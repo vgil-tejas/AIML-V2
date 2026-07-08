@@ -2934,7 +2934,9 @@ async def playbook_label_queue(limit: int = 12):
     if not (osc and STORE_ENABLED and pbr):
         raise HTTPException(503, "Recommender unavailable")
     inp = await _recommender_inputs()
-    queue = pbr.label_queue(inp["recurrence"], inp["covered"], inp["score_rows"],
+    examples = await _to_thread(osc.get_label_queue_examples,
+                                list(inp["labelled_entities"]), 30, 40)
+    queue = pbr.label_queue(inp["recurrence"], inp["covered"], examples,
                             inp["labelled_entities"], min(limit, 40))
     return {"queue": queue, "labels": len(inp["labelled_entities"])}
 

@@ -489,6 +489,36 @@ def get_entity_features(entities: Optional[list] = None, limit: int = 500) -> li
     } for r in rows]
 
 
+def get_label_queue_examples(labelled_entities: Optional[list] = None,
+                             window_days: int = 30, max_types: int = 40) -> dict:
+    """One representative (busiest) UNLABELLED source IP per threat_type, so the
+    fast-labelling queue always has an example for every recurring pattern —
+    not just whichever types happen to dominate the top-N busiest IPs overall.
+    Uses a window function to pick top-1-by-volume per threat_type in one scan."""
+    excl = ""
+    if labelled_entities:
+        safe = ",".join("'" + str(e).replace("'", "") + "'" for e in labelled_entities if e)
+        if safe:
+            excl = f"AND src_ip NOT IN ({safe})"
+    sql = (
+        "SELECT threat_type, entity, events, max_lvl, crit, uniq_dst FROM ("
+        "  SELECT threat_type, src_ip AS entity, count() AS events, "
+        "         max(rule_level) AS max_lvl, countIf(severity = 'critical') AS crit, "
+        "         uniqExact(dst_ip) AS uniq_dst, "
+        "         row_number() OVER (PARTITION BY threat_type ORDER BY count() DESC) AS rn "
+        f"  FROM {LOGS_TABLE} "
+        f"  WHERE threat_type != '' AND src_ip != '' {excl} "
+        f"  AND ts >= now() - INTERVAL {int(window_days)} DAY "
+        "   GROUP BY threat_type, src_ip"
+        f") WHERE rn = 1 LIMIT {int(min(max_types, 200))}"
+    )
+    rows = _q(sql)
+    return {r["threat_type"]: {
+        "entity": r["entity"], "events": int(r["events"]), "max_lvl": int(r.get("max_lvl") or 0),
+        "crit": int(r["crit"]), "uniq_dst": int(r["uniq_dst"]),
+    } for r in rows}
+
+
 def get_threat_type_recurrence(window_days: int = 30) -> list[dict]:
     """Per log type (threat_type): how much it recurs and how severe — the raw
     recurrence signal the recommender ranks. One scan over recent logs."""

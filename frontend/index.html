@@ -5004,11 +5004,18 @@ tr:hover td{background:#161b22}</style></head>
           <div class="cb"><div class="rec-q-list">${queue}</div></div></div>` : ''}`;
     }
     async function labelPattern(entity, threat, disposition, btn) {
-      const row = btn.closest('.rec-q'); if (row) row.style.opacity = '.5';
-      btn.disabled = true;
+      const row = btn.closest('.rec-q');
+      const isTP = disposition === 'true_positive';
+      if (row) {
+        row.style.pointerEvents = 'none';
+        row.style.opacity = '.7';
+        const btnsBox = row.querySelector('.rec-q-btns');
+        if (btnsBox) btnsBox.innerHTML =
+          `<span class="badge" style="background:${isTP ? 'var(--ok)' : 'var(--danger)'}22;color:${isTP ? 'var(--ok)' : 'var(--danger)'};font-weight:700;padding:5px 10px;font-size:11px">✓ Labelled — ${disposition.replace('_', ' ')}</span>`;
+      }
       await post(`${API}/feedback`, { entity, threat_type: threat, disposition, analyst: 'analyst' });
-      toast(`Labelled ${entity} as ${disposition.replace('_', ' ')}`, disposition === 'true_positive' ? 'ok' : 'warn');
-      loadRecommender();
+      toast(`Labelled ${entity} as ${disposition.replace('_', ' ')}`, isTP ? 'ok' : 'warn');
+      setTimeout(loadRecommender, 900);
     }
     async function retrainRecommender(btn) {
       const lbl = btn.textContent; btn.disabled = true; btn.textContent = 'Retraining…';

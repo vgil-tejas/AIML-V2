@@ -243,23 +243,21 @@ def recommend(model_bundle: dict, score_rows: list, recurrence: list,
             "recommendations": cands}
 
 
-def label_queue(recurrence: list, covered: set, sample_rows: list,
+def label_queue(recurrence: list, covered: set, examples_by_type: dict,
                 labelled_entities: set, limit: int = 12) -> list:
-    """The fast-labelling queue: recurring patterns that are NOT yet covered and
-    whose entities are mostly UNLABELLED — labelling these unlocks the model
-    fastest. Returns one representative entity per pattern to disposition."""
-    by_threat = {}
-    for r in sample_rows:
-        by_threat.setdefault(r.get("top_threat", "unknown"), []).append(r)
+    """The fast-labelling queue: recurring patterns that are NOT yet covered,
+    each with a fresh UNLABELLED example entity (queried directly per
+    threat_type — see get_label_queue_examples — so the queue never starves
+    down to one item just because the busiest IPs overall got labelled first).
+    Returns one representative entity per pattern to disposition."""
     out = []
     for rstat in recurrence:
         t = rstat["threat_type"]
         if t in _SKIP_THREATS:
             continue
-        ents = [r for r in by_threat.get(t, []) if r["entity"] not in labelled_entities]
-        if not ents:
+        ex = examples_by_type.get(t)
+        if not ex or ex["entity"] in labelled_entities:
             continue
-        ex = ents[0]
         out.append({
             "threat_type": t, "title": t.replace("_", " ").title(),
             "covered": t in covered, "events": rstat["events"], "ips": rstat["ips"],
