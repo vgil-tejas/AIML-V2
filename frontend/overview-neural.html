@@ -1,0 +1,1888 @@
+<meta charset="utf-8">
+<title>CyberSentinel — Neural Command</title>
+<!-- Fonts do NOT inherit across an iframe boundary — this deck loaded none, so
+     every word here fell back to Segoe UI while the shell rendered in Inter.
+     Same families/weights as index.html; keep the two in sync. -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet"
+  href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,100..900&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+/* ═══════════ CYBERSENTINEL NEURAL COMMAND — white-label product concept · single-theme ═══════════ */
+@property --spin{syntax:'<angle>';initial-value:0deg;inherits:false}
+/* Tokens mirror frontend/theme.css (LINEAR v19). This deck is an iframe and
+   does NOT load theme.css, so the palette has to be restated here — keep the
+   two in sync when either moves. */
+:root{
+  --bg:#08090a; --panel:#0f1011; --panel2:#141516;
+  --border:rgba(255,255,255,.08); --border-hi:rgba(255,255,255,.16);
+  --text:#f7f8f8; --muted:#8a8f98; --faint:#62666d;
+  --accent:#5e6ad2; --ai:#a78bfa; --teal:#4cb782;
+  --danger:#eb5757; --warn:#f2c94c; --ok:#4cb782;
+  --holo:#5e6ad2;
+  --grad-ai:#a78bfa;
+  --mono:'JetBrains Mono',ui-monospace,'SF Mono',Consolas,monospace;
+  --sans:'Inter',-apple-system,'Segoe UI',sans-serif;
+  --r:8px; --sidebar:0px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{background:var(--bg);scroll-behavior:smooth}
+body{font-family:var(--sans);color:var(--text);min-height:100vh;
+  overflow-x:hidden;font-size:13.5px;line-height:1.55;letter-spacing:-.01em;
+  -webkit-font-smoothing:antialiased;
+  background:var(--bg)}
+::selection{background:rgba(94,106,210,.4)}
+/* the animated particle mesh is gone — a calm static background reads cleaner */
+#mesh{display:none}
+
+/* ═══ SIDEBAR ═══ */
+@keyframes hue{to{filter:hue-rotate(360deg)}}
+/* ═══ HORIZONTAL SECTION NAV (sticky, no left sidebar) ═══ */
+.topnav{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:4px;flex-wrap:wrap;
+  padding:9px 14px;background:rgba(4,7,13,.86);backdrop-filter:blur(14px);border-bottom:1px solid var(--border)}
+.ni{display:inline-flex;align-items:center;gap:7px;padding:6px 11px;border-radius:8px;cursor:pointer;
+  font-family:var(--mono);font-size:11px;letter-spacing:.04em;color:var(--muted);border:1px solid transparent;
+  transition:.15s;text-decoration:none}
+.ni:hover{color:var(--text);background:rgba(94,106,210,.06)}
+.ni.active{color:var(--text);background:linear-gradient(90deg,rgba(94,106,210,.14),rgba(167,139,250,.07));border-color:var(--border)}
+.ni .nd{width:5px;height:5px;border-radius:50%;flex-shrink:0;background:var(--faint);transition:.2s}
+.ni.active .nd{background:var(--accent);box-shadow:0 0 9px var(--accent)}
+.cmdk{margin-left:auto;display:inline-flex;align-items:center;gap:6px;padding:6px 11px;border:1px solid var(--border);
+  border-radius:8px;font-family:var(--mono);font-size:12px;color:var(--faint);cursor:pointer;transition:.2s}
+.cmdk:hover{border-color:var(--border-hi);color:var(--muted)}
+.cmdk kbd{font-size:9px;padding:2px 6px;border:1px solid var(--border);border-radius:5px;background:var(--panel2)}
+
+/* ═══ MAIN ═══ */
+.deck{position:relative;z-index:1;margin-left:var(--sidebar);padding:22px 30px 90px;max-width:1360px}
+.topbar{display:flex;align-items:center;gap:16px;margin-bottom:8px;flex-wrap:wrap}
+.pg-title{font-family:var(--mono);font-size:15px;font-weight:600;letter-spacing:.22em;text-transform:uppercase}
+.pg-title em{font-style:normal;color:transparent;background:var(--holo);-webkit-background-clip:text;background-clip:text}
+.pg-sub{font-size:11px;color:var(--faint);letter-spacing:.04em}
+.clock{margin-left:auto;font-family:var(--mono);font-size:10.5px;color:var(--faint);letter-spacing:.1em;
+  padding:6px 12px;border:1px solid var(--border);border-radius:8px;background:var(--panel)}
+
+/* Sections collapse to tidy headers — a spacious deck. Click a header to open it. */
+.sec{display:flex;align-items:center;gap:12px;margin:30px 0 16px;scroll-margin-top:64px;
+  cursor:pointer;user-select:none;padding:8px 10px;border-radius:10px;transition:background .15s}
+.sec:hover{background:rgba(94,106,210,.05)}
+.sec:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.sec-chev{margin-left:2px;flex:0 0 auto;width:22px;height:22px;display:grid;place-items:center;
+  font-size:10px;color:var(--muted);border:1px solid var(--border);border-radius:7px;background:var(--panel);
+  transition:transform .22s,color .15s,border-color .15s}
+.sec:hover .sec-chev{color:var(--text);border-color:var(--border-hi)}
+.sec.collapsed .sec-chev{transform:rotate(-90deg)}
+.sec-body{overflow:visible}
+.sec-body.collapsed{display:none}
+.sec-body:not(.collapsed){animation:secReveal .28s ease}
+@keyframes secReveal{from{opacity:0;transform:translateY(-5px)}to{opacity:1;transform:none}}
+.sec .no{font-family:var(--mono);font-size:10px;color:transparent;background:var(--holo);
+  -webkit-background-clip:text;background-clip:text;letter-spacing:.1em;font-weight:700}
+.sec .nm{font-family:var(--mono);font-size:12px;letter-spacing:.3em;text-transform:uppercase;color:var(--text);font-weight:600}
+.sec .ln{flex:1;height:1px;background:linear-gradient(90deg,var(--border),transparent)}
+.sec .mod{font-family:var(--mono);font-size:8.5px;letter-spacing:.18em;text-transform:uppercase;
+  padding:4px 11px;border-radius:6px;border:1px solid var(--border);color:var(--faint);background:var(--panel)}
+.sec .mod.ai{border-color:rgba(167,139,250,.32);color:#c4b5fd}
+.sec .mod.soc{border-color:rgba(76,183,130,.3);color:#6cc79b}
+.sec .mod.ueba{border-color:rgba(242,201,76,.3);color:#e6c264}
+
+/* holo cards */
+.card{position:relative;border:1px solid var(--border);border-radius:var(--r);
+  background:var(--panel);backdrop-filter:blur(10px);
+  display:flex;flex-direction:column;min-width:0;transition:border-color .25s}
+.card:hover{border-color:rgba(94,106,210,.28)}
+/* corner brackets removed — flatter, calmer cards */
+.card-h{display:flex;align-items:center;gap:8px;padding:13px 17px;border-bottom:1px solid var(--border)}
+.card-t{font-family:var(--mono);font-size:10px;letter-spacing:.22em;text-transform:uppercase;color:var(--muted)}
+.card-badge{margin-left:auto;font-family:var(--mono);font-size:8.5px;color:var(--faint);letter-spacing:.12em;text-transform:uppercase}
+.card-b{padding:16px 17px;flex:1;min-height:0}
+.g2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+
+/* hero — AI verdict and Threat Index ALWAYS side by side */
+.hero{display:grid;grid-template-columns:minmax(0,1fr) 296px;gap:18px;align-items:stretch}
+/* fleet becomes a horizontal strip under the hero */
+.fleet-strip{display:grid;grid-template-columns:repeat(6,1fr);gap:10px;margin-top:16px}
+.fs{border:1px solid var(--border);border-radius:10px;background:var(--panel);padding:11px 13px;cursor:pointer;transition:.2s;min-width:0}
+.fs:hover{border-color:var(--border-hi)}
+.fs-top{display:flex;align-items:center;gap:7px}
+.fs-dot{width:6px;height:6px;border-radius:50%;background:var(--ok);box-shadow:0 0 7px var(--ok);flex-shrink:0}
+.fs-dot.v{background:var(--ai);box-shadow:0 0 7px var(--ai)}
+.fs-dot.w{background:var(--warn);box-shadow:0 0 7px var(--warn)}
+.fs-n{font-family:var(--mono);font-size:10.5px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.fs-v{font-family:var(--mono);font-size:9.5px;color:var(--faint);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.empty-note{font-size:11.5px;color:var(--faint);line-height:1.65;padding:14px 2px}
+.empty-note b{color:var(--muted)}
+.core-card{position:relative;border:1px solid var(--border);border-radius:var(--r);
+  background:var(--panel);display:flex;flex-direction:column;align-items:center;
+  justify-content:center;padding:16px;overflow:hidden}
+.core-wrap{position:relative;width:250px;height:250px}
+.core-wrap canvas{position:absolute;inset:0;width:100%;height:100%}
+.core-core{position:absolute;inset:0;display:grid;place-items:center;text-align:center;pointer-events:none}
+.core-n{font-family:var(--mono);font-size:44px;font-weight:700;line-height:1;color:#f28b8b;font-variant-numeric:tabular-nums}
+.core-l{font-family:var(--mono);font-size:8px;letter-spacing:.3em;text-transform:uppercase;color:var(--faint);margin-top:6px}
+.core-band{font-family:var(--mono);font-size:9.5px;letter-spacing:.26em;color:var(--danger);margin-top:3px}
+.core-tag{font-family:var(--mono);font-size:8.5px;letter-spacing:.24em;text-transform:uppercase;color:var(--faint);margin-top:8px}
+
+.verdict{position:relative;border:1px solid rgba(94,106,210,.2);border-radius:var(--r);overflow:hidden;
+  background:linear-gradient(165deg,rgba(12,19,34,.85),rgba(6,10,19,.9));padding:26px 28px;
+  display:flex;flex-direction:column;justify-content:center}
+/* the rotating conic border ring is gone — a static thin accent border is calmer */
+.eyebrow{font-family:var(--mono);font-size:9px;letter-spacing:.3em;text-transform:uppercase;
+  color:var(--faint);display:flex;align-items:center;gap:9px;margin-bottom:14px}
+.eyebrow .live{width:6px;height:6px;border-radius:50%;background:var(--danger);box-shadow:0 0 9px var(--danger)}
+@keyframes pulse{50%{opacity:.35}}
+.headline{font-family:var(--mono);font-size:clamp(18px,2vw,23px);font-weight:600;line-height:1.5;
+  letter-spacing:-.01em;min-height:3em;text-wrap:balance}
+.headline .hl-ai{color:transparent;background:var(--grad-ai);-webkit-background-clip:text;background-clip:text}
+.headline .hl-danger{color:var(--danger);border-bottom:1px dashed rgba(235,87,87,.4)}
+/* the headline IP: one node (not per-char spans) so it can carry handlers.
+   .hl-ipt = the IP itself → traces it.   .hl-ipe = the pencil → edits it. */
+.headline .hl-ip{display:inline-flex;align-items:baseline;gap:4px;color:var(--danger)}
+.headline .hl-ipt{cursor:pointer;border-bottom:1px dashed rgba(235,87,87,.55);
+  border-radius:5px;padding:0 3px;transition:background .15s,border-color .15s}
+.headline .hl-ipt:hover,.headline .hl-ipt:focus-visible{background:rgba(235,87,87,.15);
+  border-color:var(--danger);outline:none}
+.headline .hl-ipe{cursor:pointer;background:transparent;border:0;padding:0 2px;line-height:1;
+  font-size:.55em;color:var(--faint);vertical-align:super;transition:color .15s}
+.headline .hl-ipe:hover,.headline .hl-ipe:focus-visible{color:var(--danger);outline:none}
+.hl-ipedit{display:inline-flex;align-items:center;gap:6px;vertical-align:baseline}
+.hl-ipin{width:11ch;font-family:var(--mono);font-size:.9em;font-weight:600;color:var(--danger);
+  background:rgba(235,87,87,.08);border:1px solid var(--danger);border-radius:6px;
+  padding:1px 6px;outline:none}
+.hl-ipgo{font-family:var(--mono);font-size:9px;letter-spacing:.14em;cursor:pointer;
+  color:#041018;background:var(--danger);border:0;border-radius:6px;padding:4px 8px;font-weight:700}
+.hl-ipgo:hover{filter:brightness(1.12)}
+.caret{display:inline-block;width:9px;height:1.1em;background:var(--accent);vertical-align:text-bottom;margin-left:4px;animation:blink 1s steps(1) infinite}
+@keyframes blink{50%{opacity:0}}
+.verdict-sub{color:var(--muted);font-size:12px;margin-top:12px;max-width:58ch}
+.verdict-sub b{color:var(--text);font-weight:600}
+.kpis{display:grid;grid-template-columns:repeat(4,1fr);margin-top:20px;border-top:1px solid var(--border);padding-top:15px}
+.kpi{padding-right:14px}
+.kpi+.kpi{padding-left:14px;border-left:1px solid var(--border)}
+.kpi .kl{font-family:var(--mono);font-size:8px;letter-spacing:.18em;text-transform:uppercase;color:var(--faint)}
+.kpi .kv{font-family:var(--mono);font-size:19px;font-weight:700;font-variant-numeric:tabular-nums;margin-top:4px;letter-spacing:-.02em}
+.kpi .kv.ai{color:var(--ai)}.kpi .kv.ac{color:var(--accent)}.kpi .kv.ok{color:var(--ok)}
+
+.fleet{border:1px solid var(--border);border-radius:var(--r);background:var(--panel);padding:15px 16px;display:flex;flex-direction:column}
+.fleet-t{font-family:var(--mono);font-size:9px;letter-spacing:.26em;text-transform:uppercase;color:var(--faint);margin-bottom:11px}
+.fl-row{display:flex;align-items:center;gap:9px;padding:6.5px 0;border-bottom:1px solid rgba(255,255,255,.06);
+  font-family:var(--mono);font-size:10.5px;color:var(--muted);cursor:pointer;transition:color .15s}
+.fl-row:hover{color:var(--text)}
+.fl-row:last-child{border-bottom:0}
+.fl-dot{width:6px;height:6px;border-radius:50%;background:var(--ok);box-shadow:0 0 7px var(--ok);flex-shrink:0}
+.fl-dot.v{background:var(--ai);box-shadow:0 0 7px var(--ai)}
+.fl-dot.w{background:var(--warn);box-shadow:0 0 7px var(--warn)}
+.fl-lat{margin-left:auto;font-size:9px;color:var(--faint)}
+
+/* the scrolling LIVE WIRE marquee is removed — it was pure motion noise */
+.tapebar{display:none}
+.tapebar-hidden{margin-top:16px;border:1px solid var(--border);border-radius:11px;background:var(--panel);
+  display:flex;align-items:center;overflow:hidden;backdrop-filter:blur(8px)}
+.tapebar .tlabel{font-family:var(--mono);font-size:8.5px;letter-spacing:.22em;color:var(--faint);
+  padding:9px 13px;border-right:1px solid var(--border);white-space:nowrap;background:var(--panel2)}
+.tape{flex:1;overflow:hidden;mask-image:linear-gradient(90deg,transparent,#000 4%,#000 92%,transparent)}
+.tape-inner{display:flex;gap:28px;animation:tape 46s linear infinite;width:max-content;padding:9px 0}
+@media(prefers-reduced-motion:reduce){.tape-inner{animation:none}.caret{animation:none}.eyebrow .live{animation:none}}
+@keyframes tape{to{transform:translateX(-50%)}}
+.tev{font-family:var(--mono);font-size:10.5px;white-space:nowrap;color:var(--faint);cursor:pointer}
+.tev b{color:var(--muted);font-weight:600}
+.tev.crit b{color:var(--danger)}
+.tev.warn2 b{color:var(--warn)}
+
+/* ═══ SERVICE GRID — futuristic architecture pipeline ═══ */
+.arch-card{overflow:hidden}
+.arch-card .card-b{position:relative}
+/* faint tech-grid substrate behind the flow */
+.arch-card .card-b::before{content:'';position:absolute;inset:0;pointer-events:none;opacity:.5;
+  background-image:linear-gradient(rgba(255,255,255,.05) 1px,transparent 1px),
+    linear-gradient(90deg,rgba(255,255,255,.05) 1px,transparent 1px);
+  background-size:30px 30px,30px 30px;
+  -webkit-mask-image:radial-gradient(120% 90% at 50% 40%,#000,transparent 78%);
+          mask-image:radial-gradient(120% 90% at 50% 40%,#000,transparent 78%)}
+.archflow{position:relative;overflow-x:auto;overflow-y:hidden;padding:16px 4px 10px;scrollbar-width:thin;
+  -webkit-mask-image:linear-gradient(90deg,transparent,#000 2.5%,#000 97.5%,transparent);
+          mask-image:linear-gradient(90deg,transparent,#000 2.5%,#000 97.5%,transparent)}
+.archflow::-webkit-scrollbar{height:6px}
+.archflow::-webkit-scrollbar-thumb{background:rgba(94,106,210,.25);border-radius:3px}
+.archflow-rail{display:flex;align-items:stretch;min-width:min-content;padding:6px 4px 6px}
+
+/* a stage = a glowing glass reactor module */
+.astage{position:relative;flex:1 1 0;min-width:126px;display:flex;flex-direction:column;align-items:center;
+  gap:7px;text-align:center;padding:16px 9px 14px;cursor:pointer;background:none;border:0;color:var(--text);font:inherit}
+.astage::before{content:'';position:absolute;inset:0;border-radius:13px;pointer-events:none;transition:.22s;
+  border:1px solid color-mix(in srgb,var(--pc) 26%,transparent);
+  background:linear-gradient(180deg,color-mix(in srgb,var(--pc) 11%,rgba(13,21,36,.55)),rgba(6,10,19,.62));
+  box-shadow:0 12px 32px -20px #000,inset 0 1px 0 color-mix(in srgb,var(--pc) 22%,transparent)}
+.astage::after{content:'';position:absolute;left:15px;right:15px;top:0;height:2px;border-radius:2px;
+  background:var(--pc);box-shadow:0 0 12px var(--pc);opacity:.8;transition:.22s}
+.astage:hover{transform:translateY(-5px)}
+.astage:hover::before{border-color:var(--pc);
+  box-shadow:0 24px 48px -22px #000,0 0 30px -6px color-mix(in srgb,var(--pc) 60%,transparent),
+    inset 0 1px 0 color-mix(in srgb,var(--pc) 42%,transparent)}
+.astage:hover .astage-emblem{box-shadow:0 0 26px -1px color-mix(in srgb,var(--pc) 85%,transparent)}
+.astage:focus-visible{outline:none}
+.astage:focus-visible::before{border-color:var(--pc);box-shadow:0 0 0 2px color-mix(in srgb,var(--pc) 70%,transparent)}
+
+/* the hex reactor emblem with a pulsing core */
+.astage-emblem{position:relative;width:48px;height:48px;display:grid;place-items:center;
+  clip-path:polygon(50% 0,100% 25%,100% 75%,50% 100%,0 75%,0 25%);
+  background:linear-gradient(150deg,color-mix(in srgb,var(--pc) 90%,#fff),color-mix(in srgb,var(--pc) 55%,#000));
+  box-shadow:0 0 18px -2px color-mix(in srgb,var(--pc) 70%,transparent);transition:box-shadow .22s}
+.astage-emblem::before{content:'';position:absolute;inset:2px;background:#070d18;
+  clip-path:polygon(50% 0,100% 25%,100% 75%,50% 100%,0 75%,0 25%)}
+.astage-emblem .astage-core{position:absolute;width:11px;height:11px;border-radius:50%;background:#eaf6ff;
+  box-shadow:0 0 11px 2px color-mix(in srgb,var(--pc) 85%,#fff);animation:apulse 2.8s ease-in-out infinite}
+@keyframes apulse{0%,100%{opacity:.5;transform:scale(.78)}50%{opacity:1;transform:scale(1.12)}}
+.astage-num{font-family:var(--mono);font-size:8px;font-weight:700;letter-spacing:.2em;
+  color:var(--faint);text-transform:uppercase}
+.astage-name{font-family:var(--mono);font-size:11px;font-weight:700;letter-spacing:.12em;color:var(--pc)}
+.astage-role{font-size:10px;line-height:1.45;color:var(--muted);max-width:17ch}
+.astage-val{margin-top:auto;font-family:var(--mono);font-size:10px;font-weight:600;color:#eaf6ff;
+  padding:3px 10px;border-radius:20px;background:color-mix(in srgb,var(--pc) 14%,transparent);
+  border:1px solid color-mix(in srgb,var(--pc) 32%,transparent)}
+
+/* the conduit that wires one module to the next — flowing energy + chevron */
+.awire{flex:0 0 26px;align-self:center;position:relative;height:22px}
+.awire-flow{position:absolute;left:-3px;right:7px;top:50%;height:2px;transform:translateY(-50%);
+  border-radius:2px;overflow:hidden;background:rgba(255,255,255,.16)}
+.awire-flow::after{content:'';position:absolute;inset:0;background-repeat:no-repeat;background-size:55% 100%;
+  background-image:linear-gradient(90deg,transparent,#a5adea,transparent);animation:aflow 1.9s linear infinite}
+@keyframes aflow{0%{background-position:-55% 0}100%{background-position:165% 0}}
+.awire-tip{position:absolute;right:-3px;top:50%;transform:translateY(-50%);font-size:12px;line-height:1;
+  color:#a5adea;text-shadow:0 0 8px rgba(165,173,234,.85)}
+@media(prefers-reduced-motion:reduce){.astage-core,.awire-flow::after{animation:none}}
+.topo-hint{font-family:var(--mono);font-size:9px;color:var(--faint);letter-spacing:.12em;text-align:center;margin-top:10px;text-transform:uppercase}
+
+/* rank rows */
+.rank{display:flex;flex-direction:column}
+.rank-row{display:grid;grid-template-columns:24px minmax(0,1fr) auto;gap:12px;align-items:center;
+  padding:9.5px 6px;border-bottom:1px solid rgba(255,255,255,.07);cursor:pointer;transition:.15s;border-radius:6px}
+.rank-row:hover{background:rgba(94,106,210,.05)}
+.rank-row:last-child{border-bottom:0}
+.rank-no{font-family:var(--mono);font-size:9.5px;color:var(--faint);text-align:right}
+.rank-main{min-width:0}
+.rank-ip{font-family:var(--mono);font-size:12.5px;font-weight:600;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.rank-why{font-size:10.5px;color:var(--faint);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rank-side{display:flex;align-items:center;gap:11px}
+.rank-score{font-family:var(--mono);font-size:12.5px;font-weight:700;font-variant-numeric:tabular-nums;min-width:34px;text-align:right}
+.rank-score.d{color:var(--danger)}.rank-score.w{color:var(--warn)}.rank-score.a{color:var(--accent)}.rank-score.v{color:var(--ai)}
+.rank-bar{width:64px;height:4px;border-radius:2px;background:rgba(255,255,255,.09);overflow:hidden}
+.rank-fill{height:100%;border-radius:2px}
+.pill{font-size:8px;font-family:var(--mono);letter-spacing:.1em;padding:2px 7px;border-radius:5px;text-transform:uppercase}
+.pill.crit{background:rgba(235,87,87,.1);color:#f28b8b;border:1px solid rgba(235,87,87,.3)}
+.pill.high{background:rgba(242,201,76,.08);color:#e6c264;border:1px solid rgba(242,201,76,.28)}
+.pill.anom{background:rgba(167,139,250,.1);color:#c4b5fd;border:1px solid rgba(167,139,250,.28)}
+.pill.tech{background:rgba(94,106,210,.08);color:#a5adea;border:1px solid rgba(94,106,210,.25)}
+.pill.ok2{background:rgba(76,183,130,.08);color:#6cc79b;border:1px solid rgba(76,183,130,.25)}
+
+/* kill chain */
+.kc-track{display:grid;grid-template-columns:repeat(7,1fr);gap:9px}
+.kc-stage{padding:12px 12px 11px;border-radius:10px;border:1px solid var(--border);background:var(--panel2);min-width:0;position:relative}
+.kc-stage .ks-n{font-family:var(--mono);font-size:8.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--faint);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.kc-stage .ks-c{font-family:var(--mono);font-size:20px;font-weight:700;font-variant-numeric:tabular-nums;margin-top:5px;color:var(--muted)}
+.kc-stage .ks-bar{height:2px;border-radius:2px;background:rgba(255,255,255,.1);margin-top:9px;overflow:hidden}
+.kc-stage .ks-fill{height:100%;border-radius:2px;background:var(--accent)}
+.kc-stage.hot{border-color:rgba(235,87,87,.4)}
+.kc-stage.hot .ks-c{color:var(--danger)}
+.kc-stage.hot .ks-fill{background:var(--danger)}
+.kc-stage.hot::after{content:'ACTIVE';position:absolute;top:10px;right:10px;font-family:var(--mono);
+  font-size:6.5px;letter-spacing:.16em;color:var(--danger);animation:pulse 1.6s infinite}
+.kc-stage.warm{border-color:rgba(242,201,76,.3)}
+.kc-stage.warm .ks-c{color:var(--warn)}
+.kc-stage.warm .ks-fill{background:var(--warn)}
+
+/* ═══ IP TRAIL ═══ */
+.trail-head{display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap}
+.trail-head input{flex:1;min-width:220px;background:rgba(8,13,23,.8);border:1px solid var(--border);border-radius:9px;
+  padding:10px 14px;color:var(--text);font-family:var(--mono);font-size:12px;outline:none;transition:border-color .2s}
+.trail-head input:focus{border-color:var(--border-hi)}
+.timeline{position:relative;padding-left:26px}
+.timeline::before{content:'';position:absolute;left:8px;top:6px;bottom:6px;width:1.5px;
+  background:linear-gradient(180deg,var(--danger),var(--warn),var(--accent))}
+.tl-item{position:relative;padding:0 0 16px 8px}
+.tl-item:last-child{padding-bottom:0}
+.tl-item::before{content:'';position:absolute;left:-23.5px;top:5px;width:9px;height:9px;border-radius:50%;
+  background:var(--bg);border:2px solid var(--accent)}
+.tl-item.crit::before{border-color:var(--danger);box-shadow:0 0 9px rgba(235,87,87,.6)}
+.tl-item.warn::before{border-color:var(--warn)}
+.tl-time{font-family:var(--mono);font-size:9px;color:var(--faint);letter-spacing:.12em}
+.tl-tx{font-size:12px;color:var(--muted);margin-top:2px}
+.tl-tx b{color:var(--text);font-family:var(--mono);font-size:11.5px}
+.tl-tags{display:flex;gap:6px;margin-top:5px;flex-wrap:wrap}
+
+/* ═══ LOGS EXPLORER ═══ */
+.log-filters{display:flex;gap:9px;margin-bottom:13px;flex-wrap:wrap;align-items:center}
+.log-filters input{flex:1;min-width:200px;background:rgba(8,13,23,.8);border:1px solid var(--border);border-radius:9px;
+  padding:9px 13px;color:var(--text);font-family:var(--mono);font-size:11.5px;outline:none;transition:border-color .2s}
+.log-filters input:focus{border-color:var(--border-hi)}
+.fchip{font-family:var(--mono);font-size:9px;letter-spacing:.12em;padding:6px 12px;border-radius:7px;
+  border:1px solid var(--border);color:var(--muted);cursor:pointer;transition:.15s;text-transform:uppercase;background:transparent}
+.fchip:hover{color:var(--text)}
+.fchip.on{border-color:var(--border-hi);color:var(--accent);background:rgba(94,106,210,.07)}
+.logtbl-wrap{overflow-x:auto}
+.logtbl{width:100%;border-collapse:collapse;font-size:11.5px;min-width:640px}
+.logtbl th{font-family:var(--mono);font-size:8.5px;letter-spacing:.18em;text-transform:uppercase;color:var(--faint);
+  text-align:left;padding:7px 10px;border-bottom:1px solid var(--border)}
+.logtbl td{padding:8px 10px;border-bottom:1px solid rgba(255,255,255,.06);color:var(--muted);font-family:var(--mono);font-size:11px}
+.logtbl tr{cursor:pointer;transition:background .12s}
+.logtbl tbody tr:hover{background:rgba(94,106,210,.05)}
+.logtbl .lip{color:var(--text);font-weight:600}
+.sevdot{display:inline-flex;align-items:center;gap:6px}
+.sevdot i{width:7px;height:7px;border-radius:50%;flex-shrink:0}
+.logtbl .msg{color:var(--faint);max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* incidents */
+.inc{border:1px solid var(--border);border-radius:11px;background:var(--panel2);padding:14px 16px;margin-bottom:11px;transition:border-color .2s;cursor:pointer}
+.inc:hover{border-color:var(--border-hi)}
+.inc:last-child{margin-bottom:0}
+.inc-top{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.inc-id{font-family:var(--mono);font-size:11px;color:var(--accent);letter-spacing:.06em}
+.inc-title{font-family:var(--mono);font-size:13px;font-weight:600}
+.inc-right{margin-left:auto;display:flex;gap:6px;align-items:center}
+.inc-story{font-size:11.5px;color:var(--muted);margin-top:8px;line-height:1.6;border-left:2px solid rgba(167,139,250,.4);padding-left:11px}
+.inc-story b{color:var(--text)}
+.inc-story .rag{font-family:var(--mono);font-size:8px;letter-spacing:.16em;color:#c4b5fd;text-transform:uppercase;display:block;margin-bottom:3px}
+.inc-meta{display:flex;gap:14px;margin-top:9px;font-family:var(--mono);font-size:9px;color:var(--faint);letter-spacing:.08em;flex-wrap:wrap}
+.inc-meta b{color:var(--muted)}
+
+/* queue + feed */
+.q-item{display:grid;grid-template-columns:42px minmax(0,1fr) auto;gap:12px;align-items:center;
+  padding:11px 12px;border:1px solid var(--border);border-radius:10px;background:var(--panel2);
+  margin-bottom:9px;transition:border-color .2s;cursor:pointer}
+.q-item:hover{border-color:var(--border-hi)}
+.q-item:last-child{margin-bottom:0}
+.q-risk{width:42px;height:42px;border-radius:10px;display:grid;place-items:center;
+  font-family:var(--mono);font-weight:700;font-size:14px;font-variant-numeric:tabular-nums}
+.q-risk.crit{background:rgba(235,87,87,.1);color:var(--danger);border:1px solid rgba(235,87,87,.35)}
+.q-risk.high{background:rgba(242,201,76,.08);color:var(--warn);border:1px solid rgba(242,201,76,.3)}
+.q-main{min-width:0}
+.q-ip{font-family:var(--mono);font-size:12.5px;font-weight:600;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.q-why{font-size:10.5px;color:var(--muted);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* per-row fusion mini-bar: the score arithmetic at a glance */
+.q-fuse{display:inline-flex;width:64px;height:4px;margin-left:10px;border-radius:2px;overflow:hidden;vertical-align:middle;background:rgba(255,255,255,.05)}
+.q-fuse span{display:block;height:100%}
+.q-actions{display:flex;gap:6px}
+.qa{font-family:var(--mono);font-size:8.5px;letter-spacing:.1em;padding:4px 9px;border-radius:6px;border:1px solid var(--border);
+  background:transparent;color:var(--muted);cursor:pointer;transition:.15s}
+.qa:hover{color:var(--text);border-color:var(--border-hi)}
+.qa.block:hover{color:var(--danger);border-color:rgba(235,87,87,.5)}
+.qa.go{border-color:rgba(76,183,130,.35);color:var(--ok)}
+.qa.go:hover{background:rgba(76,183,130,.08)}
+.qa:focus-visible,.q-item:focus-visible,.rank-row:focus-visible,.inc:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.feed-item{display:flex;gap:11px;padding:10px 0;border-bottom:1px solid rgba(255,255,255,.07)}
+.feed-item:first-child{padding-top:2px}
+.feed-item:last-child{border-bottom:0;padding-bottom:2px}
+.feed-ic{width:25px;height:25px;border-radius:7px;display:grid;place-items:center;font-size:11.5px;flex-shrink:0;font-family:var(--mono)}
+.feed-ic.ok{background:rgba(76,183,130,.08);color:var(--ok);border:1px solid rgba(76,183,130,.25)}
+.feed-ic.ai{background:rgba(167,139,250,.08);color:var(--ai);border:1px solid rgba(167,139,250,.25)}
+.feed-ic.wait{background:rgba(242,201,76,.07);color:var(--warn);border:1px solid rgba(242,201,76,.25)}
+.feed-tx{color:var(--muted);line-height:1.5;min-width:0;font-size:11.5px}
+.feed-tx b{color:var(--text);font-weight:600;font-family:var(--mono);font-size:11px}
+.feed-ts{font-family:var(--mono);font-size:8px;color:var(--faint);letter-spacing:.12em;margin-top:3px;text-transform:uppercase}
+.approve-row{display:flex;gap:7px;margin-top:7px}
+
+/* playbooks */
+.pb-rec{border:1px solid rgba(167,139,250,.25);border-radius:11px;background:linear-gradient(160deg,rgba(167,139,250,.06),rgba(13,21,36,.7));
+  padding:14px 16px;margin-bottom:11px}
+.pb-rec:last-child{margin-bottom:0}
+.pb-top{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.pb-name{font-family:var(--mono);font-size:12.5px;font-weight:600}
+.pb-conf{margin-left:auto;font-family:var(--mono);font-size:10px;color:#c4b5fd}
+.pb-why{font-size:11px;color:var(--muted);margin-top:6px}
+.pb-steps{display:flex;gap:6px;margin-top:9px;flex-wrap:wrap}
+.pb-step{font-family:var(--mono);font-size:8.5px;letter-spacing:.06em;padding:3px 8px;border-radius:5px;
+  border:1px solid var(--border);color:var(--muted);background:rgba(8,13,23,.6)}
+.pb-step.mut{border-color:rgba(242,201,76,.35);color:#e6c264}
+.pb-step .arr{color:var(--faint);margin-right:5px}
+
+/* console */
+.console{font-family:var(--mono);font-size:11.5px;background:rgba(4,7,13,.8);border:1px solid var(--border);
+  border-radius:10px;padding:14px 16px;line-height:1.7;max-height:380px;overflow-y:auto}
+.console .u{color:var(--accent)}
+.console .a{color:var(--muted)}
+.console .sql{color:#a5adea;background:rgba(94,106,210,.06);display:block;padding:8px 11px;border-radius:7px;
+  margin:7px 0;border-left:2px solid rgba(94,106,210,.4);white-space:pre-wrap;font-size:10.5px}
+.console .res{color:var(--ok);font-size:10.5px}
+.console .cur{display:inline-block;width:8px;height:1.05em;background:var(--ai);vertical-align:text-bottom;animation:blink 1s steps(1) infinite}
+.console-in{display:flex;gap:9px;margin-top:12px;align-items:center}
+.console-in input{flex:1;background:rgba(8,13,23,.8);border:1px solid var(--border);border-radius:8px;
+  padding:9px 13px;color:var(--text);font-family:var(--mono);font-size:11.5px;outline:none;transition:border-color .2s}
+.console-in input:focus{border-color:rgba(167,139,250,.5)}
+.console-in .qa{padding:9px 14px;font-size:9.5px}
+
+/* intel tiles */
+.intel-tiles{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:16px}
+.itile{position:relative;border:1px solid var(--border);border-radius:12px;background:var(--panel);padding:14px 16px;
+  cursor:pointer;transition:.2s;overflow:hidden}
+.itile:hover{border-color:var(--border-hi);transform:translateY(-2px)}
+.itile .in{font-family:var(--mono);font-size:23px;font-weight:700;font-variant-numeric:tabular-nums}
+.itile .il{font-family:var(--mono);font-size:8.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--muted);margin-top:4px}
+.itile .is{font-size:10px;color:var(--faint);margin-top:2px}
+.itile .in.d{color:var(--danger)}.itile .in.w{color:var(--warn)}.itile .in.a{color:var(--accent)}.itile .in.v{color:var(--ai)}
+
+/* pulse + severity */
+.pulse-wrap{position:relative;height:205px}
+.pulse-wrap canvas{position:absolute;inset:0;width:100%;height:100%}
+.tooltip{position:absolute;pointer-events:none;background:var(--panel2);border:1px solid var(--border-hi);border-radius:8px;
+  padding:8px 12px;font-family:var(--mono);font-size:11px;display:none;z-index:5;white-space:nowrap;
+  box-shadow:0 12px 32px -12px rgba(0,0,0,.85);backdrop-filter:blur(8px)}
+.tooltip .tt-t{color:var(--faint);font-size:8.5px;letter-spacing:.14em;text-transform:uppercase}
+.tooltip .tt-v{font-size:13.5px;font-weight:700;margin-top:3px}
+.sev-rows{display:flex;flex-direction:column;gap:13px;padding-top:4px}
+/* stacked proportion bar — the headline "graph" */
+.sev-stack{display:flex;height:16px;border-radius:5px;overflow:hidden;margin:2px 0 18px;
+  background:rgba(255,255,255,.05);box-shadow:inset 0 0 0 1px rgba(255,255,255,.06)}
+.sev-seg{height:100%;transition:width 1.1s cubic-bezier(.2,.8,.2,1)}
+.sev-seg:not(:last-child){border-right:1px solid rgba(8,9,10,.55)}
+.sev-rows-inner{display:flex;flex-direction:column;gap:11px}
+.sev-row{display:grid;grid-template-columns:84px minmax(0,1fr) 66px;gap:13px;align-items:center}
+.sev-name{font-family:var(--mono);font-size:9.5px;letter-spacing:.12em;text-transform:uppercase}
+.sev-track{height:8px;border-radius:4px;background:rgba(255,255,255,.08);overflow:hidden}
+.sev-fill{height:100%;border-radius:4px;transition:width 1.4s cubic-bezier(.2,.8,.2,1)}
+.sev-val{font-family:var(--mono);font-size:11.5px;font-weight:600;font-variant-numeric:tabular-nums;text-align:right;
+  display:flex;flex-direction:column;align-items:flex-end;line-height:1.25}
+.sev-pct{font-style:normal;font-size:9px;color:var(--faint);font-weight:400}
+.mini-note{font-size:10.5px;color:var(--faint);margin-top:13px;padding-top:11px;border-top:1px solid var(--border);line-height:1.6}
+.mini-note b{color:var(--muted)}
+
+/* palette + modal + toasts */
+.palette{position:fixed;inset:0;z-index:100;display:none;align-items:flex-start;justify-content:center;
+  padding-top:14vh;background:rgba(2,4,10,.72);backdrop-filter:blur(6px)}
+.palette.open{display:flex}
+.pal-box{width:min(560px,92vw);border:1px solid var(--border-hi);border-radius:14px;background:rgba(10,17,29,.96);
+  overflow:hidden;box-shadow:0 40px 100px -30px rgba(0,0,0,.9),0 0 60px -20px rgba(94,106,210,.25)}
+.pal-in{display:flex;align-items:center;gap:10px;padding:14px 17px;border-bottom:1px solid var(--border)}
+.pal-in .pr{font-family:var(--mono);color:var(--accent);font-size:13px}
+.pal-in input{flex:1;background:none;border:0;outline:none;color:var(--text);font-family:var(--mono);font-size:13px}
+.pal-list{max-height:320px;overflow-y:auto;padding:8px}
+.pal-item{display:flex;align-items:center;gap:11px;padding:9px 12px;border-radius:8px;cursor:pointer;
+  font-size:12.5px;color:var(--muted)}
+.pal-item:hover,.pal-item.sel{background:rgba(94,106,210,.08);color:var(--text)}
+.pal-item .pi{font-family:var(--mono);font-size:10px;color:var(--faint);width:36px}
+.pal-item .pk{margin-left:auto;font-family:var(--mono);font-size:8.5px;color:var(--faint);letter-spacing:.1em}
+
+.modal{position:fixed;inset:0;z-index:90;display:none;align-items:center;justify-content:center;
+  background:rgba(2,4,10,.7);backdrop-filter:blur(6px);padding:20px}
+.modal.open{display:flex}
+/* Column + max-height so a tall drill-in (the 8-stage pipeline) SCROLLS instead of
+   being clipped. Without the max-height, overflow:hidden silently cut the content off
+   and there was no way to reach the bottom of a long modal. */
+.mod-box{width:min(520px,94vw);max-height:calc(100vh - 40px);display:flex;flex-direction:column;
+  border:1px solid var(--border-hi);border-radius:14px;background:rgba(10,17,29,.97);
+  box-shadow:0 40px 100px -30px rgba(0,0,0,.9),0 0 60px -20px rgba(94,106,210,.2);overflow:hidden}
+.mod-h{display:flex;align-items:center;gap:10px;padding:15px 18px;border-bottom:1px solid var(--border);flex:0 0 auto}
+.mod-t{font-family:var(--mono);font-size:12px;letter-spacing:.2em;text-transform:uppercase;font-weight:600}
+.mod-x{margin-left:auto;font-family:var(--mono);color:var(--faint);cursor:pointer;font-size:15px;padding:2px 8px;border-radius:6px}
+.mod-x:hover{color:var(--text);background:rgba(94,106,210,.08)}
+.mod-b{padding:17px 18px;font-size:12px;color:var(--muted);line-height:1.65;
+  flex:1 1 auto;overflow-y:auto;overscroll-behavior:contain}
+.mod-b b{color:var(--text)}
+.mod-stats{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin:13px 0}
+.ms{border:1px solid var(--border);border-radius:9px;padding:10px 12px;background:var(--panel2)}
+.ms .n{font-family:var(--mono);font-size:16px;font-weight:700;font-variant-numeric:tabular-nums}
+.ms .l{font-family:var(--mono);font-size:8px;letter-spacing:.14em;text-transform:uppercase;color:var(--faint);margin-top:2px}
+.mod-act{display:flex;gap:8px;margin-top:6px}
+/* what the service actually IS, in pipeline terms */
+.mod-arch{display:flex;flex-direction:column;gap:6px;margin:12px 0;padding:11px 13px;border:1px solid var(--border);
+  border-radius:9px;background:rgba(94,106,210,.04)}
+.mod-arch .ar{display:flex;gap:9px;align-items:baseline;font-size:11.5px}
+.mod-arch .ak{font-family:var(--mono);font-size:8px;letter-spacing:.16em;text-transform:uppercase;color:var(--faint);
+  min-width:52px;flex:0 0 auto}
+.mod-arch .av{color:var(--text)}
+/* real rows — the actual entities this service is holding right now */
+.mod-list{margin-top:12px;border:1px solid var(--border);border-radius:9px;overflow:hidden}
+.mod-list .lh{display:flex;justify-content:space-between;padding:8px 12px;background:rgba(255,255,255,.05);
+  font-family:var(--mono);font-size:8px;letter-spacing:.16em;text-transform:uppercase;color:var(--faint)}
+.mrow{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:8px 12px;
+  border-top:1px solid var(--border);font-size:12px}
+.mrow .e{font-family:var(--mono);color:var(--text)}
+.mrow .v{font-family:var(--mono);font-size:11px;color:var(--accent);font-variant-numeric:tabular-nums}
+.mrow .v.d{color:var(--danger)} .mrow .v.w{color:var(--warn)}
+.mod-empty{padding:11px 12px;font-size:11.5px;color:var(--faint);border-top:1px solid var(--border)}
+
+/* Pipeline — the architecture, in order, in plain words. It lives ONLY inside the
+   architecture modal now; the deck itself stays on the topology canvas. Stacked
+   vertically so eight stages read top-to-bottom and scroll in the modal body. */
+.pipe{display:flex;flex-direction:column;gap:8px}
+.pstage{width:100%;text-align:left;cursor:pointer;padding:11px 12px;border:1px solid var(--border);
+  border-radius:10px;background:var(--panel2);transition:.16s;position:relative}
+.pstage:hover{border-color:var(--pc,var(--accent));background:rgba(94,106,210,.06);transform:translateX(2px)}
+.pstage .pn{font-family:var(--mono);font-size:8px;letter-spacing:.18em;color:var(--faint)}
+.pstage .pt{font-family:var(--mono);font-size:10.5px;font-weight:700;letter-spacing:.08em;color:var(--pc,var(--accent));margin:4px 0 3px}
+.pstage .pd{font-size:10.5px;color:var(--muted);line-height:1.45}
+.pstage .pv{font-family:var(--mono);font-size:11px;color:var(--text);margin-top:6px;font-variant-numeric:tabular-nums}
+/* flow arrow points DOWN between stacked stages */
+.pstage::after{content:'▾';position:absolute;left:50%;bottom:-8px;transform:translateX(-50%);
+  color:var(--faint);font-size:9px;line-height:1}
+.pstage:last-child::after{content:''}
+
+/* the architecture symbol — the only way into the pipeline */
+.arch-btn{margin-left:auto;display:inline-flex;align-items:center;gap:7px;cursor:pointer;
+  font-family:var(--mono);font-size:9px;letter-spacing:.16em;text-transform:uppercase;
+  color:var(--faint);background:var(--panel2);border:1px solid var(--border);
+  border-radius:8px;padding:5px 10px;transition:.16s}
+.arch-btn .ag{font-size:12px;line-height:1;color:var(--accent)}
+.arch-btn:hover{color:var(--text);border-color:var(--accent);background:rgba(94,106,210,.08)}
+
+.toasts{position:fixed;right:20px;bottom:20px;z-index:120;display:flex;flex-direction:column;gap:9px}
+.toast{display:flex;align-items:center;gap:10px;padding:11px 15px;border-radius:10px;border:1px solid rgba(76,183,130,.4);
+  background:rgba(10,17,29,.97);font-family:var(--mono);font-size:11px;color:var(--text);
+  box-shadow:0 16px 40px -14px rgba(0,0,0,.8);animation:tin .25s cubic-bezier(.2,.8,.2,1)}
+.toast.warn{border-color:rgba(242,201,76,.4)}
+.toast.ai{border-color:rgba(167,139,250,.4)}
+.toast .ti{font-size:13px}
+@keyframes tin{from{transform:translateY(14px);opacity:0}}
+
+@media(max-width:1240px){.intel-tiles{grid-template-columns:1fr 1fr}.fleet-strip{grid-template-columns:repeat(3,1fr)}}
+@media(max-width:1080px){
+  .g2{grid-template-columns:1fr}
+  .kpis{grid-template-columns:repeat(2,1fr);row-gap:14px}
+  .kpi:nth-child(3){padding-left:0;border-left:0}
+  .kc-track{grid-template-columns:repeat(4,1fr)}
+}
+/* Verdict + Threat Index only stack on genuinely narrow screens */
+@media(max-width:820px){.hero{grid-template-columns:1fr}}
+@media(max-width:700px){.kc-track{grid-template-columns:repeat(2,1fr)}.deck{padding:14px}
+  .intel-tiles{grid-template-columns:1fr}.fleet-strip{grid-template-columns:repeat(2,1fr)}}
+/* ═══ LINEAR FLATTEN LAYER ═══
+   Same job as the block at the foot of theme.css: the rules above hardcode
+   cyan/violet washes and glow that the tokens can't reach. Depth here comes
+   from a hairline border and a flat surface step, never from light. */
+.card,.verdict,.arch-card,.pb-rec,.console,.pal,.mod-panel,.astage{
+  box-shadow:none!important;background-image:none!important;backdrop-filter:none!important}
+.card{background:var(--panel)!important;border:1px solid var(--border)!important;border-radius:var(--r)!important}
+.card:hover{border-color:var(--border-hi)!important}
+.verdict{border:1px solid var(--border)!important;background:var(--panel)!important}
+.topnav{background:var(--bg)!important;backdrop-filter:none!important;border-bottom:1px solid var(--border)!important}
+.ni:hover{background:rgba(255,255,255,.05)!important}
+.ni.active{background:rgba(94,106,210,.16)!important;border-color:transparent!important;color:var(--text)!important}
+.sec:hover,.rank-row:hover,.logtbl tbody tr:hover,.pal-item:hover,.pal-item.sel,.mod-x:hover{background:rgba(255,255,255,.04)!important}
+.pill.tech{background:rgba(94,106,210,.12)!important;color:#a5adea!important;border-color:rgba(94,106,210,.26)!important}
+.pill.anom{background:rgba(167,139,250,.12)!important;color:#c4b5fd!important;border-color:rgba(167,139,250,.26)!important}
+.pill.ok2{background:rgba(76,183,130,.12)!important;color:#6cc79b!important;border-color:rgba(76,183,130,.26)!important}
+.fchip.on{background:rgba(94,106,210,.12)!important;border-color:var(--accent)!important;color:#a5adea!important}
+.pb-rec{border:1px solid var(--border)!important;background:var(--panel2)!important;border-radius:var(--r)!important}
+.console .sql{background:rgba(94,106,210,.08)!important;color:#a5adea!important;border-left-color:var(--accent)!important}
+.console-in input:focus{border-color:var(--accent)!important}
+.inc-story{border-left-color:rgba(167,139,250,.4)!important}
+.feed-ic.ai{background:rgba(167,139,250,.1)!important;border-color:rgba(167,139,250,.26)!important}
+.feed-ic.ok{background:rgba(76,183,130,.1)!important;border-color:rgba(76,183,130,.26)!important}
+.qa.go{border-color:rgba(76,183,130,.32)!important}
+.qa.go:hover{background:rgba(76,183,130,.08)!important}
+.pal,.mod-panel{background:var(--panel2)!important;border:1px solid var(--border)!important;
+  box-shadow:0 8px 24px rgba(0,0,0,.45)!important}
+.pstage:hover,.arch-btn:hover{background:rgba(255,255,255,.05)!important;transform:none!important}
+.archflow::-webkit-scrollbar-thumb{background:rgba(255,255,255,.12)!important}
+.sec .mod.ai{border-color:rgba(167,139,250,.3)!important;color:#c4b5fd!important}
+.sec .mod.soc{border-color:rgba(76,183,130,.28)!important;color:#6cc79b!important}
+/* Gradient ink → solid, matching theme.css section 3. */
+[class*="grad"],.holo,.hero-ai,.hero-red{background:none!important;
+  -webkit-text-fill-color:currentColor!important;text-shadow:none!important;animation:none!important}
+
+/* ═══ TYPOGRAPHY: terminal → Linear ═══
+   This deck set 81 elements in monospace, 27 in uppercase, and tracked labels
+   out to .3em at 8–9px. Wide-tracked uppercase mono is what made this read as
+   cramped AND clumsy: tiny to read, yet each word eats huge horizontal space.
+   Linear's rule is plain — Inter, sentence case, tight tracking, and monospace
+   ONLY where glyphs must line up (IPs, counts, code, timestamps).
+   Default everything to sans here; the allowlist below re-claims mono. */
+.pg-title,.sec .nm,.sec .no,.sec .mod,.card-t,.card-badge,.eyebrow,.headline,
+.core-l,.core-band,.core-tag,.kpi .kl,.fleet-t,.fleet-i,.tapebar .tlabel,
+.astage-num,.astage-name,.astage-role,.topo-hint,.pill,.fchip,.hl-ipgo,
+.kc-stage .ks-n,.logtbl th,.inc-title,.tl-tx,.qa,.arch-btn,.ni,.fs-v,
+.rank-no,.mod-t,.pal-item,.feed-tx,.pb-rec,.ti-why,.sec-t{
+  font-family:var(--sans)!important;
+  letter-spacing:-.006em!important;
+  text-transform:none!important;
+}
+/* Micro-labels were 8–9px: below the floor where Inter stays legible. */
+.eyebrow,.card-t,.core-l,.core-tag,.kpi .kl,.fleet-t,.sec .mod,.card-badge,
+.astage-num,.astage-role,.tapebar .tlabel,.logtbl th,.pill,.topo-hint,.fs-v{
+  font-size:11px!important;font-weight:500!important;color:var(--muted)!important;
+}
+.sec .nm{font-size:13px!important;font-weight:600!important;letter-spacing:-.01em!important}
+.pg-title{font-size:15px!important;font-weight:600!important;letter-spacing:-.02em!important}
+/* The hero headline was monospace — the single worst offender on the page. */
+.headline{font-size:clamp(19px,2vw,25px)!important;font-weight:600!important;
+  line-height:1.35!important;letter-spacing:-.02em!important}
+.card-t{font-weight:500!important}
+.kc-stage .ks-n{font-size:11px!important}
+.inc-title{font-size:13.5px!important;font-weight:550!important}
+
+/* Mono allowlist: numerals and identifiers only — things that must align. */
+.core-n,.kpi .kv,.rank-ip,.rank-score,.kc-stage .ks-c,.astage-val,.inc-id,
+.tl-time,.clock,.logtbl td,.console .sql,.hl-ipin,.tev,.tl-tx b,.console-in input,
+.pal-in input{
+  font-family:var(--mono)!important;letter-spacing:0!important;
+  font-variant-numeric:tabular-nums;
+}
+/* ═══ 02 · SIGNAL FUSION BOARD ═══
+   The bar is the score, drawn to scale: each segment's flex IS that engine's
+   point contribution, so the widths literally add up to the number on the right.
+   Nothing here is decorative — if a segment is wide, that engine drove the score. */
+.fz-group{border:1px solid var(--border);border-radius:var(--r);padding:14px 16px;margin-bottom:12px;background:var(--bg-soft)}
+.fz-gh{display:flex;align-items:center;gap:10px}
+.fz-agree{font-family:var(--mono);font-size:11px;font-weight:600;padding:2px 8px;border-radius:5px;
+  background:rgba(255,255,255,.06);color:var(--faint)}
+.fz-agree.mid{background:rgba(94,106,210,.16);color:#a5adea}
+.fz-agree.hi{background:rgba(235,87,87,.16);color:#f28b8b}
+.fz-gn{font-size:13.5px;font-weight:600;letter-spacing:-.01em}
+.fz-gc{margin-left:auto;font-size:11px;color:var(--faint)}
+.fz-gb{font-size:12px;color:var(--muted);line-height:1.55;margin:6px 0 12px;max-width:82ch}
+.fz-row{display:flex;align-items:center;gap:12px;padding:7px 8px;border-radius:6px;cursor:pointer;
+  transition:background .12s}
+.fz-row:hover,.fz-row:focus-visible{background:rgba(255,255,255,.04);outline:none}
+.fz-ip{font-family:var(--mono);font-size:12.5px;min-width:15ch;color:var(--accent-2,#7b86e6);
+  display:inline-flex;align-items:center;gap:5px}
+.fz-arrow{font-style:normal;opacity:0;transform:translateX(-3px);transition:.14s;color:var(--accent-2,#7b86e6)}
+.fz-row:hover .fz-ip{text-decoration:underline}
+.fz-row:hover .fz-arrow{opacity:1;transform:translateX(0)}
+.fz-bar{display:flex;gap:2px;flex:1;height:8px;min-width:80px;border-radius:99px;overflow:hidden;
+  background:rgba(255,255,255,.05)}
+.fz-seg{height:100%}
+/* the anomaly-floor lift: hatched, because it is not an engine's evidence —
+   it's the model refusing to let a thin signal score below 50 */
+.fz-floor{background:repeating-linear-gradient(45deg,rgba(255,255,255,.16) 0 3px,transparent 3px 6px)}
+.fz-fchip{color:var(--faint)!important}
+.fz-score.fl{color:var(--muted)}
+.fz-sum{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;min-width:210px}
+.fz-chip{font-family:var(--mono);font-size:10.5px;font-weight:500}
+.fz-score{font-family:var(--mono);font-size:13px;font-weight:600;min-width:3ch;text-align:right;
+  font-variant-numeric:tabular-nums}
+.fz-more{font-size:11.5px;color:var(--faint);padding:6px 8px 0}
+
+/* Ingest-staleness callout — the pulse is worthless without knowing whether
+   "activity" means now or a fortnight ago. */
+.pulse-stale{font-size:11.5px;line-height:1.55;color:var(--muted);margin-bottom:12px;
+  padding:9px 12px;border-radius:var(--radius-sm,6px);border-left:2px solid var(--warn);
+  background:rgba(242,201,76,.06)}
+.pulse-stale.hot{border-left-color:var(--danger);background:rgba(235,87,87,.06)}
+.pulse-stale b{color:var(--text)}
+@media (max-width:900px){.fz-sum{display:none}}
+
+/* Service names are product names, not data — they get sans like any other label. */
+.fs-n{font-family:var(--sans)!important;font-size:12.5px!important;font-weight:550!important;
+  letter-spacing:-.01em!important;color:var(--text)!important}
+
+/* ═══ DENSITY: room to breathe ═══
+   Paddings and gaps here were tuned to fit a lot above the fold. Linear does
+   the opposite — it spends space so each block reads as one thing. */
+.deck{padding:28px 40px 96px!important}
+.card-h{padding:14px 20px!important}
+.card-b{padding:20px!important}
+.g2,.hero{gap:20px!important}
+.sec{margin:40px 0 18px!important}
+.verdict{padding:28px 30px!important}
+.kpis{margin-top:24px!important;padding-top:20px!important;gap:4px}
+.kpi{padding-right:18px!important}
+.kpi+.kpi{padding-left:18px!important}
+.verdict-sub{font-size:12.5px!important;line-height:1.6!important;margin-top:14px!important}
+.topnav{padding:10px 18px!important;gap:6px!important}
+.ni{padding:7px 12px!important}
+.rank-row{padding:10px 12px!important}
+.logtbl td{padding:10px 12px!important}
+.logtbl th{padding:9px 12px!important}</style>
+
+<canvas id="mesh"></canvas>
+
+<!-- ═══ TOP SECTION NAV (horizontal — no left sidebar) ═══ -->
+<nav class="topnav" id="sbnav">
+  <a class="ni active" href="#s-verdict"><span class="nd"></span>Verdict</a>
+  <a class="ni" href="#s-fusion"><span class="nd"></span>Why</a>
+  <a class="ni" href="#s-pipeline"><span class="nd"></span>Pipeline</a>
+  <a class="ni" href="#s-trail"><span class="nd"></span>Trail</a>
+  <a class="ni" href="#s-console"><span class="nd"></span>Console</a>
+  <div class="cmdk" id="cmdk-btn">⌘<kbd>Ctrl K</kbd></div>
+</nav>
+
+<!-- ═══ COMMAND PALETTE ═══ -->
+<div class="palette" id="palette">
+  <div class="pal-box">
+    <div class="pal-in"><span class="pr">❯</span><input id="pal-input" placeholder="Jump to engine, entity, or action…" autocomplete="off"></div>
+    <div class="pal-list" id="pal-list"></div>
+  </div>
+</div>
+
+<!-- ═══ SERVICE MODAL ═══ -->
+<div class="modal" id="modal">
+  <div class="mod-box">
+    <div class="mod-h"><span class="mod-t" id="mod-t">—</span><span class="mod-x" id="mod-x">✕</span></div>
+    <div class="mod-b" id="mod-b"></div>
+  </div>
+</div>
+
+<div class="toasts" id="toasts"></div>
+
+<div class="deck">
+
+  <div class="topbar">
+    <div>
+      <div class="pg-title">Neural <em>Command</em></div>
+      <div class="pg-sub">Every engine, one pass — the AI has already done the first shift.</div>
+    </div>
+    <span class="clock" id="clock">—</span>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════════════
+       FIVE ACTS, not thirteen sections.
+       This deck used to carry one section per backend engine — ML, UEBA, SIEM,
+       Incidents, Logs, Intel, Telemetry — which made it a scrolling copy of the
+       sidebar. It was organised by system architecture, not by the question an
+       analyst actually arrives with. The order below is the inverted pyramid:
+         01 what happened + what to do first   (status)
+         02 why it thinks that                 (evidence)
+         03 how an event became a verdict      (mechanism, drill-in per engine)
+         04 the entity's whole story           (detail — every IP click lands here)
+         05 ask it anything                    (open question)
+       The engines didn't disappear: each is a stage in 03 with its real live
+       contents one click away, and each has its own full page in the sidebar.
+       ═══════════════════════════════════════════════════════════════════ -->
+
+  <!-- 01 · VERDICT -->
+  <div class="sec" id="s-verdict"><span class="no">01</span><span class="nm">Verdict</span><span class="ln"></span><span class="mod ai">AI verdict · fusion of 3 engines</span></div>
+  <div class="hero">
+    <div class="verdict">
+      <div class="eyebrow"><span class="live"></span><span id="verdict-eyebrow">Autonomous triage · reading the wire…</span></div>
+      <div class="headline" id="headline"></div>
+      <div class="verdict-sub" id="verdict-sub">NeuronCore anomaly model, behavioural baselines and the identity
+        engine are correlating live telemetry…</div>
+      <div class="kpis">
+        <div class="kpi"><div class="kl">Events ingested</div><div class="kv ac" id="kpi-events">—</div></div>
+        <div class="kpi"><div class="kl">Entities profiled</div><div class="kv" id="kpi-entities">—</div></div>
+        <div class="kpi"><div class="kl">ML anomalies</div><div class="kv ai" id="kpi-anom">—</div></div>
+        <div class="kpi"><div class="kl">Deviations</div><div class="kv ok" id="kpi-dev">—</div></div>
+      </div>
+    </div>
+    <div class="core-card">
+      <div class="core-wrap">
+        <canvas id="core" width="500" height="500"></canvas>
+        <div class="core-core"><div>
+          <div class="core-n" id="core-n">0</div>
+          <div class="core-l">Threat Index</div>
+          <div class="core-band" id="core-band">—</div>
+        </div></div>
+      </div>
+      <div class="core-tag">Anomaly · deviation · intel</div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:20px">
+    <div class="card-h"><span class="card-t">Start here</span><span class="card-badge">ranked by time-decayed risk</span></div>
+    <div class="card-b" id="queue"></div>
+  </div>
+
+  <!-- 02 · WHY THESE ENTITIES -->
+  <div class="sec" id="s-fusion"><span class="no">02</span><span class="nm">Why these entities</span><span class="ln"></span><span class="mod ai">Signal fusion · the arithmetic behind every score</span></div>
+  <div class="card">
+    <div class="card-h"><span class="card-t">Signal fusion</span><span class="card-badge" id="fuse-badge">loading…</span></div>
+    <div class="card-b">
+      <div id="fuse-board"><div class="empty-note">Fusing engine signals…</div></div>
+      <div class="mini-note" id="fuse-note"></div>
+    </div>
+  </div>
+  <div class="g2" style="grid-template-columns:minmax(0,1.7fr) minmax(0,1fr)">
+    <div class="card">
+      <div class="card-h"><span class="card-t">Activity Pulse</span><span class="card-badge" id="pulse-badge">reading the window…</span></div>
+      <div class="card-b">
+        <div class="pulse-wrap">
+          <canvas id="pulse"></canvas>
+          <div class="tooltip" id="pulse-tt"><div class="tt-t" id="tt-t">—</div><div class="tt-v" id="tt-v">—</div></div>
+        </div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-h"><span class="card-t">Severity Mix</span><span class="card-badge" id="sev-badge">loading…</span></div>
+      <div class="card-b">
+        <div class="sev-rows" id="sev"></div>
+        <div class="mini-note" id="sev-note">Reading severity mix…</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 03 · PIPELINE -->
+  <div class="sec" id="s-pipeline"><span class="no">03</span><span class="nm">Pipeline</span><span class="ln"></span><span class="mod">Architecture · sensor → verdict · click any stage</span></div>
+  <div class="card arch-card">
+    <div class="card-h"><span class="card-t">How an event becomes a verdict</span><span class="card-badge">live pipeline · 8 engines</span>
+      <button class="arch-btn" id="arch-btn" title="Open the stage-by-stage list"><span class="ag">▦</span>Detail</button>
+    </div>
+    <div class="card-b">
+      <div class="archflow" id="archflow"><div class="empty-note">Spinning up the pipeline…</div></div>
+      <div class="topo-hint">An event enters at <b style="color:var(--muted)">SENSENET</b> and leaves as a verdict at <b style="color:var(--muted)">EDGEGATE</b> — click any stage for its live contents</div>
+    </div>
+  </div>
+
+  <!-- 04 · TRAIL -->
+  <div class="sec" id="s-trail"><span class="no">04</span><span class="nm">IP Trail</span><span class="ln"></span><span class="mod">Forensic timeline · every IP click lands here</span></div>
+  <div class="card">
+    <div class="card-h"><span class="card-t">Entity Trail</span><span class="card-badge" id="trail-badge">enter an entity to trace</span></div>
+    <div class="card-b">
+      <div class="trail-head">
+        <input id="trail-input" placeholder="Enter an IP, username or host to trace">
+        <button class="qa go" id="trail-go" style="padding:10px 16px;font-size:10px">TRACE</button>
+      </div>
+      <div class="timeline" id="timeline"></div>
+    </div>
+  </div>
+
+  <!-- 05 · CONSOLE -->
+  <div class="sec" id="s-console"><span class="no">05</span><span class="nm">AI Console</span><span class="ln"></span><span class="mod ai">SOC query + AI investigator</span></div>
+  <div class="card">
+    <div class="card-h"><span class="card-t">Ask the SOC anything</span><span class="card-badge">natural language → VaultQL → answer</span></div>
+    <div class="card-b">
+      <div class="console" id="console">
+        <div class="a">Ask in plain English — the query runs against the live vault and answers from
+          <b>real</b> events. Try <b>ssh_bruteforce</b>, an IP, or a username.<span class="cur"></span></div>
+      </div>
+      <div class="console-in">
+        <input id="console-input" placeholder="Search the vault in plain English…">
+        <button class="qa go" id="console-run">RUN</button>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+/* ═══════════════════════════════════════════════════════════════════════════
+   NEURAL COMMAND — live data layer.
+   Every number on this deck comes from the real API. Where an engine has no
+   data yet (no usernames in the logs, no events in the last 24h), we say so
+   plainly instead of inventing a number.
+   ═══════════════════════════════════════════════════════════════════════════ */
+const REDUCED = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const API = '/api';
+
+const j = async (u) => { try { const r = await fetch(u); return r.ok ? await r.json() : null; } catch (e) { return null; } };
+const num = v => Number(v || 0).toLocaleString();
+const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const pretty = s => String(s || '').replace(/_/g, ' ');
+
+/* clock */
+const clockEl = document.getElementById('clock');
+const tickClock = () => clockEl.textContent = new Date().toISOString().replace('T', ' ').slice(0, 19) + ' UTC';
+tickClock(); setInterval(tickClock, 1000);
+
+/* toasts */
+function toast(msg, cls = '', icon = '✓') {
+  const t = document.createElement('div'); t.className = 'toast ' + cls;
+  t.innerHTML = `<span class="ti">${icon}</span>${msg}`;
+  document.getElementById('toasts').appendChild(t);
+  setTimeout(() => { t.style.opacity = '0'; t.style.transition = 'opacity .4s'; setTimeout(() => t.remove(), 400); }, 3400);
+}
+
+/* ═══ Collapsible sections — a spacious deck ═══
+   Each section header controls the block of content beneath it (everything up to
+   the next header, wrapped once here). Core + Grid open on load; the rest are tidy
+   collapsed headers you click to reveal. Any jump (top-nav, palette, a trace) that
+   targets a section expands it first via expandSection(). */
+const OPEN_SECTIONS = new Set(['s-verdict', 's-fusion']);
+function expandSection(id) {
+  const sec = document.getElementById(id);
+  if (!sec || !sec.classList.contains('sec')) return;
+  sec.classList.remove('collapsed'); sec.setAttribute('aria-expanded', 'true');
+  const body = sec.nextElementSibling;
+  if (body && body.classList.contains('sec-body')) {
+    body.classList.remove('collapsed');
+    // canvases sized while hidden come back 0×0 — nudge a redraw on reveal
+    requestAnimationFrame(() => dispatchEvent(new Event('resize')));
+  }
+}
+(function initSectionCollapse() {
+  document.querySelectorAll('.deck .sec').forEach(sec => {
+    const body = document.createElement('div');
+    body.className = 'sec-body';
+    let n = sec.nextElementSibling;
+    while (n && !n.classList.contains('sec')) { const nx = n.nextElementSibling; body.appendChild(n); n = nx; }
+    sec.after(body);
+    const chev = document.createElement('span'); chev.className = 'sec-chev'; chev.textContent = '▾';
+    sec.appendChild(chev);
+    sec.setAttribute('role', 'button'); sec.setAttribute('tabindex', '0');
+    const open = OPEN_SECTIONS.has(sec.id);
+    sec.setAttribute('aria-expanded', open ? 'true' : 'false');
+    if (!open) { sec.classList.add('collapsed'); body.classList.add('collapsed'); }
+    const toggle = () => {
+      const willOpen = sec.classList.contains('collapsed');
+      sec.classList.toggle('collapsed', !willOpen);
+      body.classList.toggle('collapsed', !willOpen);
+      sec.setAttribute('aria-expanded', String(willOpen));
+      if (willOpen) requestAnimationFrame(() => dispatchEvent(new Event('resize')));
+    };
+    sec.addEventListener('click', toggle);
+    sec.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); } });
+  });
+})();
+
+/* scrollspy */
+const links = [...document.querySelectorAll('.topnav .ni')];
+const spy = new IntersectionObserver(es => {
+  es.forEach(e => { if (e.isIntersecting) links.forEach(l => l.classList.toggle('active', l.getAttribute('href') === '#' + e.target.id)); });
+}, { rootMargin: '-12% 0px -74% 0px' });
+links.forEach(l => { const s = document.querySelector(l.getAttribute('href')); if (s) spy.observe(s); });
+/* a top-nav jump opens the target section, then scrolls to it */
+links.forEach(a => a.addEventListener('click', e => {
+  const id = (a.getAttribute('href') || '').slice(1);
+  expandSection(id);
+  const t = document.getElementById(id);
+  if (t) { e.preventDefault(); t.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+}));
+
+/* shared rank-row renderer */
+function rankRows(el, rows, clickable = true) {
+  const host = document.getElementById(el);
+  if (!host) return;
+  if (!rows.length) { host.innerHTML = '<div class="empty-note">Nothing to show yet.</div>'; return; }
+  host.innerHTML = rows.map((r, i) => `
+    <div class="rank-row" tabindex="0" ${clickable && r.e ? `data-e="${esc(r.e)}"` : ''}>
+      <span class="rank-no">${String(i + 1).padStart(2, '0')}</span>
+      <span class="rank-main">
+        <span class="rank-ip">${esc(r.e)}${(r.pills || []).map(p => `<span class="pill ${p[0]}">${esc(p[1])}</span>`).join('')}</span>
+        <span class="rank-why">${r.why}</span>
+      </span>
+      <span class="rank-side">
+        <span class="rank-bar"><span class="rank-fill" style="width:${r.pct}%;background:${r.col}"></span></span>
+        <span class="rank-score ${r.sc || ''}">${esc(r.score)}</span>
+      </span>
+    </div>`).join('');
+  if (clickable) host.querySelectorAll('.rank-row[data-e]').forEach(row => {
+    row.onclick = () => { runTrail(row.dataset.e); document.querySelector('#s-trail').scrollIntoView({ behavior: 'smooth' }); };
+  });
+}
+
+/* ── helpers over the real API shapes ── */
+function topThreat(types) {
+  const e = Object.entries(types || {}).filter(([k]) => k && k !== 'unknown');
+  if (!e.length) return ['unknown', 0];
+  return e.sort((a, b) => b[1] - a[1])[0];
+}
+function worstSev(sevs) {
+  for (const s of ['critical', 'high', 'medium', 'low']) if ((sevs || {})[s]) return s;
+  return 'low';
+}
+function threatIndexOf(sev) {
+  const c = +(sev.critical || 0), h = +(sev.high || 0), m = +(sev.medium || 0), l = +(sev.low || 0);
+  const t = c + h + m + l;
+  if (!t) return 0;
+  return Math.max(0, Math.min(100, Math.round(((c * 1.0 + h * 0.65 + m * 0.35 + l * 0.10) / t) * 100)));
+}
+const bandOf = i => i >= 70 ? ['CRITICAL', 'var(--danger)'] : i >= 40 ? ['▲ ELEVATED', 'var(--warn)'] : i > 0 ? ['ACTIVE', 'var(--accent)'] : ['QUIET', 'var(--ok)'];
+
+/* ═══ THREAT INDEX — orbital core (driven by the real weighted severity mix) ═══ */
+const core = document.getElementById('core'), cx2 = core.getContext('2d');
+let GV = 0, gcur = 0, coreT = 0;
+function drawCore(v) {
+  const W = 500, c = W / 2; cx2.clearRect(0, 0, W, W);
+  coreT += REDUCED ? 0 : 0.008;
+  const a0 = Math.PI * 0.75, a1 = Math.PI * 2.25, r = 214;
+  cx2.lineCap = 'round';
+  cx2.beginPath(); cx2.arc(c, c, r, a0, a1); cx2.strokeStyle = 'rgba(255,255,255,.08)'; cx2.lineWidth = 9; cx2.stroke();
+  const av = a0 + (a1 - a0) * v / 100;
+  const grad = cx2.createLinearGradient(0, W, W, 0);
+  grad.addColorStop(0, '#5e6ad2'); grad.addColorStop(.6, '#f2c94c'); grad.addColorStop(1, '#eb5757');
+  cx2.beginPath(); cx2.arc(c, c, r, a0, av); cx2.strokeStyle = grad; cx2.lineWidth = 9; cx2.stroke();
+  cx2.beginPath(); cx2.arc(c + Math.cos(av) * r, c + Math.sin(av) * r, 5.5, 0, 7);
+  cx2.fillStyle = '#eb5757'; cx2.shadowColor = '#eb5757'; cx2.shadowBlur = 14; cx2.fill(); cx2.shadowBlur = 0;
+  [[176, coreT, 1.9, 'rgba(94,106,210,.5)'], [176, coreT + 3.4, 0.8, 'rgba(94,106,210,.25)'],
+   [158, -coreT * 1.4, 1.2, 'rgba(167,139,250,.45)'], [158, -coreT * 1.4 + 2.6, 2.2, 'rgba(167,139,250,.18)'],
+   [142, coreT * 2.1, 0.6, 'rgba(45,212,191,.4)']].forEach(([ar, off, len, col]) => {
+    cx2.beginPath(); cx2.arc(c, c, ar, off, off + len); cx2.strokeStyle = col; cx2.lineWidth = 1.5; cx2.stroke();
+  });
+  for (let i = 0; i < 3; i++) {
+    const oa = coreT * (1.2 + i * 0.5) + i * 2.1, orr = 142 + i * 17;
+    cx2.beginPath(); cx2.arc(c + Math.cos(oa) * orr, c + Math.sin(oa) * orr, 2.2, 0, 7);
+    cx2.fillStyle = ['#5e6ad2', '#a78bfa', '#4cb782'][i]; cx2.fill();
+  }
+  const br = 48 + Math.sin(coreT * 2.4) * 5;
+  const rg = cx2.createRadialGradient(c, c, 4, c, c, br * 2.4);
+  rg.addColorStop(0, 'rgba(235,87,87,.25)'); rg.addColorStop(.5, 'rgba(167,139,250,.08)'); rg.addColorStop(1, 'transparent');
+  cx2.fillStyle = rg; cx2.beginPath(); cx2.arc(c, c, br * 2.4, 0, 7); cx2.fill();
+}
+(function animCore() {
+  gcur += (GV - gcur) * 0.05;
+  drawCore(gcur);
+  document.getElementById('core-n').textContent = Math.round(gcur);
+  requestAnimationFrame(animCore);
+})();
+
+/* typed verdict headline */
+function typeHeadline(parts) {
+  const headline = document.getElementById('headline');
+  headline.innerHTML = '';
+  /* An `atomic` part lands as a single element instead of one span per character —
+     the IP has to stay one node to be clickable and to swap itself for an input. */
+  const ipChip = ip => {
+    const s = document.createElement('span');
+    s.className = 'hl-ip'; s.dataset.ip = ip;
+    // two affordances: the IP itself traces, the pencil swaps it for an editable box
+    const t = document.createElement('span');
+    t.className = 'hl-ipt'; t.textContent = ip;
+    t.setAttribute('role', 'button'); t.setAttribute('tabindex', '0');
+    t.title = `Trace ${ip} in IP Trail`;
+    const p = document.createElement('button');
+    p.className = 'hl-ipe'; p.textContent = '✎';
+    p.title = 'Trace a different IP';
+    p.setAttribute('aria-label', 'Edit the IP to trace');
+    s.append(t, p);
+    return s;
+  };
+  if (REDUCED) {
+    parts.forEach(s => {
+      if (s.atomic) return headline.appendChild(ipChip(s.t));
+      s.t.split('\n').forEach((line, i) => {
+        if (i) headline.appendChild(document.createElement('br'));
+        const sp = document.createElement('span'); if (s.c) sp.className = s.c; sp.textContent = line;
+        headline.appendChild(sp);
+      });
+    });
+    const c = document.createElement('span'); c.className = 'caret'; headline.appendChild(c);
+    return;
+  }
+  const flat = [];
+  parts.forEach(s => s.atomic ? flat.push({ atomic: s.t }) : [...s.t].forEach(ch => flat.push({ ch, c: s.c })));
+  let i = 0;
+  const caret = document.createElement('span'); caret.className = 'caret'; headline.appendChild(caret);
+  (function step() {
+    if (i >= flat.length) return;
+    const f = flat[i++];
+    if (f.atomic) { headline.insertBefore(ipChip(f.atomic), caret); setTimeout(step, 90); return; }
+    if (f.ch === '\n') { headline.insertBefore(document.createElement('br'), caret); setTimeout(step, 70); return; }
+    const sp = document.createElement('span'); if (f.c) sp.className = f.c; sp.textContent = f.ch;
+    headline.insertBefore(sp, caret); setTimeout(step, f.ch === ' ' ? 10 : 20);
+  })();
+}
+
+/* ── Headline IP: a live handle, not a label ──
+   Click the IP  → jump to IP Trail and trace THAT IP.
+   Click the ✎   → swap it for an input; type any other IP, Enter/TRACE traces that one
+                   instead (and the headline keeps whatever you typed). */
+function traceHeadlineIp(ip) {
+  if (!ip) return;
+  runTrail(ip);
+  document.querySelector('#s-trail').scrollIntoView({ behavior: 'smooth' });
+}
+const headlineEl = document.getElementById('headline');
+headlineEl.addEventListener('click', e => {
+  if (e.target.closest('.hl-ipe')) return editHeadlineIp(e.target.closest('.hl-ip'));
+  const t = e.target.closest('.hl-ipt');
+  if (t) traceHeadlineIp(t.closest('.hl-ip').dataset.ip);
+});
+headlineEl.addEventListener('keydown', e => {
+  const t = e.target.closest('.hl-ipt');
+  if (t && (e.key === 'Enter' || e.key === ' ')) {
+    e.preventDefault(); traceHeadlineIp(t.closest('.hl-ip').dataset.ip);
+  }
+});
+function editHeadlineIp(chip) {
+  const ip = chip.dataset.ip;
+  const wrap = document.createElement('span');
+  wrap.className = 'hl-ipedit';
+  const input = document.createElement('input');
+  input.className = 'hl-ipin'; input.value = ip; input.spellcheck = false;
+  input.setAttribute('aria-label', 'Entity to trace');
+  const go = document.createElement('button');
+  go.className = 'hl-ipgo'; go.textContent = 'TRACE';
+  wrap.append(input, go);
+  chip.replaceWith(wrap);
+  input.focus(); input.select();
+
+  let done = false;
+  const restore = value => {                 // put the chip back, carrying any edit
+    if (done) return;
+    done = true;
+    wrap.replaceWith(chip);
+    chip.dataset.ip = value;                 // the chip owns children — retarget the label,
+    const t = chip.querySelector('.hl-ipt'); // never overwrite the chip's own textContent
+    t.textContent = value;
+    t.title = `Trace ${value} in IP Trail`;
+  };
+  const trace = () => {
+    const v = input.value.trim();
+    if (!v) return restore(ip);              // empty box shouldn't wipe the IP
+    restore(v);
+    traceHeadlineIp(v);
+  };
+  go.onclick = trace;
+  input.addEventListener('keydown', e => {
+    e.stopPropagation();                     // the palette also listens for keys
+    if (e.key === 'Enter') trace();
+    if (e.key === 'Escape') restore(ip);
+  });
+  input.addEventListener('blur', () => setTimeout(() => restore(input.value.trim() || ip), 120));
+}
+
+/* ═══ SERVICE MODAL — real per-service stats ═══ */
+let SERVICES = {};
+const modal = document.getElementById('modal'), modT = document.getElementById('mod-t'), modB = document.getElementById('mod-b');
+function openService(key) {
+  const s = SERVICES[key]; if (!s) return;
+  modT.textContent = s.t;
+  modB.innerHTML = (s.stage ? `<div style="font-family:var(--mono);font-size:8px;letter-spacing:.22em;
+    text-transform:uppercase;color:var(--faint);margin-bottom:9px">${s.stage}</div>` : '')
+    + s.b + `<div class="mod-act"><button class="qa go" data-go="${s.go[0]}">${s.go[1]}</button>
+    <button class="qa" data-close="1">Close</button></div>`;
+  modB.scrollTop = 0;          // fresh content starts at the top, not where the last modal was scrolled
+  modal.classList.add('open');
+}
+function closeModal() { modal.classList.remove('open'); }
+document.getElementById('mod-x').onclick = closeModal;
+
+/* ═══ ARCHITECTURE MODAL — the 8-stage pipeline, on demand ═══
+   The strip used to sit open on the deck. It now lives behind the architecture
+   symbol, and its body scrolls (see .mod-box / .mod-b). Each stage still drills
+   into the same real per-service view as clicking that service's topology node. */
+let PIPE_HTML = '';
+function openPipeline() {
+  modT.textContent = 'Architecture';
+  modB.innerHTML = `<div style="margin-bottom:12px">Eight services. An event enters at the top and
+    leaves as a verdict at the bottom — every count below is live.</div>`
+    + (PIPE_HTML || `<div class="mod-empty">Still reading service state…</div>`)
+    + `<div class="mod-act"><button class="qa" data-close="1">Close</button></div>`;
+  modB.scrollTop = 0;
+  modal.classList.add('open');
+}
+document.getElementById('arch-btn').onclick = openPipeline;
+
+modal.addEventListener('click', e => {
+  const stage = e.target.closest('.pstage');
+  if (stage) return openService(stage.dataset.svc);   // pipeline → per-service drill-in
+  if (e.target === modal || e.target.dataset.close) return closeModal();
+  if (e.target.dataset.go) { closeModal(); document.querySelector(e.target.dataset.go)?.scrollIntoView({ behavior: 'smooth' }); }
+});
+
+/* ═══ COMMAND PALETTE ═══ */
+const pal = document.getElementById('palette'), palIn = document.getElementById('pal-input'), palList = document.getElementById('pal-list');
+const SECTIONS = [
+  ['01', 'Verdict — what happened, what to do first', '#s-verdict'],
+  ['02', 'Why these entities — signal fusion & trends', '#s-fusion'],
+  ['03', 'Pipeline — how an event becomes a verdict', '#s-pipeline'],
+  ['04', 'IP Trail — forensic timeline', '#s-trail'],
+  ['05', 'AI Console — ask anything', '#s-console'],
+];
+function renderPal(f = '') {
+  const q = f.trim().toLowerCase();
+  let items = SECTIONS.filter(c => !q || c[1].toLowerCase().includes(q)).map(c => ({ i: c[0], l: c[1], h: c[2] }));
+  if (q) items.unshift({ i: 'TRACE', l: `Trace "${f.trim()}" in IP Trail`, h: 'trail:' + f.trim() });
+  palList.innerHTML = items.length
+    ? items.map((c, i) => `<div class="pal-item ${i === 0 ? 'sel' : ''}" data-h="${esc(c.h)}">
+        <span class="pi">${esc(c.i)}</span>${esc(c.l)}<span class="pk">↵</span></div>`).join('')
+    : '<div class="pal-item">No match</div>';
+}
+function palGo(h) {
+  closePal();
+  if (h.startsWith('trail:')) { runTrail(h.slice(6)); document.querySelector('#s-trail').scrollIntoView({ behavior: 'smooth' }); }
+  else { expandSection(h.slice(1)); document.querySelector(h)?.scrollIntoView({ behavior: 'smooth' }); }
+}
+function openPal() { pal.classList.add('open'); palIn.value = ''; renderPal(); palIn.focus(); }
+function closePal() { pal.classList.remove('open'); }
+document.getElementById('cmdk-btn').onclick = openPal;
+addEventListener('keydown', e => {
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); pal.classList.contains('open') ? closePal() : openPal(); }
+  if (e.key === 'Escape') { closePal(); closeModal(); }
+  if (e.key === 'Enter' && pal.classList.contains('open')) {
+    const sel = palList.querySelector('.sel') || palList.querySelector('.pal-item');
+    if (sel && sel.dataset.h) palGo(sel.dataset.h);
+  }
+});
+palIn.addEventListener('input', () => renderPal(palIn.value));
+palList.addEventListener('click', e => { const it = e.target.closest('.pal-item'); if (it && it.dataset.h) palGo(it.dataset.h); });
+pal.addEventListener('click', e => { if (e.target === pal) closePal(); });
+
+/* ═══ SERVICE GRID — futuristic architecture pipeline ═══
+   Eight engines wired in series. Rendered from the live PIPE array (built in the
+   sync loop) so every stage carries a real count. Clicking a stage opens exactly
+   the same per-service drill-in as before. */
+function renderArchFlow(PIPE) {
+  const host = document.getElementById('archflow');
+  if (!host) return;
+  host.innerHTML = '<div class="archflow-rail">' + PIPE.map(([id, t, d, v, c], i) => `
+    <button class="astage" data-svc="${id}" style="--pc:${c}" title="Open ${esc(t)}">
+      <span class="astage-emblem"><span class="astage-core"></span></span>
+      <span class="astage-num">Stage ${String(i + 1).padStart(2, '0')}</span>
+      <span class="astage-name">${esc(t)}</span>
+      <span class="astage-role">${esc(d)}</span>
+      <span class="astage-val">${esc(v)}</span>
+    </button>`).join('<span class="awire" aria-hidden="true"><span class="awire-flow"></span><span class="awire-tip">&#9656;</span></span>')
+    + '</div>';
+  host.querySelectorAll('.astage').forEach(b => b.onclick = () => openService(b.dataset.svc));
+}
+
+/* ═══ IP TRAIL — real /api/trail/{entity} ═══ */
+async function runTrail(entity, reveal = true) {
+  const e = String(entity || '').trim();
+  if (!e) return;
+  if (reveal) expandSection('s-trail');   // a user-initiated trace reveals the section
+  document.getElementById('trail-input').value = e;
+  const badge = document.getElementById('trail-badge'), tl = document.getElementById('timeline');
+  badge.textContent = e + ' · tracing…';
+  tl.innerHTML = '<div class="empty-note">Reconstructing timeline…</div>';
+  const r = await j(`${API}/trail/${encodeURIComponent(e)}`);
+  const evs = (r && r.events) || [];
+  if (!evs.length) {
+    badge.textContent = e + ' · no events found';
+    tl.innerHTML = `<div class="empty-note"><b>${esc(e)}</b> has no events in the store. It may be an internal
+      address that never triggered a rule, or the identity isn't captured on these logs.</div>`;
+    return;
+  }
+  badge.textContent = `${e} · ${num(evs.length)} events reconstructed`;
+  const shown = evs.slice(0, 14);
+  tl.innerHTML = shown.map(ev => {
+    const sev = (ev.severity || 'low').toLowerCase();
+    const cls = sev === 'critical' ? 'crit' : (sev === 'high' ? 'warn' : '');
+    const ts = String(ev['@timestamp'] || '').replace('T', ' ').slice(0, 19);
+    const tags = [ev.threat_type, ev.country, ev.dst_port ? 'port ' + ev.dst_port : '', ev.agent]
+      .filter(Boolean).map(t => pretty(t).toUpperCase());
+    return `<div class="tl-item ${cls}">
+      <div class="tl-time">${esc(ts)} UTC</div>
+      <div class="tl-tx">${esc(ev.rule || pretty(ev.threat_type) || 'event')}
+        ${ev.dst_ip ? ' → <b>' + esc(ev.dst_ip) + '</b>' : ''}</div>
+      <div class="tl-tags">${tags.map(t => `<span class="pill ${cls === 'crit' ? 'crit' : cls === 'warn' ? 'high' : 'tech'}">${esc(t)}</span>`).join('')}</div>
+    </div>`;
+  }).join('') + (evs.length > shown.length
+    ? `<div class="empty-note">+ ${num(evs.length - shown.length)} more events — open <b>IP Trail</b> in the sidebar for the full history.</div>` : '');
+}
+document.getElementById('trail-go').onclick = () => runTrail(document.getElementById('trail-input').value);
+document.getElementById('trail-input').addEventListener('keydown', e => { if (e.key === 'Enter') runTrail(e.target.value); });
+
+/* ═══ LOGS EXPLORER — real /api/logs ═══ */
+let LOGS = [];
+let sevFilter = 'all';
+const sevCol = { critical: '#eb5757', high: '#f2c94c', medium: '#5e6ad2', low: '#62666d' };
+document.querySelectorAll('.fchip').forEach(ch => ch.onclick = () => {
+  document.querySelectorAll('.fchip').forEach(c => c.classList.remove('on'));
+  ch.classList.add('on'); sevFilter = ch.dataset.sev; renderLogs();
+});
+
+/* ═══ ACTIVITY PULSE — real /api/trend/hourly (honest when the window is empty) ═══ */
+let PULSE = [];
+const pc = document.getElementById('pulse'), px2 = pc.getContext('2d');
+const tt = document.getElementById('pulse-tt'), ttT = document.getElementById('tt-t'), ttV = document.getElementById('tt-v');
+let hoverI = -1;
+function drawPulse() {
+  if (!PULSE.length) return;
+  const dpr = devicePixelRatio || 1, W = pc.clientWidth, Hh = pc.clientHeight;
+  pc.width = W * dpr; pc.height = Hh * dpr; px2.setTransform(dpr, 0, 0, dpr, 0, 0);
+  px2.clearRect(0, 0, W, Hh);
+  const vals = PULSE.map(p => p.v);
+  const max = Math.max(...vals) * 1.12 || 1, L = 40, R = 10, T = 12, B = 24, iw = W - L - R, ih = Hh - T - B;
+  px2.strokeStyle = 'rgba(255,255,255,.06)'; px2.lineWidth = 1; px2.font = '9.5px monospace'; px2.fillStyle = '#62666d';
+  for (let i = 0; i <= 3; i++) {
+    const y = T + ih * i / 3; px2.beginPath(); px2.moveTo(L, y); px2.lineTo(W - R, y); px2.stroke();
+    px2.fillText(Math.round(max * (1 - i / 3)), 4, y + 3);
+  }
+  const step = Math.max(1, Math.floor(PULSE.length / 6));
+  for (let i = 0; i < PULSE.length; i += step) {
+    const x = L + iw * i / Math.max(1, PULSE.length - 1);
+    px2.fillText(PULSE[i].label, x - 11, Hh - 7);
+  }
+  const xy = i => [L + iw * i / Math.max(1, PULSE.length - 1), T + ih - (PULSE[i].v / max) * ih];
+  px2.beginPath(); PULSE.forEach((p, i) => { const [x, y] = xy(i); i ? px2.lineTo(x, y) : px2.moveTo(x, y); });
+  px2.lineTo(xy(PULSE.length - 1)[0], T + ih); px2.lineTo(L, T + ih); px2.closePath();
+  const ag = px2.createLinearGradient(0, T, 0, T + ih);
+  ag.addColorStop(0, 'rgba(94,106,210,.25)'); ag.addColorStop(1, 'rgba(94,106,210,.01)');
+  px2.fillStyle = ag; px2.fill();
+  px2.beginPath(); PULSE.forEach((p, i) => { const [x, y] = xy(i); i ? px2.lineTo(x, y) : px2.moveTo(x, y); });
+  px2.strokeStyle = '#5e6ad2'; px2.lineWidth = 2; px2.lineJoin = 'round'; px2.stroke();
+  const [ex, ey] = xy(PULSE.length - 1);
+  px2.beginPath(); px2.arc(ex, ey, 4, 0, 7); px2.fillStyle = '#5e6ad2'; px2.fill();
+  if (hoverI >= 0 && hoverI < PULSE.length) {
+    const [hx, hy] = xy(hoverI);
+    px2.strokeStyle = 'rgba(232,240,251,.22)'; px2.setLineDash([3, 3]);
+    px2.beginPath(); px2.moveTo(hx, T); px2.lineTo(hx, T + ih); px2.stroke(); px2.setLineDash([]);
+    px2.beginPath(); px2.arc(hx, hy, 5, 0, 7); px2.fillStyle = '#e8f0fb'; px2.fill();
+    px2.beginPath(); px2.arc(hx, hy, 7, 0, 7); px2.strokeStyle = '#02040a'; px2.lineWidth = 2; px2.stroke();
+  }
+}
+addEventListener('resize', drawPulse);
+pc.parentElement.addEventListener('mousemove', e => {
+  if (!PULSE.length) return;
+  const r = pc.getBoundingClientRect(), L = 40, iw = r.width - L - 10;
+  hoverI = Math.max(0, Math.min(PULSE.length - 1, Math.round((e.clientX - r.left - L) / iw * (PULSE.length - 1))));
+  ttT.textContent = PULSE[hoverI].label;
+  ttV.textContent = num(PULSE[hoverI].v) + ' events';
+  tt.style.display = 'block';
+  const tw = tt.offsetWidth; let tx3 = e.clientX - r.left + 16;
+  if (tx3 + tw > r.width) tx3 = e.clientX - r.left - tw - 16;
+  tt.style.left = tx3 + 'px'; tt.style.top = Math.max(4, e.clientY - r.top - 48) + 'px';
+  drawPulse();
+});
+pc.parentElement.addEventListener('mouseleave', () => { hoverI = -1; tt.style.display = 'none'; drawPulse(); });
+
+/* ═══ NEURAL MESH BACKGROUND ═══ */
+const mesh = document.getElementById('mesh'), mx = mesh.getContext('2d');
+let P = [];
+function initMesh() {
+  mesh.width = innerWidth; mesh.height = innerHeight;
+  const n = Math.min(70, Math.floor(innerWidth / 24));
+  P = Array.from({ length: n }, () => ({
+    x: Math.random() * mesh.width, y: Math.random() * mesh.height,
+    vx: (Math.random() - .5) * .22, vy: (Math.random() - .5) * .22
+  }));
+}
+function drawMesh() {
+  mx.clearRect(0, 0, mesh.width, mesh.height);
+  P.forEach(p => {
+    p.x += p.vx; p.y += p.vy;
+    if (p.x < 0 || p.x > mesh.width) p.vx *= -1;
+    if (p.y < 0 || p.y > mesh.height) p.vy *= -1;
+  });
+  for (let i = 0; i < P.length; i++) for (let k = i + 1; k < P.length; k++) {
+    const dx = P[i].x - P[k].x, dy = P[i].y - P[k].y, d = dx * dx + dy * dy;
+    if (d < 19000) {
+      mx.beginPath(); mx.moveTo(P[i].x, P[i].y); mx.lineTo(P[k].x, P[k].y);
+      mx.strokeStyle = `rgba(94,106,210,${.05 * (1 - d / 19000)})`; mx.lineWidth = 1; mx.stroke();
+    }
+  }
+  P.forEach(p => { mx.beginPath(); mx.arc(p.x, p.y, 1.1, 0, 7); mx.fillStyle = 'rgba(94,106,210,.28)'; mx.fill(); });
+  if (!REDUCED) requestAnimationFrame(drawMesh);
+}
+initMesh(); drawMesh();
+addEventListener('resize', () => { initMesh(); if (REDUCED) drawMesh(); });
+
+/* ═══════════════════ BOOT — pull everything real ═══════════════════ */
+(async function boot() {
+  const ov = await j(`${API}/overview`) || {};
+  const stats = ov.stats || {}, hot = ov.hot_ips || [], mlh = ov.ml_health || {};
+  const sev = stats.severity_counts || {};
+  const threats = stats.threat_counts || {};
+  const totalLogs = +stats.total_logs || 0;
+  const uniqIps = +stats.unique_ips || 0;
+  const alerts = +stats.total_alerts || 0;
+  const hotCount = (stats.hot_ips || []).length;
+  const critCount = (stats.critical_ips || []).length;
+
+  /* ── Threat Index (real weighted severity mix) ── */
+  GV = threatIndexOf(sev);
+  const [bandTxt, bandCol] = bandOf(GV);
+  const bandEl = document.getElementById('core-band');
+  bandEl.textContent = bandTxt; bandEl.style.color = bandCol;
+
+  /* ── Verdict — written by the backend from real fused scores (never a
+        static string). Falls back to client-side composition if the endpoint
+        is unreachable. ── */
+  const topIp = hot.length ? hot[0].ip : null;
+  document.getElementById('verdict-eyebrow').textContent =
+    `Autonomous triage · ${mlh.model_ready ? 'model trained' : 'model not trained'} · ${num(mlh.scored_ips || 0)} entities scored`;
+  const vd = await j(`${API}/verdict`);
+  if (vd && vd.sentence) {
+    const sw = vd.start_with;
+    const frags = [{ t: 'AI', c: 'hl-ai' }, { t: ' verdict: ' }];
+    // Type the backend's sentence, but keep the lead entity as a live chip.
+    if (sw && vd.sentence.includes(sw.entity)) {
+      const [before, after] = vd.sentence.split(sw.entity);
+      frags.push({ t: before },
+                 { t: sw.entity, atomic: true },
+                 { t: after || '' });
+    } else {
+      frags.push({ t: vd.sentence });
+      if (sw) frags.push({ t: '\nStart with ' }, { t: sw.entity, atomic: true }, { t: '.' });
+    }
+    typeHeadline(frags);
+  } else typeHeadline(critCount > 0 ? [
+    { t: 'AI', c: 'hl-ai' }, { t: ' triaged ' }, { t: num(totalLogs) }, { t: ' events — ' },
+    { t: `${num(critCount)} source${critCount === 1 ? '' : 's'}`, c: 'hl-danger' }, { t: ' need you.' },
+    ...(topIp ? [{ t: '\nStart with ' }, { t: topIp, atomic: true }, { t: '.' }] : []),
+  ] : [
+    { t: 'AI', c: 'hl-ai' }, { t: ' triaged ' }, { t: num(totalLogs) }, { t: ' events — ' },
+    { t: 'nothing critical', c: 'hl-ai' }, { t: ' is waiting on you.' },
+  ]);
+  document.getElementById('verdict-sub').innerHTML =
+    `NeuronCore scored <b>${num(mlh.scored_ips || 0)}</b> entities across <b>${num(totalLogs)}</b> events.
+     <b>${num(hotCount)}</b> sources are running hot, <b style="color:var(--danger)">${num(critCount)}</b> are critical,
+     and behavioural baselines raised <b>${num(alerts)}</b> deviations.`;
+  document.getElementById('kpi-events').textContent = num(totalLogs);
+  document.getElementById('kpi-entities').textContent = num(uniqIps);
+  document.getElementById('kpi-dev').textContent = num(alerts);
+
+  /* ── Live wire (real hot IPs) ── */
+  const wire = hot.slice(0, 10).map(h => {
+    const [t, c] = topThreat(h.threat_types);
+    const s = worstSev(h.severities);
+    return { cls: s === 'critical' ? 'crit' : s === 'high' ? 'warn2' : '', e: h.ip, d: `${pretty(t)} ×${num(c)} · ${num(h.total)} events` };
+  });
+  /* ── SIEM kill chain from the real threat mix ── */
+  const g = k => +threats[k] || 0;
+  /* ── Severity mix (real) ── */
+  const SEVR = [['Critical', +sev.critical || 0, '#eb5757'], ['High', +sev.high || 0, '#f2c94c'],
+                ['Medium', +sev.medium || 0, '#5e6ad2'], ['Low', +sev.low || 0, '#62666d']];
+  const smax = Math.max(1, ...SEVR.map(s => s[1]));
+  const sevTotal = SEVR.reduce((a, s) => a + s[1], 0);
+  document.getElementById('sev-badge').textContent = num(sevTotal) + ' events';
+  /* Stacked proportion bar — the mix at a glance, each segment sized to its share
+     of all retained events. This is the "graph" (the thin per-row bars below are
+     the exact per-severity magnitudes). */
+  const stacked = SEVR.filter(([, v]) => v > 0).map(([nm, v, c]) => {
+    const pct = sevTotal ? (v / sevTotal * 100) : 0;
+    return `<span class="sev-seg" style="width:0%;background:${c}" data-w="${pct.toFixed(2)}"
+                  title="${nm}: ${num(v)} events (${pct.toFixed(1)}%)"></span>`;
+  }).join('');
+  document.getElementById('sev').innerHTML = `
+    <div class="sev-stack">${stacked}</div>
+    <div class="sev-rows-inner">` + SEVR.map(([nm, v, c]) => `
+      <div class="sev-row"><span class="sev-name" style="color:${c}">■ ${nm}</span>
+        <span class="sev-track"><span class="sev-fill" style="width:0%;background:${c}" data-w="${(v / smax * 100).toFixed(1)}"></span></span>
+        <span class="sev-val">${num(v)}<i class="sev-pct">${sevTotal ? Math.round(v / sevTotal * 100) : 0}%</i></span></div>`).join('')
+    + `</div>`;
+  setTimeout(() => {
+    document.querySelectorAll('.sev-fill').forEach(f => f.style.width = f.dataset.w + '%');
+    document.querySelectorAll('.sev-seg').forEach(f => f.style.width = f.dataset.w + '%');
+  }, 300);
+  const critPct = sevTotal ? Math.round((+sev.critical || 0) / sevTotal * 100) : 0;
+  document.getElementById('sev-note').innerHTML =
+    `<b>${critPct}%</b> of retained events are critical. Threat Index <b>${GV}</b> is the severity-weighted
+     mix of all ${num(sevTotal)} events — it rises only when traffic is genuinely dangerous, not merely busy.`;
+
+  /* ── Everything else, in parallel ── */
+  const [anomR, uebaR, teleR, incR, recsR, lqR, runsR, erR, trendR, logsR, atoR, travelR] = await Promise.all([
+    j(`${API}/ml/anomalies`), j(`${API}/ueba/risk`), j(`${API}/telemetry/summary`),
+    j(`${API}/incidents?limit=6`), j(`${API}/playbooks/recommendations`), j(`${API}/playbooks/label-queue`),
+    j(`${API}/playbooks/runs?limit=8`), j(`${API}/entity-risk?limit=6`), j(`${API}/trend/hourly?hours=24`),
+    j(`${API}/logs/latest?limit=60`), j(`${API}/ueba/account-takeover`), j(`${API}/ueba/impossible-travel`),
+  ]);
+
+  /* ── ML · anomalies (real) ── */
+  const anomalies = (anomR && anomR.anomalies) || [];
+  document.getElementById('kpi-anom').textContent = num(anomalies.length);
+  const avg = k => anomalies.length ? Math.round(anomalies.reduce((s, a) => s + (a.components?.[k]?.points || 0), 0) / anomalies.length) : 0;
+  const aAn = avg('anomaly'), aDev = avg('deviation'), aInt = avg('intel');
+
+  /* ── 02 · SIGNAL FUSION ─────────────────────────────────────────────────
+     The deck claims "fusion of 3 engines", but it used to prove that by showing
+     the three engines as three separate sections — the opposite of fusion.
+     risk_score IS the sum of the engines' points (45.227.9.9: 30 anomaly + 25
+     intel = 55), so this shows the arithmetic rather than asserting a verdict,
+     and groups entities by SIGNATURE — which engines agree — because that is
+     what separates known-bad infrastructure from a local behaviour change.
+     Caps come from the API's own maxima, not invented numbers. ── */
+  const ENGINE = {
+    anomaly:   { label: 'ML',       cap: 55, col: '#a78bfa', why: 'Isolation-forest outlier vs the population' },
+    deviation: { label: 'Baseline', cap: 40, col: '#5e6ad2', why: "Drifted from this entity's own 30-day baseline" },
+    intel:     { label: 'Intel',    cap: 25, col: '#4cb782', why: 'Matches known-bad infrastructure' },
+  };
+  const EK = Object.keys(ENGINE);
+  const ARCHETYPE = {
+    'anomaly+deviation+intel': ['All three engines agree', 'Anomalous, off its own baseline, AND on a known-bad range. The strongest signal the platform can produce.'],
+    'anomaly+intel':           ['Known-bad infrastructure', 'Behaving anomalously from a range already known to be hostile — the actor is not new, the traffic is.'],
+    'anomaly+deviation':       ['Behaviour change', 'No intel on it at all, but it broke its own pattern and the model agrees. This is what a rules engine misses.'],
+    'deviation+intel':         ['Known-bad and drifting', 'On a hostile range and moving away from its baseline, though the model has not flagged it.'],
+    'anomaly':                 ['Anomalous only', 'The model alone. No baseline history and no intel to corroborate — treat as a lead, not a verdict.'],
+    'deviation':               ['Baseline drift only', 'Off its own pattern with nothing else agreeing.'],
+    'intel':                   ['Intel hit only', 'Known-bad range, but behaving normally so far.'],
+  };
+  /* The score is NOT simply the sum. ml-engine/main.py fuse_risk():
+       risk = min(100, anomaly + deviation + intel)
+       if is_anomaly: risk = max(risk, 50)     ← a floor, not a sum
+     19 of 23 entities currently sit ON that floor (parts of 28/30/38 all
+     surfacing as 50), so a board claiming "the parts add up" would be lying
+     about most rows. Surface the floor instead — it's the most interesting
+     thing here: the model overruling its own arithmetic. */
+  const fused = anomalies.map(a => {
+    const c = a.components || {};
+    const sig = EK.filter(k => (c[k]?.points || 0) > 0);
+    const parts = EK.reduce((t, k) => t + (c[k]?.points || 0), 0);
+    const score = +a.risk_score || 0;
+    return { ip: a.ip, score, parts, c, sig, key: sig.join('+'),
+             floored: score > parts, lift: score - parts };
+  }).filter(f => f.sig.length)
+    .sort((x, y) => y.sig.length - x.sig.length || y.score - x.score);
+
+  const groups = {};
+  fused.forEach(f => (groups[f.key] = groups[f.key] || []).push(f));
+  const order = Object.keys(groups).sort((a, b) =>
+    groups[b][0].sig.length - groups[a][0].sig.length || groups[b].length - groups[a].length);
+
+  const maxAgree = fused.length ? fused[0].sig.length : 0;
+  document.getElementById('fuse-badge').textContent = fused.length
+    ? `${num(fused.length)} flagged · best agreement ${maxAgree} of 3 engines`
+    : 'nothing flagged';
+
+  document.getElementById('fuse-board').innerHTML = fused.length ? order.map(key => {
+    const rows = groups[key];
+    const [name, blurb] = ARCHETYPE[key] || [key, ''];
+    const agree = rows[0].sig.length;
+    return `<div class="fz-group">
+      <div class="fz-gh">
+        <span class="fz-agree ${agree >= 3 ? 'hi' : agree === 2 ? 'mid' : ''}" title="${agree} of the 3 detection engines (ML anomaly, baseline, intel) independently flagged these — agreement is evidence, not a list position">${agree}/3 engines</span>
+        <span class="fz-gn">${esc(name)}</span>
+        <span class="fz-gc">${num(rows.length)} ${rows.length === 1 ? 'entity' : 'entities'}</span>
+      </div>
+      <div class="fz-gb">${esc(blurb)}</div>
+      ${rows.slice(0, 5).map(f => `
+        <div class="fz-row" tabindex="0" data-e="${esc(f.ip)}">
+          <span class="fz-ip" title="Trace ${esc(f.ip)} in IP Trail">${esc(f.ip)}<i class="fz-arrow">→</i></span>
+          <span class="fz-bar">${EK.map(k => {
+            const pts = f.c[k]?.points || 0;
+            return pts ? `<span class="fz-seg" style="flex:${pts};background:${ENGINE[k].col}"
+                                title="${ENGINE[k].label}: +${pts} pts — ${esc(ENGINE[k].why)}"></span>` : '';
+          }).join('')}${f.floored
+            ? `<span class="fz-seg fz-floor" style="flex:${f.lift}"
+                     title="Anomaly floor: the parts total ${f.parts}, but the model flagged this entity, so the score is held at a minimum of 50 (+${f.lift})"></span>`
+            : ''}</span>
+          <span class="fz-sum">${EK.filter(k => f.c[k]?.points).map(k =>
+            `<span class="fz-chip" style="color:${ENGINE[k].col}">${ENGINE[k].label} +${f.c[k].points}</span>`).join('')}${
+            f.floored ? `<span class="fz-chip fz-fchip" title="parts total ${f.parts}; held at the 50 floor">floor +${f.lift}</span>` : ''}</span>
+          <span class="fz-score${f.floored ? ' fl' : ''}">${f.score}</span>
+        </div>`).join('')}
+      ${rows.length > 5 ? `<div class="fz-more">+${num(rows.length - 5)} more with the same signature</div>` : ''}
+    </div>`;
+  }).join('') : '<div class="empty-note">No entity is carrying a risk signal right now — every score is zero.</div>';
+
+  document.getElementById('fuse-board').addEventListener('click', e => {
+    const r = e.target.closest('.fz-row');
+    if (r && r.dataset.e) { runTrail(r.dataset.e); document.querySelector('#s-trail').scrollIntoView({ behavior: 'smooth' }); }
+  });
+
+  const nFloor = fused.filter(f => f.floored).length;
+  const nAgree = fused.filter(f => f.sig.length >= 2).length;
+  const f0 = fused[0];
+  document.getElementById('fuse-note').innerHTML = fused.length
+    ? `Each bar is the score, drawn to scale — ${esc(f0.ip)} scores <b>${f0.score}</b> from
+       ${EK.filter(k => f0.c[k]?.points).map(k => `${ENGINE[k].label} <b>+${f0.c[k].points}</b>`).join(' and ')}${
+         f0.floored ? `, lifted to the <b>50</b> anomaly floor` : ''}.
+       The engines run independently, so agreement is evidence: <b>${num(nAgree)}</b> of ${num(fused.length)}
+       flagged entities have two or more agreeing${nAgree ? '' : ' — none yet'}.
+       ${nFloor ? `<b>${num(nFloor)}</b> sit on the <b>anomaly floor</b>: their parts total less than 50, but the model
+       flagged them, so the score is held at 50 rather than letting a thin signal look safe. The grey tail on those
+       bars is that lift — it is the model overruling its own arithmetic, and it is worth knowing which rows it applies to.` : ''}
+       Click any row to trace the entity.`
+    : `Nothing is flagged. Average points per engine across all scored entities:
+       ML <b>${aAn}</b>, Baseline <b>${aDev}</b>, Intel <b>${aInt}</b>.`;
+  /* ── UEBA (real; honest when identities aren't in the logs) ── */
+  const users = (uebaR && uebaR.users) || [];
+  const pop = (uebaR && uebaR.population) || 0;  const atoN = ((atoR && atoR.findings) || (atoR && atoR.users) || []).length;
+  const travN = ((travelR && travelR.findings) || (travelR && travelR.users) || []).length;
+  const findings = [
+    ['Account takeover', atoN, 'MFA fatigue / new device / privilege change'],
+    ['Impossible travel', travN, 'same identity, two countries, no time to fly'],
+  ].filter(f => f[1] > 0);
+  /* ── Incidents (real correlated campaigns) ── */
+  const incidents = (incR && incR.incidents) || [];
+  /* ── SOC priority queue (real entity risk) ── */
+  const ents = (erR && erR.entities) || [];
+  /* join each queue entity with its fusion arithmetic and live behaviour so
+     the row answers "what is it doing and why this score" at a glance */
+  const _fmap = {}; fused.forEach(f => _fmap[f.ip] = f);
+  const _hmap = {}; hot.forEach(h => _hmap[h.ip] = h);
+  const _doing = en => {
+    const h = _hmap[en.entity], tt = h && h.threat_types;
+    const top = tt && Object.keys(tt).length ? pretty(Object.keys(tt).reduce((a, b) => tt[a] >= tt[b] ? a : b)) : null;
+    const dst = num(en.uniq_dsts) + (en.uniq_dsts === 1 ? ' destination' : ' destinations');
+    return top
+      ? `Mostly ${top} — ${num(en.events)} events at ${dst}, ${num(en.critical)} critical.`
+      : `${num(en.events)} events at ${dst}, ${num(en.critical)} critical.`;
+  };
+  const _minibar = en => {
+    const f = _fmap[en.entity];
+    if (!f) return '';
+    return `<span class="q-fuse" title="Score arithmetic — click the row for the full Fusion Board">${
+      EK.map(k => { const p = f.c[k]?.points || 0;
+        return p ? `<span style="flex:${p};background:${ENGINE[k].col}" title="${ENGINE[k].label} +${p}"></span>` : '';
+      }).join('')}${f.floored ? `<span style="flex:${f.lift};background:var(--faint)" title="anomaly floor +${f.lift}"></span>` : ''}</span>`;
+  };
+  document.getElementById('queue').innerHTML = ents.length ? ents.map(en => {
+    const b = String(en.band || 'medium').toLowerCase();
+    return `<div class="q-item" tabindex="0" data-e="${esc(en.entity)}">
+      <div class="q-risk ${b === 'critical' ? 'crit' : 'high'}">${esc(en.score)}</div>
+      <div class="q-main">
+        <div class="q-ip">${esc(en.entity)}<span class="pill ${b === 'critical' ? 'crit' : 'high'}">${esc(b)}</span>${_minibar(en)}</div>
+        <div class="q-why">${_doing(en)}</div>
+      </div>
+      <div class="q-actions">
+        <button class="qa go" data-act="trail" data-e="${esc(en.entity)}" title="Open this entity's full trail">INVESTIGATE</button>
+        <button class="qa" data-act="pb" data-e="${esc(en.entity)}" title="Suggest a response playbook">PLAYBOOK</button>
+      </div>
+    </div>`;
+  }).join('') : '<div class="empty-note">Queue is empty — no entity is carrying risk right now.</div>';
+  document.getElementById('queue').addEventListener('click', async e => {
+    const b = e.target.closest('.qa');
+    if (b) {
+      e.stopPropagation();
+      const ent = b.dataset.e;
+      if (b.dataset.act === 'fp') {
+        // Dismissal must carry a reason — that reason is training data.
+        const why = prompt(`Dismiss ${ent} — why? (e.g. "known scanner", "pentest box")`);
+        if (why === null) return;
+        const r = await fetch(`${API}/feedback`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ entity: ent, disposition: 'false_positive', signature: 'overview', note: why || 'dismissed from Overview' }),
+        }).then(x => x.ok).catch(() => false);
+        toast(r ? `${ent} dismissed — the recommender will learn from it` : `Could not save feedback for ${ent}`, r ? 'ai' : 'warn', r ? '◈' : '⚠');
+      } else if (b.dataset.act === 'pb') {
+        // suggest() keys off an incident — find the one this entity belongs to
+        const inc = incidents.find(x => ((x.entities || {}).ips || []).includes(ent));
+        const s = inc ? await j(`${API}/playbooks/suggest?incident_id=${encodeURIComponent(inc.id)}`) : null;
+        const name = s && ((s.suggestions || [])[0]?.name);
+        toast(name ? `Suggested playbook for ${ent}: “${name}” — run it in Responder`
+                   : `${ent} is not in a correlated incident yet — open Responder to pick a playbook manually`, 'ai', '◈');
+      } else if (b.dataset.act === 'trail') {
+        runTrail(ent); document.querySelector('#s-trail').scrollIntoView({ behavior: 'smooth' });
+      }
+      return;
+    }
+    const it = e.target.closest('.q-item');
+    if (it && it.dataset.e) { runTrail(it.dataset.e); document.querySelector('#s-trail').scrollIntoView({ behavior: 'smooth' }); }
+  });
+
+  /* ── Responder ledger (real playbook runs) ── */
+  const runs = (runsR && runsR.runs) || [];
+  /* ── Playbook Foundry (real recommender) ── */
+  const recs = (recsR && recsR.recommendations) || [];
+  const recStatus = (recsR && recsR.status) || 'collecting';
+  const queue = (lqR && lqR.queue) || [];
+
+  /* ── Telemetry intel · logs · knownBad ──
+     These sections' own cards are gone (each has a full page in the sidebar),
+     but the data stays: the pipeline drill-ins in 03 read every one of them. ── */
+  const tele = teleR || {};
+  LOGS = (logsR && logsR.logs) || [];
+  const knownBad = anomalies.filter(a => a.components?.intel?.known_bad_subnet).length;
+
+  /* ── Activity pulse · adaptive window ────────────────────────────────────
+     This asked for a fixed hours=24. The newest event in this store is from
+     2026-07-02 — 15 days ago — so that window returns zero buckets and the
+     chart was permanently blank: a dashboard holding 10,394 events drawing
+     nothing. A fixed window only works if the data is live; it isn't.
+     Widen until the data appears, then SAY which window we landed on rather
+     than quietly implying "now". ── */
+  const WINDOWS = [[24, 'last 24 hours'], [168, 'last 7 days'], [720, 'last 30 days'], [8760, 'last year']];
+  let trend = (trendR && trendR.trend) || [];
+  let winLabel = WINDOWS[0][1];
+  if (!trend.length) {
+    for (const [h, lbl] of WINDOWS.slice(1)) {
+      const r = await j(`${API}/trend/hourly?hours=${h}`);
+      if (r && r.trend && r.trend.length) { trend = r.trend; winLabel = lbl; break; }
+    }
+  }
+  if (trend.length) {
+    /* Buckets are hourly, but a widened window can span weeks — labelling those
+       "08:00" would render 17 Jun and 2 Jul as the same tick. Show the date once
+       the span outgrows a single day. */
+    const span = new Date(trend[trend.length - 1].hour) - new Date(trend[0].hour);
+    const multiDay = span > 864e5;
+    PULSE = trend.map(p => ({
+      label: multiDay ? String(p.hour || '').slice(5, 10).replace('-', '/') : String(p.hour || '').slice(11, 16),
+      v: +p.total || 0,
+    }));
+    drawPulse();
+    const peak = trend.reduce((a, b) => (+b.total || 0) > (+a.total || 0) ? b : a, trend[0]);
+    const newestTs = LOGS.length ? new Date(LOGS[0]['@timestamp']) : null;
+    const staleDays = newestTs ? Math.floor((Date.now() - newestTs) / 864e5) : null;
+    document.getElementById('pulse-badge').textContent =
+      `${winLabel} · ${num(trend.length)} active hour${trend.length === 1 ? '' : 's'}`;
+    /* Staleness is the headline, not a footnote: if ingest stopped 15 days ago
+       every "live" number on this page is history, and nothing else says so. */
+    if (staleDays !== null && staleDays >= 1) {
+      const w = document.querySelector('.pulse-wrap');
+      const b = document.createElement('div');
+      b.className = 'pulse-stale' + (staleDays >= 7 ? ' hot' : '');
+      b.innerHTML = `<b>Ingest is ${num(staleDays)} day${staleDays === 1 ? '' : 's'} behind.</b>
+        Newest event ${esc(String(LOGS[0]['@timestamp']).slice(0, 16).replace('T', ' '))} —
+        this pulse is the ${esc(winLabel)}, not right now. Peak ${num(peak.total)} events/hour.`;
+      w.parentElement.insertBefore(b, w);
+    }
+  } else {
+    document.getElementById('pulse-badge').textContent = 'no events on record';
+    document.querySelector('.pulse-wrap').innerHTML =
+      `<div class="empty-note" style="padding:26px 4px">The store holds no events in any window back to a year.
+       This chart fills in as telemetry arrives — it is deliberately blank rather than showing an invented line.</div>`;
+  }
+
+  /* ── Real drill-in data. Every list below is the service's ACTUAL current
+     contents — no samples, no placeholders. An empty list says so out loud. ── */
+  const arch = rows => `<div class="mod-arch">${rows.map(([k, v]) =>
+    `<div class="ar"><span class="ak">${k}</span><span class="av">${v}</span></div>`).join('')}</div>`;
+  const tiles = ts => `<div class="mod-stats">${ts.map(([n, l]) =>
+    `<div class="ms"><div class="n">${n}</div><div class="l">${l}</div></div>`).join('')}</div>`;
+  const list = (h, rows, empty) => `<div class="mod-list">
+    <div class="lh"><span>${h[0]}</span><span>${h[1]}</span></div>
+    ${rows.length ? rows.map(r => `<div class="mrow"><span class="e">${esc(String(r.e))}</span>
+      <span class="v ${r.c || ''}">${esc(String(r.v))}</span></div>`).join('')
+      : `<div class="mod-empty">${empty}</div>`}</div>`;
+
+  const topSources = hot.slice(0, 6).map(h => ({
+    e: h.ip, v: `${num(h.total || 0)} events`,
+    c: (h.severities?.critical || 0) > 0 ? 'd' : '',
+  }));
+  const hostAgg = {};
+  hot.forEach(h => (h.hosts || []).forEach(x => { hostAgg[x.name] = (hostAgg[x.name] || 0) + (+x.events || 0); }));
+  const topHosts = Object.entries(hostAgg).sort((a, b) => b[1] - a[1]).slice(0, 6)
+    .map(([n, v]) => ({ e: n, v: `${num(v)} events` }));
+  const topScored = anomalies.slice(0, 6).map(a => ({
+    e: a.ip, v: `risk ${a.risk_score ?? 0}/100`,
+    c: a.risk_score >= 70 ? 'd' : a.risk_score >= 45 ? 'w' : '',
+  }));
+  const topThreats = Object.entries(threats).sort((a, b) => b[1] - a[1]).slice(0, 6)
+    .map(([t, c]) => ({ e: String(t).replace(/_/g, ' '), v: num(c) }));
+  const intelRows = anomalies.filter(a => a.components?.intel?.known_bad_subnet).slice(0, 6)
+    .map(a => ({ e: a.ip, v: `+${a.components.intel.points} pts`, c: 'd' }));
+  const runRows = runs.slice(0, 6).map(r => ({
+    e: `${r.entity || r.incident_id || r.run_id}`, v: r.status || '—',
+    c: r.status === 'done' ? '' : 'w',
+  }));
+  const incRows = incidents.slice(0, 6).map(i => ({
+    e: i.subnet || (i.entities?.ips || [])[0] || i.id || 'incident',
+    v: `${i.ip_count || (i.entities?.ips || []).length || 0} entities`,
+  }));
+  const sevRows = SEVR.map(([k, v]) => ({ e: k, v: num(v), c: k === 'Critical' ? 'd' : k === 'High' ? 'w' : '' }));
+
+  SERVICES = {
+    wire: {
+      t: 'SENSENET · SENSOR FABRIC', go: ['#s-fusion', 'See the trends'], stage: 'Stage 1 of 8',
+      b: `The sensors on your endpoints, servers and firewalls. Nothing reaches the platform that a sensor did not see first.`
+        + arch([['Receives', 'endpoint, server, firewall and identity activity'], ['Hands off', 'raw events → StreamCore'], ['Watch for', 'a sensor that goes quiet — that is a blind spot, not silence']])
+        + tiles([[num(tele.agents_total || 0), 'sensors'], [num(tele.silent_agents || 0), 'gone silent'], [num(tele.blind_agents || 0), 'blind spots']])
+        + list(['Busiest reporting hosts', 'volume'], topHosts, 'No host attribution on the current events.'),
+    },
+    stream: {
+      t: 'STREAMCORE · INGEST', go: ['#s-trail', 'Trace an entity'], stage: 'Stage 2 of 8',
+      b: `Takes whatever shape a sensor emits and normalises it into one schema — 39 fields, every event, so everything downstream can rely on them.`
+        + arch([['Receives', 'raw events from SenseNet'], ['Hands off', 'normalised events → HyperVault'], ['Guarantee', 'no sampling, no dropping — what is sent is what is stored']])
+        + tiles([[num(totalLogs), 'events ingested'], [num(uniqIps), 'distinct sources'], ['39', 'fields mapped']])
+        + list(['Loudest sources ingested', 'events'], topSources, 'Nothing ingested yet.'),
+    },
+    vault: {
+      t: 'HYPERVAULT · EVENT STORE', go: ['#s-trail', 'Trace an entity'], stage: 'Stage 3 of 8',
+      b: `Where every event lives. Full history, no rollups, sub-second queries — this is the single source of truth every other service reads from.`
+        + arch([['Receives', 'normalised events from StreamCore'], ['Serves', 'NeuronCore, Cortex API, VisionDeck and the AI console'], ['Holds', `${num(totalLogs)} events across ${num(uniqIps)} sources`]])
+        + tiles([[num(totalLogs), 'events held'], [num(uniqIps), 'entities'], [num(alerts), 'deviations raised']])
+        + list(['What is in the vault', 'events'], sevRows, 'The vault is empty.'),
+    },
+    ml: {
+      t: 'NEURONCORE · RISK ENGINE', go: ['#s-fusion', 'See the signal mix'], stage: 'Stage 4 of 8',
+      b: `Reads the vault and scores every entity. Isolation Forest over 19 behavioural features, fused with its baseline deviation and threat intel into one 0–100 risk score.`
+        + arch([['Reads', `${num(totalLogs)} events from HyperVault`], ['Emits', 'a risk score per entity → Cortex API'], ['Retrains', 'every 24h, or after 10k new events']])
+        + tiles([[num(mlh.scored_ips || 0), 'entities scored'], [num(anomalies.length), 'flagged anomalous'], [mlh.model_ready ? 'TRAINED' : 'COLD', 'model']])
+        + list(['Highest-risk entities scored', 'risk'], topScored, 'The model has flagged nothing — every entity is inside its baseline.'),
+    },
+    intel: {
+      t: 'INTELMESH · THREAT FEEDS', go: ['#s-fusion', 'See the signal mix'], stage: 'Stage 5 of 8',
+      b: `Checks every hot entity against known-bad infrastructure, and watches for the quiet signals a rules engine never reports — beaconing, novelty, silence.`
+        + arch([['Receives', 'hot entities from NeuronCore'], ['Adds', 'up to 25 risk points for a known-bad match'], ['Also watches', 'beacons, week-old novelties, silent sensors']])
+        + tiles([[num(knownBad), 'known-bad hits'], [num(tele.beacons || 0), 'beacons'], [num(tele.novelties_7d || 0), 'novel 7d']])
+        + list(['Entities matching known-bad ranges', 'intel'], intelRows, 'No entity currently matches a known-bad range.'),
+    },
+    be: {
+      t: 'CORTEX API · CORRELATION', go: ['#s-verdict', 'Open the queue'], stage: 'Stage 6 of 8',
+      b: `The brain. Collapses related alerts into single incidents, runs UEBA against each identity's own baseline, and decides what actually deserves an analyst.`
+        + arch([['Receives', 'scores from NeuronCore, intel from IntelMesh'], ['Emits', 'incidents and verdicts → Responder and the UI'], ['Also runs', 'UEBA, kill-chain mapping, baselines']])
+        + tiles([[num(incidents.length), 'incidents'], [num(hotCount), 'hot sources'], [num(critCount), 'critical']])
+        + list(['Correlated incidents', 'scope'], incRows, 'Nothing has correlated into an incident.'),
+    },
+    resp: {
+      t: 'RESPONDER · RESPONSE', go: ['#s-verdict', 'Open the queue'], stage: 'Stage 7 of 8',
+      b: `Executes the playbook. Read-only steps run on their own; anything that changes your estate (block an IP, disable a user) stops and waits for a human APPROVE. Every action is receipted.`
+        + arch([['Receives', 'incidents and verdicts from Cortex API'], ['Acts on', 'firewall, identity, case and notification systems'], ['Never', 'mutates anything without an approval']])
+        + tiles([[num(runs.length), 'runs'], [num(recs.length), 'drafted plays'], [num((recsR && recsR.labels) || 0), 'analyst labels']])
+        + list(['Recent playbook runs', 'status'], runRows, 'No playbook has run yet.'),
+    },
+    edge: {
+      t: 'EDGEGATE · GATEWAY', go: ['#s-fusion', 'See the trends'], stage: 'Stage 8 of 8',
+      b: `The only door into the platform. TLS terminates here, every request is routed and rate-limited here, and this is what your analysts' browsers actually talk to.`
+        + arch([['Fronts', 'Cortex API, the vault and this console'], ['Serves', 'every request you are making right now'], ['Status', 'online']])
+        + tiles([['ONLINE', 'status'], [num(sevTotal), 'events served'], [GV, 'threat index']])
+        + list(['Threat mix reaching the analyst', 'events'], topThreats, 'No threats classified yet.'),
+    },
+    vision: {
+      t: 'VISIONDECK · BOARDS', go: ['#s-fusion', 'See the trends'], stage: 'Side channel',
+      b: `Long-range trend and compliance boards, read straight off the same vault — nothing is copied, duplicated or re-indexed to produce them.`
+        + arch([['Reads', 'HyperVault directly'], ['Produces', 'trend, volume and compliance boards'], ['Duplicates', 'nothing — one copy of the truth']])
+        + tiles([[num(sevTotal), 'events charted'], [`${critPct}%`, 'critical share'], [num(alerts), 'deviations']])
+        + list(['Threat mix over the full history', 'events'], topThreats, 'No threats classified yet.'),
+    },
+  };
+
+  /* The same eight services, laid out in the order an event travels through them.
+     Clicking a stage opens exactly the same real drill-in as clicking its node. */
+  const PIPE = [
+    ['wire', 'SENSENET', 'Sensors watch endpoints, servers and firewalls', `${num(tele.agents_total || 0)} sensor${(tele.agents_total || 0) === 1 ? '' : 's'}`, '#8ea3c0'],
+    ['stream', 'STREAMCORE', 'Normalises every event into one 39-field schema', `${num(totalLogs)} ingested`, '#5e6ad2'],
+    ['vault', 'HYPERVAULT', 'Stores the full event history, queryable instantly', `${num(totalLogs)} held`, '#5e6ad2'],
+    ['ml', 'NEURONCORE', 'Scores every entity 0–100 for risk', `${num(mlh.scored_ips || 0)} scored`, '#a78bfa'],
+    ['intel', 'INTELMESH', 'Checks entities against known-bad infrastructure', `${num(knownBad)} hits`, '#4cb782'],
+    ['be', 'CORTEX API', 'Correlates alerts into incidents worth reading', `${num(incidents.length)} incidents`, '#5e6ad2'],
+    ['resp', 'RESPONDER', 'Runs the playbook — mutations need approval', `${num(runs.length)} runs`, '#4cb782'],
+    ['edge', 'EDGEGATE', 'The gateway your analysts connect through', 'online', '#e8f0fb'],
+  ];
+  /* Rendered once, held in memory, and shown only when the architecture symbol is
+     clicked — the deck itself no longer carries the strip. Re-rendered on every
+     sync, so the counts in it are as live as everything else. */
+  PIPE_HTML = `<div class="pipe">` + PIPE.map(([id, t, d, v, c], i) => `
+    <button class="pstage" data-svc="${id}" style="--pc:${c}">
+      <div class="pn">STAGE ${String(i + 1).padStart(2, '0')}</div>
+      <div class="pt">${t}</div>
+      <div class="pd">${d}</div>
+      <div class="pv">${v}</div>
+    </button>`).join('') + `</div>`;
+
+  /* the inline futuristic pipeline on the deck — same live data, always visible */
+  renderArchFlow(PIPE);
+
+  /* ── AI console — real NL → SQL → answer.
+     Groq writes the query (POST /api/nl/query), the vault runs it, we show both
+     the generated SQL and the real rows it returned. ── */
+  const cin = document.getElementById('console-input');
+  const runBtn = document.getElementById('console-run');
+  const box = document.getElementById('console');
+
+  if (!stats.ai_configured) {
+    box.innerHTML = `<div class="a">The AI analyst is <b style="color:var(--warn)">not configured</b> —
+      no API key is set, so natural-language queries can't be generated.
+      Add <b>GROQ_API_KEY</b> to <b>.env</b> and restart to enable this console.</div>`;
+    cin.disabled = true; runBtn.disabled = true;
+    cin.placeholder = 'AI key not configured';
+  }
+
+  async function askConsole() {
+    const q = cin.value.trim();
+    if (!q || runBtn.disabled) return;
+    box.insertAdjacentHTML('beforeend',
+      `<div style="margin-top:10px"><span class="u">❯ analyst:</span> ${esc(q)}</div>`);
+    cin.value = '';
+    runBtn.disabled = true;
+    box.insertAdjacentHTML('beforeend', `<div class="a" id="con-wait">writing the query…<span class="cur"></span></div>`);
+    box.scrollTop = box.scrollHeight;
+
+    let r = null, err = null;
+    try {
+      const res = await fetch(`${API}/nl/query`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ question: q }),
+      });
+      r = await res.json();
+      if (!res.ok) err = r.detail || `request failed (${res.status})`;
+    } catch (e) { err = 'could not reach the query engine'; }
+
+    document.getElementById('con-wait')?.remove();
+    runBtn.disabled = false;
+
+    if (err) {
+      box.insertAdjacentHTML('beforeend',
+        `<div class="a"><span class="res" style="color:var(--danger)">→ ${esc(err)}</span></div>`);
+      box.scrollTop = box.scrollHeight;
+      return;
+    }
+
+    const cols = r.columns || [], rows = r.rows || [];
+    let html = '';
+    if (r.sql) html += `<div class="sql">${esc(r.sql)}</div>`;
+    html += `<div class="a"><span class="res">→ ${num(r.row_count || 0)} row${(r.row_count === 1) ? '' : 's'} · ${num(r.elapsed_ms || 0)}ms</span></div>`;
+    if (rows.length) {
+      const show = rows.slice(0, 8);
+      html += `<div class="logtbl-wrap" style="margin-top:8px"><table class="logtbl">
+        <thead><tr>${cols.map(c => `<th>${esc(c)}</th>`).join('')}</tr></thead>
+        <tbody>${show.map(rw => `<tr>${rw.map(v => `<td>${esc(v)}</td>`).join('')}</tr>`).join('')}</tbody>
+      </table></div>`;
+      if (rows.length > show.length)
+        html += `<div class="a" style="margin-top:6px">…and ${num(rows.length - show.length)} more rows.</div>`;
+    } else {
+      html += `<div class="a">No rows matched — nothing in the vault answers that.</div>`;
+    }
+    box.insertAdjacentHTML('beforeend', html);
+    box.scrollTop = box.scrollHeight;
+  }
+  runBtn.onclick = askConsole;
+  cin.addEventListener('keydown', e => { if (e.key === 'Enter') askConsole(); });
+
+  /* seed the trail with the hottest real entity — but keep the section collapsed
+     (reveal=false) so only Core + Grid are open on load */
+  if (topIp) runTrail(topIp, false);
+})();
+</script>

@@ -39,6 +39,10 @@ try:
     import telemetry_intel as tint     # value from the 95% of logs that never alert
 except Exception:
     tint = None  # type: ignore
+try:
+    import intel_hub                   # pluggable external threat-intel connectors
+except Exception:
+    intel_hub = None  # type: ignore
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
@@ -69,7 +73,23 @@ def _save_topology(data: dict):
 _topology: dict[str, dict] = _load_topology()
 
 app = FastAPI(title="CyberSentinel API", version="2.2.0")
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+
+# ── Production hardening (additive; env-tunable; safe defaults) ───────────────
+try:
+    import hardening
+    import migrate as _migrate
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=hardening.cors_origins_list(hardening.settings.cors_origins),
+        allow_methods=["*"], allow_headers=["*"],
+    )
+    hardening.install(app, osc=osc, migrations_current=lambda: _migrate.current(osc))
+    _HARDENED = True
+except Exception as _he:
+    # Never let hardening wiring take the app down — fall back to open CORS.
+    logging.getLogger("cybersentinel.backend").error("hardening install failed: %s", _he)
+    app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+    _HARDENED = False
 
 # Explicit thread pool - default is only cpu_count+4 (6-8 threads on most servers).
 # With 2 uvicorn workers and multiple concurrent users, the default exhausts fast.
@@ -98,6 +118,15 @@ async def _start_background_refresh():
     # isn't hammered. Defaults are gentle; lower them on a lightly-loaded box.
     _fast_every = int(os.getenv("WARM_FAST_SECONDS", "60"))
     _inc_every = int(os.getenv("WARM_INCIDENTS_SECONDS", "180"))
+
+    # Run pending additive migrations (idempotent; refuses destructive DDL).
+    if osc and getattr(osc, "CLICKHOUSE_ENABLED", False) and \
+            os.getenv("RUN_MIGRATIONS_ON_START", "true").lower() in ("true", "1", "yes"):
+        try:
+            import migrate as _mig
+            await _to_thread(_mig.run)
+        except Exception as e:
+            logger.error(f"startup migrations failed (continuing): {e}")
 
     # Create SOAR/case/tag tables on existing volumes (init SQL only runs on a
     # fresh volume). Idempotent — safe on every startup.
@@ -830,7 +859,7 @@ async def entity_trail(field: str = "ip", value: str = "", limit: int = 200):
     if not summary.get("found"):
         return {"found": False, "field": field, "value": value}
     summary.update({"found": True, "field": field, "value": value,
-                    "events": events, "source": "clickhouse"})
+                    "events": events, "source": "event-store"})
     return summary
 
 
@@ -855,7 +884,7 @@ async def trail_summary(ip: str):
             "threat_types": threat_types,
             "severities":   severities,
             "is_hot":       bool(severities.get("critical") or severities.get("high")),
-            "source":       "clickhouse",
+            "source":       "event-store",
         }
 
     # Fallback: use in-process cache
@@ -885,7 +914,7 @@ async def trail_summary(ip: str):
 
 async def rebuild_runtime_indexes() -> dict:
     """No-op since the move to ClickHouse: hot/critical are computed on read from ClickHouse (FINAL)."""
-    return {"hot_ips": 0, "critical_ips": 0, "auto_blocked": 0, "source": "clickhouse"}
+    return {"hot_ips": 0, "critical_ips": 0, "auto_blocked": 0, "source": "event-store"}
 
 
 # -- baselines -----------------------------------------------------------------
@@ -1254,7 +1283,7 @@ async def _report_from_store() -> dict:
         for sev, cnt in (item.get("severity_counts") or {}).items():
             severity_counts[sev] = severity_counts.get(sev, 0) + int(cnt or 0)
     return {
-        "source": "clickhouse",
+        "source": "event-store",
         "total_logs": stats.get("total_logs", 0),
         "threat_counts": stats.get("threat_counts", {}),
         "severity_counts": severity_counts,
@@ -1584,6 +1613,538 @@ async def get_overview():
         return {"stats": _stats_cache or {}, "hot_ips": _hot_ips_cache or [], "ml_health": {}}
 
 
+# ═══ Part 5 — buyer-facing differentiators ═══════════════════════════════════
+
+# -- 5.1 Threat-intel connector hub -------------------------------------------
+
+@app.get("/api/intel/hub-status")
+async def intel_hub_status():
+    """Which intel providers are armed (Settings page). Never returns keys."""
+    if not intel_hub:
+        return {"connectors": {}}
+    return {"connectors": intel_hub.key_status(),
+            "cache_ttl_hours": intel_hub.CACHE_TTL_HOURS}
+
+
+@app.get("/api/intel/hub/{ip}")
+async def intel_hub_lookup(ip: str):
+    """All external intel verdicts for one IP — cache-first, parallel, fail-soft.
+    An intel outage never blocks triage; a missing key is an honest answer."""
+    if not intel_hub:
+        raise HTTPException(503, "intel hub unavailable")
+    return await intel_hub.lookup_all(
+        ip, osc=osc if (osc and STORE_ENABLED) else None, to_thread=_to_thread)
+
+
+# -- 5.2 Incident workbench (cases with status/assignee/disposition) ----------
+
+_CASE_STATUSES = ["new", "investigating", "contained", "closed"]
+
+
+def _case_audit(case_id: str, actor: str, action: str, detail: str = ""):
+    """Every case action is logged with user + timestamp — non-negotiable #4."""
+    try:
+        osc._exec(f"""CREATE TABLE IF NOT EXISTS {osc.CLICKHOUSE_DB}.case_audit (
+            case_id String, actor String, action String, detail String,
+            ts DateTime64(3) DEFAULT now64(3)
+        ) ENGINE = MergeTree ORDER BY (case_id, ts)""")
+        osc._insert_row(f"{osc.CLICKHOUSE_DB}.case_audit",
+                        {"case_id": case_id, "actor": actor or "analyst",
+                         "action": action, "detail": detail[:500]})
+    except Exception as e:
+        logger.warning(f"case audit write failed: {e}")
+
+
+@app.get("/api/cases")
+async def list_cases(status: str = ""):
+    if not (osc and STORE_ENABLED):
+        return {"cases": []}
+    where = "WHERE status = {st:String}" if status in _CASE_STATUSES else ""
+    rows = await _to_thread(lambda: osc._q(
+        f"""SELECT case_id, title, incident_id, entity, severity, status, assignee,
+                   disposition, notes, created_by, created_at, updated_at
+            FROM {osc.CLICKHOUSE_DB}.cases FINAL {where}
+            ORDER BY updated_at DESC LIMIT 200""", {"st": status}))
+    for r in rows:
+        r["created_at"], r["updated_at"] = str(r["created_at"]), str(r["updated_at"])
+    return {"cases": rows, "statuses": _CASE_STATUSES}
+
+
+@app.post("/api/cases/upsert")
+async def upsert_case(payload: dict):
+    """Create or update a case. Closing REQUIRES a disposition — that decision
+    is the training data for the feedback loop."""
+    if not (osc and STORE_ENABLED):
+        raise HTTPException(503, "store unavailable")
+    case_id = str(payload.get("case_id") or f"case-{int(time.time()*1000)}")
+    status = str(payload.get("status") or "new").lower()
+    if status not in _CASE_STATUSES:
+        raise HTTPException(400, f"status must be one of {_CASE_STATUSES}")
+    disposition = str(payload.get("disposition") or "")
+    if status == "closed" and disposition not in ("true_positive", "false_positive", "benign"):
+        raise HTTPException(400, "closing a case requires a disposition: "
+                                 "true_positive | false_positive | benign")
+    actor = str(payload.get("actor") or "analyst")
+    row = {
+        "case_id": case_id,
+        "title": str(payload.get("title") or "")[:200],
+        "incident_id": str(payload.get("incident_id") or ""),
+        "entity": str(payload.get("entity") or ""),
+        "severity": str(payload.get("severity") or "medium"),
+        "status": status,
+        "assignee": str(payload.get("assignee") or ""),
+        "disposition": disposition,
+        "notes": str(payload.get("notes") or "")[:4000],
+        "created_by": actor,
+    }
+    from datetime import datetime as _dt
+    await _to_thread(lambda: osc._insert_row(
+        f"{osc.CLICKHOUSE_DB}.cases", {**row, "updated_at": _dt.utcnow()}))
+    await _to_thread(_case_audit, case_id, actor,
+                     f"status:{status}" + (f" disposition:{disposition}" if disposition else ""),
+                     row["notes"][:200])
+    # A closed disposition feeds the same suppression/weighting loop as /api/feedback.
+    if status == "closed" and row["entity"]:
+        try:
+            await submit_feedback({"entity": row["entity"], "disposition": disposition,
+                                   "signature": "case-close", "note": f"case {case_id}",
+                                   "analyst": actor})
+        except Exception:
+            pass
+    return {"status": "ok", "case_id": case_id}
+
+
+@app.get("/api/cases/{case_id}/audit")
+async def case_audit_log(case_id: str):
+    if not (osc and STORE_ENABLED):
+        return {"audit": []}
+    rows = await _to_thread(lambda: osc._q(
+        f"SELECT actor, action, detail, ts FROM {osc.CLICKHOUSE_DB}.case_audit "
+        "WHERE case_id = {c:String} ORDER BY ts DESC LIMIT 100", {"c": case_id}))
+    for r in rows:
+        r["ts"] = str(r["ts"])
+    return {"audit": rows}
+
+
+# -- 5.4 Feedback loop: the product visibly gets quieter ----------------------
+
+@app.get("/api/feedback/noise-stats")
+async def feedback_noise_stats():
+    """'Noise reduced by your feedback' — how many alert-instances the analyst's
+    standing FP/benign verdicts are suppressing per week."""
+    if not (osc and STORE_ENABLED):
+        return {"suppressed_entities": 0, "suppressed_events_7d": 0}
+    rows = await _to_thread(lambda: osc._q(f"""
+        WITH fp AS (SELECT DISTINCT entity FROM {osc.CLICKHOUSE_DB}.alert_feedback
+                    WHERE disposition IN ('false_positive', 'benign'))
+        SELECT (SELECT count() FROM fp) AS ents,
+               countIf(src_ip IN (SELECT entity FROM fp)
+                       AND ts >= now() - INTERVAL 7 DAY) AS ev7
+        FROM {osc.LOGS_TABLE}"""))
+    r = rows[0] if rows else {}
+    return {"suppressed_entities": int(r.get("ents") or 0),
+            "suppressed_events_7d": int(r.get("ev7") or 0),
+            "sentence": (f"Your feedback is suppressing {int(r.get('ents') or 0)} "
+                         f"known-benign entities — {int(r.get('ev7') or 0)} alert-events "
+                         f"this week never reached the queue.") if r.get("ents") else
+                        "No standing suppressions yet — dismiss a false positive and "
+                        "the product starts getting quieter."}
+
+
+# -- 5.6 Executive report -----------------------------------------------------
+
+_VGIL_LOGO_URI = None
+
+
+def _vgil_logo() -> str:
+    """Base64 data URI of the Virtual Galaxy logo so every report is self-contained."""
+    global _VGIL_LOGO_URI
+    if _VGIL_LOGO_URI is None:
+        try:
+            import base64
+            p = Path(__file__).with_name("vgil-logo.png")
+            _VGIL_LOGO_URI = "data:image/png;base64," + base64.b64encode(p.read_bytes()).decode()
+        except Exception:
+            _VGIL_LOGO_URI = ""
+    return _VGIL_LOGO_URI
+
+
+@app.get("/api/report/executive", response_class=HTMLResponse)
+async def executive_report(days: int = 7):
+    """One-click board-ready summary. Every number is pulled live."""
+    if not (osc and STORE_ENABLED):
+        raise HTTPException(503, "store unavailable")
+    days = max(1, min(days, 90))
+    core = await _to_thread(lambda: osc._q(f"""
+        SELECT count() AS events, uniqExact(src_ip) AS sources,
+               countIf(severity = 'critical') AS crit,
+               topK(5)(threat_type) AS top_threats
+        FROM {osc.LOGS_TABLE} WHERE ts >= now() - INTERVAL {days} DAY"""))
+    fb = await _to_thread(lambda: osc._q(f"""
+        SELECT countIf(disposition = 'true_positive') AS tp,
+               countIf(disposition IN ('false_positive', 'benign')) AS fp
+        FROM {osc.CLICKHOUSE_DB}.alert_feedback
+        WHERE ts >= now() - INTERVAL {days} DAY"""))
+    cases = await _to_thread(lambda: osc._q(f"""
+        SELECT count() AS total, countIf(status = 'closed') AS closed,
+               avgIf(dateDiff('minute', created_at, updated_at), status = 'closed') AS mttr_min
+        FROM {osc.CLICKHOUSE_DB}.cases FINAL
+        WHERE created_at >= now() - INTERVAL {days} DAY"""))
+    inc = await list_incidents()
+    c = core[0] if core else {}
+    f = fb[0] if fb else {}
+    k = cases[0] if cases else {}
+    armed = sum(1 for v in (intel_hub.key_status().values() if intel_hub else [])
+                if v["configured"])
+    mttr = f"{int(k.get('mttr_min') or 0)} min" if k.get("closed") else "—"
+    threats = ", ".join(str(t).replace("_", " ") for t in (c.get("top_threats") or [])[:5]) or "—"
+    ncrit = int(c.get('crit') or 0)
+    return f"""<!doctype html><html><head><meta charset="utf-8">
+<title>CyberSentinel — Executive Summary</title>
+<style>
+ body{{font-family:Inter,-apple-system,'Segoe UI',sans-serif;background:#0b0c0e;color:#f0f2f4;
+      max-width:820px;margin:40px auto;padding:0 24px;line-height:1.6}}
+ .vgil-hdr{{display:flex;align-items:center;justify-content:space-between;
+      border-bottom:2px solid #e30613;padding-bottom:14px;margin-bottom:26px}}
+ .vgil-hdr img{{height:44px;background:#fff;padding:6px 10px;border-radius:6px}}
+ .vgil-hdr .doc{{text-align:right;font-size:11px;color:#8a8f98;line-height:1.5}}
+ h1{{font-size:22px;letter-spacing:-.02em}} h1 b{{color:#7b86e6}}
+ .sub{{color:#8a8f98;font-size:13px;margin-bottom:28px}}
+ .grid{{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin:24px 0}}
+ .kpi{{background:#131415;border:1px solid rgba(255,255,255,.08);border-radius:10px;padding:18px}}
+ .kpi .n{{font-size:30px;font-weight:700;font-variant-numeric:tabular-nums}}
+ .kpi .l{{font-size:11px;color:#8a8f98;text-transform:uppercase;letter-spacing:.08em;margin-top:4px}}
+ .crit .n{{color:#eb5757}} .ok .n{{color:#4cb782}}
+ p.narr{{font-size:14px;background:#101113;border-left:3px solid #5e6ad2;padding:14px 18px;border-radius:0 8px 8px 0}}
+ .foot{{color:#62666d;font-size:11px;margin-top:36px;border-top:1px solid rgba(255,255,255,.08);padding-top:12px}}
+ @media print{{body{{background:#fff;color:#111}} .kpi{{border-color:#ddd;background:#fafafa}}
+   .vgil-hdr img{{background:none;padding:0}}}}
+</style></head><body>
+<div class="vgil-hdr">
+  <img src="{_vgil_logo()}" alt="Virtual Galaxy Infotech Ltd">
+  <div class="doc">CyberSentinel · AI-assisted SIEM<br>Executive Summary · {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')} UTC</div>
+</div>
+<h1>Cyber<b>Sentinel</b> — Executive Summary</h1>
+<div class="sub">Last {days} days · generated {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')} UTC ·
+Virtual Galaxy Infotech Ltd — bank client SOC</div>
+<p class="narr">In the last {days} days the platform triaged
+<b>{int(c.get('events') or 0):,} security events</b> from
+<b>{int(c.get('sources') or 0):,} distinct sources</b> automatically.
+{len((inc or {}).get('incidents', []))} correlated incidents are being tracked;
+analysts confirmed <b>{int(f.get('tp') or 0)} true positives</b> and dismissed
+{int(f.get('fp') or 0)} false alarms — every dismissal makes the system quieter.
+Dominant activity: {threats}.</p>
+<div class="grid">
+ <div class="kpi"><div class="n">{int(c.get('events') or 0):,}</div><div class="l">Events triaged</div></div>
+ <div class="kpi crit"><div class="n">{ncrit:,}</div><div class="l">Critical events</div></div>
+ <div class="kpi"><div class="n">{len((inc or {}).get('incidents', []))}</div><div class="l">Open incidents</div></div>
+ <div class="kpi ok"><div class="n">{int(f.get('tp') or 0)}</div><div class="l">Confirmed true positives</div></div>
+ <div class="kpi"><div class="n">{int(f.get('fp') or 0)}</div><div class="l">False alarms dismissed</div></div>
+ <div class="kpi"><div class="n">{mttr}</div><div class="l">Mean time to close (MTTR)</div></div>
+ <div class="kpi"><div class="n">{int(k.get('total') or 0)}</div><div class="l">Cases opened</div></div>
+ <div class="kpi"><div class="n">{int(k.get('closed') or 0)}</div><div class="l">Cases closed</div></div>
+ <div class="kpi"><div class="n">{armed}/6</div><div class="l">Intel connectors armed</div></div>
+</div>
+<div class="foot">All figures computed live from the event store at generation time.
+Print this page to PDF for board distribution. CyberSentinel · AI-assisted SIEM.</div>
+</body></html>"""
+
+
+# -- 5.7 Demo mode: a scripted attack through the REAL pipeline ---------------
+# SAFETY: demo mode WRITES synthetic attack rows into the live store. It is
+# hard-disabled unless DEMO_MODE=true is set in the environment, so it can never
+# pollute the production 26M-row dataset on the .23 server (which ships without
+# that flag). Turn it on only on a dev/demo box.
+DEMO_MODE = os.getenv("DEMO_MODE", "false").lower() in ("true", "1", "yes")
+
+_demo_state = {"running": False, "inserted": 0, "started_at": None}
+
+_DEMO_ATTACKER = "198.51.100.66"        # TEST-NET-2 — never a real host
+_DEMO_TARGETS = ["10.0.10.5", "10.0.10.21", "10.0.10.33", "10.0.20.7", "10.0.20.11"]
+
+
+def _demo_events():
+    """Recon → brute force → lateral movement → exfil, backdated across the
+    last 55 minutes so every trend widget lights up act by act."""
+    import random
+    rnd = random.Random(42)   # deterministic: same demo every run
+    now = datetime.now(timezone.utc)
+    ev = []
+
+    def at(mins_ago, **kw):
+        base = {
+            "@timestamp": (now - timedelta(minutes=mins_ago,
+                                           seconds=rnd.randint(0, 50))).isoformat(),
+            "data.srcip": _DEMO_ATTACKER, "data.srccountry": "Netherlands",
+            "agent.name": "BANK-FW-01", "data.action": "denied",
+        }
+        base.update(kw)
+        return base
+
+    # Act 1 — recon: port sweep across targets (55-45 min ago)
+    for i in range(30):
+        ev.append(at(55 - i // 3, **{
+            "data.dstip": _DEMO_TARGETS[i % len(_DEMO_TARGETS)],
+            "data.dstport": str([22, 80, 443, 3389, 445, 1433][i % 6]),
+            "rule.description": "Firewall: connection attempt to closed port",
+            "rule.id": "4101", "rule.level": 3, "rule.mitre.id": "T1595",
+        }))
+    # Act 2 — brute force: hammering SSH on one host (40-30 min ago)
+    for i in range(40):
+        ev.append(at(40 - i // 4, **{
+            "data.dstip": _DEMO_TARGETS[0], "data.dstport": "22",
+            "rule.description": "sshd: authentication failed",
+            "rule.id": "5710", "rule.level": 10, "rule.mitre.id": "T1110",
+            "data.user": "svc_backup", "agent.name": "BANK-DB-01",
+            "data.action": "",
+        }))
+    # the breach: one success
+    ev.append(at(29, **{
+        "data.dstip": _DEMO_TARGETS[0], "data.dstport": "22",
+        "rule.description": "sshd: authentication success after multiple failures",
+        "rule.id": "5715", "rule.level": 12, "rule.mitre.id": "T1078",
+        "data.user": "svc_backup", "agent.name": "BANK-DB-01", "data.action": "",
+    }))
+    # Act 3 — lateral movement: compromised host fans out (25-12 min ago)
+    for i in range(35):
+        ev.append(at(25 - i // 3, **{
+            "data.srcip": _DEMO_TARGETS[0], "data.srccountry": "",
+            "data.dstip": _DEMO_TARGETS[1 + i % (len(_DEMO_TARGETS) - 1)],
+            "data.dstport": str([445, 3389, 5985][i % 3]),
+            "rule.description": "SMB/RDP session from unusual internal source",
+            "rule.id": "18152", "rule.level": 9, "rule.mitre.id": "T1021",
+            "agent.name": f"BANK-SRV-{i % 4 + 1:02d}", "data.action": "allowed",
+        }))
+    # Act 4 — exfil attempt: large outbound transfer, blocked (10-2 min ago)
+    for i in range(12):
+        ev.append(at(10 - i // 2, **{
+            "data.srcip": _DEMO_TARGETS[0], "data.srccountry": "",
+            "data.dstip": _DEMO_ATTACKER, "data.dstport": "443",
+            "rule.description": "DLP: large outbound transfer to unclassified external host",
+            "rule.id": "31151", "rule.level": 13, "rule.mitre.id": "T1048",
+            "agent.name": "BANK-FW-01", "data.action": "blocked",
+        }))
+    return ev
+
+
+@app.post("/api/demo/run")
+async def demo_run(background_tasks: BackgroundTasks):
+    """Replay a scripted 4-act attack (recon → brute force → lateral → exfil)
+    through the REAL ingestion pipeline. Sales-demo center of attraction."""
+    if not DEMO_MODE:
+        raise HTTPException(403, "Demo mode is disabled on this deployment "
+                                 "(set DEMO_MODE=true to enable — never on production).")
+    if _demo_state["running"]:
+        return {"status": "already-running", **_demo_state}
+
+    async def replay():
+        _demo_state.update(running=True, inserted=0,
+                           started_at=datetime.now(timezone.utc).isoformat())
+        try:
+            for e in _demo_events():
+                if await ingest_log_row(e):
+                    _demo_state["inserted"] += 1
+            await build_baseline(_DEMO_ATTACKER)
+            await build_baseline(_DEMO_TARGETS[0])
+            global _stats_cache_ts, _hot_ips_cache_ts
+            _stats_cache_ts = 0    # bust caches so the dashboard lights up NOW
+            _hot_ips_cache_ts = 0
+        finally:
+            _demo_state["running"] = False
+
+    background_tasks.add_task(replay)
+    return {"status": "started",
+            "story": "recon → brute force → lateral movement → exfil attempt",
+            "attacker": _DEMO_ATTACKER, "patient_zero": _DEMO_TARGETS[0]}
+
+
+@app.get("/api/demo/status")
+async def demo_status():
+    return {**_demo_state, "enabled": DEMO_MODE}
+
+
+_COVERAGE_COLS = [
+    # (column, empty-test SQL, what the field is for — shown to the buyer)
+    ("ts", None, "event timestamp"),
+    ("src_ip", "src_ip != ''", "source address — drives entity risk"),
+    ("dst_ip", "dst_ip != ''", "destination — lateral-movement detection"),
+    ("dst_port", "dst_port != ''", "target service — sensitive-port alerts"),
+    ("threat_type", "threat_type != 'unknown'", "classified behaviour"),
+    ("severity", "severity != ''", "triage band"),
+    ("rule", "rule != ''", "matched detection rule"),
+    ("rule_id", "rule_id != ''", "rule identity — suppression/tuning"),
+    ("rule_level", "rule_level > 0", "raw Wazuh urgency 0-15"),
+    ("action", "action != ''", "allowed vs blocked"),
+    ("country", "country != ''", "geo origin — UEBA impossible-travel"),
+    ("agent", "agent != ''", "reporting host"),
+    ("username", "username != ''", "identity — UEBA"),
+    ("target_user", "target_user != ''", "account being acted upon"),
+    ("logon_type", "logon_type != ''", "interactive vs network vs service logon"),
+    ("mitre_tactic", "mitre_tactic != ''", "ATT&CK kill-chain stage"),
+    ("mitre_technique", "mitre_technique != ''", "ATT&CK technique id"),
+    ("rule_groups", "rule_groups != ''", "rule family — facet filters"),
+    ("proc_image", "proc_image != ''", "process executable (endpoint)"),
+    ("proc_parent", "proc_parent != ''", "parent process — injection chains"),
+    ("proc_cmdline", "proc_cmdline != ''", "full command line (endpoint)"),
+    ("sc_path", "sc_path != ''", "sysmon file path"),
+    ("sc_sha256", "sc_sha256 != ''", "binary hash — intel lookups"),
+    ("useragent", "useragent != ''", "HTTP client — web attacks"),
+    ("signature", "signature != ''", "IDS signature"),
+    ("url", "url != ''", "requested URL (web)"),
+    ("policy_id", "policy_id != ''", "firewall policy hit"),
+    ("decoder", "decoder != ''", "wazuh decoder that parsed the event"),
+    ("location", "location != ''", "log file / channel of origin"),
+    ("geo_lat", "geo_lat != 0", "geo coordinates (display only — UEBA uses country)"),
+    ("pci_dss", "pci_dss != ''", "PCI-DSS control tag (compliance report)"),
+    ("gdpr", "gdpr != ''", "GDPR article tag (compliance report)"),
+    ("hipaa", "hipaa != ''", "HIPAA tag (compliance report)"),
+    ("nist", "nist != ''", "NIST 800-53 tag (compliance report)"),
+    ("full_log", "full_log != ''", "verbatim raw line"),
+    ("raw", "raw != ''", "complete original alert JSON"),
+]
+
+
+@app.get("/api/identity/{ip}")
+async def identity_attribution(ip: str, days: int = 30):
+    """Who was this IP? An address is not an identity — under DHCP the same IP
+    maps to different hosts/users over time. This resolves a src_ip to the
+    agent(s) (host) and username(s) actually seen behind it, with time ranges,
+    so an analyst never confuses 'the IP' with 'the person/machine'."""
+    if not (osc and STORE_ENABLED):
+        return {"ip": ip, "agents": [], "users": [], "dhcp": False}
+    days = max(1, min(days, 180))
+    agents = await _to_thread(lambda: osc._q(
+        f"""SELECT agent AS name, count() AS hits, min(ts) AS first_ts, max(ts) AS last_ts
+            FROM {osc.LOGS_TABLE}
+            WHERE src_ip = {{ip:String}} AND agent != '' AND ts >= now() - INTERVAL {days} DAY
+            GROUP BY agent ORDER BY hits DESC LIMIT 25""", {"ip": ip}))
+    users = await _to_thread(lambda: osc._q(
+        f"""SELECT username AS name, count() AS hits, min(ts) AS first_ts, max(ts) AS last_ts
+            FROM {osc.LOGS_TABLE}
+            WHERE src_ip = {{ip:String}} AND username != '' AND ts >= now() - INTERVAL {days} DAY
+            GROUP BY username ORDER BY hits DESC LIMIT 25""", {"ip": ip}))
+    for row in (agents + users):
+        row["first_ts"], row["last_ts"] = str(row["first_ts"]), str(row["last_ts"])
+    dhcp = len(agents) > 1        # same IP, multiple hosts over the window = reassigned
+    return {
+        "ip": ip, "window_days": days,
+        "agents": agents, "users": users, "dhcp": dhcp,
+        "note": (f"This IP was used by {len(agents)} different hosts in the last "
+                 f"{days} days — it is DHCP-reassigned, so pin activity to the host/user, "
+                 f"not the address." if dhcp else
+                 ("Consistently one host — the IP is a stable identity here."
+                  if agents else "No host/user attribution captured for this IP.")),
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+@app.get("/api/fields/coverage")
+async def field_coverage(hours: int = 24):
+    """Fill-rate per ingested column — proves nothing is silently wasted and
+    instantly exposes broken parsing. hours=0 means all-time."""
+    if not (osc and STORE_ENABLED):
+        return {"fields": [], "total": 0}
+    where = f"WHERE ts >= now() - INTERVAL {max(1, int(hours))} HOUR" if hours else ""
+    tests = ", ".join(
+        f"countIf({t}) AS c_{c}" for c, t, _ in _COVERAGE_COLS if t)
+    rows = await _to_thread(lambda: osc._q(
+        f"SELECT count() AS total, {tests} FROM {osc.LOGS_TABLE} {where}"))
+    if not rows:
+        return {"fields": [], "total": 0}
+    r, total = rows[0], int(rows[0]["total"] or 0)
+    fields = []
+    for col, test, purpose in _COVERAGE_COLS:
+        filled = total if test is None else int(r.get(f"c_{col}", 0) or 0)
+        fields.append({
+            "column": col, "purpose": purpose, "filled": filled,
+            "pct": round(filled / total * 100, 1) if total else 0.0,
+        })
+    return {"total": total, "window_hours": hours, "fields": fields,
+            "generated_at": datetime.now(timezone.utc).isoformat()}
+
+
+@app.get("/api/verdict")
+async def get_verdict():
+    """The Overview's opening sentence, written by the backend from real fused
+    scores — never a static string. Answers "am I under attack right now?" in
+    plain English, and is honest about a stale/idle pipeline (a bank must never
+    read 'quiet night' when the truth is 'no data')."""
+    try:
+        stats, hot = await asyncio.gather(get_stats(), get_hot_ips())
+    except Exception:
+        stats, hot = {}, []
+    total = int(stats.get("total_logs") or 0)
+    crit_ips = stats.get("critical_ips") or []
+    sev = stats.get("severity_counts") or {}
+    alerts = int(stats.get("total_alerts") or 0)
+
+    # Top fused entity + its dominant behaviour (for the "start with" clause)
+    top = None
+    try:
+        er = await entity_risk(limit=1)
+        ents = er.get("entities") or []
+        if ents:
+            top = ents[0]
+    except Exception:
+        pass
+    top_threat = ""
+    if top:
+        for h in (hot or []):
+            if h.get("ip") == top["entity"]:
+                tt = h.get("threat_types") or {}
+                if tt:
+                    top_threat = max(tt, key=tt.get).replace("_", " ")
+                break
+
+    # Freshness: how old is the newest event? Verdict tone depends on it.
+    lag_hours = None
+    try:
+        if osc and STORE_ENABLED:
+            rows = await _to_thread(
+                lambda: osc._q(f"SELECT max(ts) AS newest FROM {osc.LOGS_TABLE}"))
+            newest = rows[0]["newest"] if rows else None
+            if newest:
+                lag_hours = max(0.0, (datetime.now(timezone.utc)
+                                      - newest.replace(tzinfo=timezone.utc)).total_seconds() / 3600)
+    except Exception:
+        pass
+
+    n_crit = len(crit_ips)
+    stale = lag_hours is not None and lag_hours > 24
+
+    if stale:
+        days = int(lag_hours // 24)
+        tone = "idle"
+        sentence = (f"No new events for {days} day{'s' if days != 1 else ''} — the ingestion "
+                    f"pipeline is idle. The last {total:,} events stand fully triaged"
+                    + (f"; {n_crit} sources were left flagged critical." if n_crit else "."))
+    elif n_crit == 0:
+        tone = "calm"
+        sentence = (f"Quiet. {total:,} events triaged — nothing critical is waiting on you."
+                    + (f" {alerts} baseline deviations are logged for review." if alerts else ""))
+    else:
+        tone = "active"
+        lead = top["entity"] if top else crit_ips[0]
+        doing = f" behaving like {top_threat}" if top_threat else ""
+        sentence = (f"Attention: {n_crit} source{'s' if n_crit != 1 else ''} flagged critical "
+                    f"out of {total:,} triaged events. {lead}{doing} scores "
+                    f"{top['score'] if top else '—'}/100 — investigate first.")
+
+    return {
+        "tone": tone,
+        "sentence": sentence,
+        "start_with": ({
+            "entity": top["entity"], "score": top["score"], "band": top["band"],
+            "events": top["events"], "critical": top["critical"],
+            "threat": top_threat, "last_seen": top["last_seen"],
+        } if top else None),
+        "counts": {"events": total, "critical_sources": n_crit,
+                   "deviations": alerts, "severity": sev},
+        "ingest_lag_hours": round(lag_hours, 1) if lag_hours is not None else None,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
 async def _get_ml_health() -> dict:
     try:
         async with httpx.AsyncClient(timeout=3) as hc:
@@ -1591,6 +2152,29 @@ async def _get_ml_health() -> dict:
             return r.json() if r.status_code == 200 else {}
     except Exception:
         return {}
+
+
+@app.get("/api/ml/anomalies")
+async def get_ml_anomalies(limit: int = 500):
+    """IPs the Risk Engine flagged as outliers, worst risk_score first.
+
+    Reads the scores the engine already persisted, so it answers even while the
+    engine is mid-run or down. Each row carries its `components` breakdown, which
+    is what the UI uses to say WHY an IP was flagged rather than just that it was.
+    """
+    if not (STORE_ENABLED and osc):
+        return {"anomalies": [], "scored_ips": 0}
+
+    anomalies, scored = await asyncio.gather(
+        _to_thread(osc.get_ml_anomalies, limit),
+        _to_thread(osc.count_ml_scores),
+        return_exceptions=True,
+    )
+    return {
+        "anomalies":  anomalies if isinstance(anomalies, list) else [],
+        "scored_ips": scored if isinstance(scored, int) else 0,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+    }
 
 
 # -- threat intel --------------------------------------------------------------
@@ -2764,11 +3348,22 @@ async def _run_action(action: str, params: dict, ip: str, user: str,
 
 @app.get("/api/playbooks")
 async def list_playbooks():
-    """All playbook definitions (the catalogue)."""
+    """All built-in playbook definitions (the catalogue). Steps are enriched with
+    their human label + whether they mutate the estate, so the Responder page can
+    render built-in and adopted playbooks the same way."""
     if not pb:
         return {"playbooks": []}
-    return {"playbooks": [{k: p[k] for k in ("id", "name", "description", "severity", "steps")}
-                          for p in pb.PLAYBOOKS]}
+    out = []
+    for p in pb.PLAYBOOKS:
+        steps = []
+        for s in p["steps"]:
+            meta = pb.ACTIONS.get(s["action"], {})
+            steps.append({"action": s["action"], "label": meta.get("label", s["action"]),
+                          "mutates": bool(meta.get("mutates")),
+                          "requires_approval": bool(s.get("requires_approval"))})
+        out.append({"id": p["id"], "name": p["name"], "description": p["description"],
+                    "severity": p["severity"], "steps": steps, "source": "built-in"})
+    return {"playbooks": out}
 
 
 @app.get("/api/playbooks/suggest")
@@ -2869,6 +3464,76 @@ async def playbook_runs(incident_id: str = "", limit: int = 50):
     return {"runs": runs, "total": len(runs)}
 
 
+def _adopted_slug(threat: str) -> str:
+    """Stable playbook id for an adopted threat_type (no regex dependency)."""
+    s = "".join(c if c.isalnum() else "-" for c in threat.lower()).strip("-")
+    while "--" in s:
+        s = s.replace("--", "-")
+    return "pb-adopted-" + (s or "pattern")
+
+
+@app.post("/api/playbooks/adopt")
+async def adopt_playbook(payload: dict):
+    """Promote an AI-drafted recommendation into a live playbook. Idempotent per
+    threat_type — re-adopting refreshes it. Once adopted, the pattern counts as
+    'covered', so it drops out of the recommendation list and shows on the
+    Responder page as an active playbook."""
+    if not (osc and STORE_ENABLED):
+        raise HTTPException(503, "Storage unavailable")
+    threat = (payload.get("threat_type") or "").strip()
+    if not threat:
+        raise HTTPException(400, "threat_type is required")
+    # Prefer the draft the client sent; regenerate from the catalogue if missing,
+    # so an adopt with only a threat_type still produces a real, ordered response.
+    steps = payload.get("steps") or payload.get("draft_steps") or []
+    technique = payload.get("technique", "")
+    tactic = payload.get("tactic", "")
+    mitigations = payload.get("mitigations", [])
+    if not steps and pbr:
+        d = pbr.draft_response(threat)
+        steps = d["steps"]; technique = d["technique"]; tactic = d["tactic"]; mitigations = d["mitigations"]
+    severity = (payload.get("severity") or "").strip().lower()
+    if severity not in ("low", "medium", "high", "critical"):
+        severity = "critical" if any(s.get("mutates") for s in steps) else "high"
+    rec = {
+        "playbook_id": _adopted_slug(threat),
+        "threat_type": threat,
+        "title": (payload.get("title") or threat.replace("_", " ").title()),
+        "severity": severity,
+        "why": payload.get("why", ""),
+        "steps": steps, "technique": technique, "tactic": tactic,
+        "mitigations": mitigations,
+        "adopted_by": (payload.get("adopted_by") or "analyst").strip() or "analyst",
+        "status": "active",
+    }
+    ok = await _to_thread(osc.insert_adopted_playbook, rec)
+    if not ok:
+        raise HTTPException(500, "Could not persist the adopted playbook")
+    return {"adopted": True, "playbook": rec}
+
+
+@app.get("/api/playbooks/adopted")
+async def list_adopted_playbooks():
+    """Live adopted playbooks, each enriched with the CURRENT 30-day log stats for
+    the pattern it covers (events / source IPs / critical), so the Responder page
+    shows real, live volume rather than a frozen snapshot."""
+    if not (osc and STORE_ENABLED):
+        return {"adopted": [], "total": 0}
+    adopted = await _to_thread(osc.get_adopted_playbooks, 100)
+    recurrence = await _to_thread(osc.get_threat_type_recurrence, 30)
+    by_type = {r["threat_type"]: r for r in recurrence}
+    for a in adopted:
+        r = by_type.get(a["threat_type"]) or {}
+        a["live"] = {
+            "events":    int(r.get("events", 0)),
+            "ips":       int(r.get("ips", 0)),
+            "critical":  int(r.get("crit", 0)),
+            "span_days": int(r.get("span_days", 0)),
+            "last_seen": r.get("last_seen", ""),
+        }
+    return {"adopted": adopted, "total": len(adopted)}
+
+
 # -- Playbook Recommender: "which NEW playbooks should we build?" -------------
 # Feedback-trained true-positive classifier -> recurring, uncovered log types
 # become ranked playbook recommendations with a draft response. No heuristic
@@ -2897,6 +3562,12 @@ async def _recommender_inputs():
             if r:
                 train_rows.append({**r, "disposition": d})
     covered = pbr.covered_threat_types([r["threat_type"] for r in recurrence]) if pbr else set()
+    # An adopted playbook covers its threat_type too — so it stops being recommended.
+    try:
+        adopted = await _to_thread(osc.get_adopted_playbooks, 200)
+        covered |= {a["threat_type"] for a in adopted if a.get("threat_type")}
+    except Exception:
+        pass
     return {"train_rows": train_rows, "score_rows": score_rows, "recurrence": recurrence,
             "anomaly_set": anomaly_set, "covered": covered,
             "labelled_entities": set(disp.keys())}
@@ -3167,12 +3838,37 @@ async def get_logs(minutes: int = 0, start: str = "", end: str = "",
     # spans whatever range they picked (e.g. "All time" = no time bound).
     if not minutes and not start and not end and not q.strip():
         minutes = 10080  # 7 days
+    # SERVER-SIDE CLAMP: a client asking for minutes=99999999 (the old full-scan
+    # hole, runbook §1) is capped to the max window so no request can full-scan
+    # the 26M store. Enforced here at the API layer, not just in the UI.
+    _max_win = int(os.getenv("LOGS_MAX_WINDOW_MINUTES", "43200"))  # 30 days
+    _clamped = False
+    if minutes and minutes > _max_win:
+        logger.info("clamped logs window %s -> %s minutes", minutes, _max_win)
+        minutes, _clamped = _max_win, True
     sevs = [s.strip() for s in severity.split(",") if s.strip()] or None
     logs = await _to_thread(
         osc.get_recent_logs,
         minutes, start, end, sevs, min_level, min(limit, 1000), q
     )
-    return {"logs": logs, "count": len(logs), "source": "clickhouse"}
+    return {"logs": logs, "count": len(logs), "source": "event-store",
+            "window_clamped": _clamped, "window_minutes": minutes}
+
+
+@app.get("/api/logs/latest")
+async def get_logs_latest(limit: int = 60):
+    """The newest N events, partition-pruned. Walks back day-by-day so it is
+    fast on a live feed AND still returns rows on a stale dev store — never a
+    full scan (runbook §5, B2). Prefer this over /api/logs?minutes=huge."""
+    if not (STORE_ENABLED and osc):
+        return {"logs": [], "count": 0, "source": "disabled"}
+    for minutes in (1440, 10080, 43200, 525600):     # 1d -> 7d -> 30d -> 1y
+        logs = await _to_thread(osc.get_recent_logs,
+                                minutes, "", "", None, 0, min(limit, 200), "")
+        if logs:
+            return {"logs": logs, "count": len(logs), "window_minutes": minutes,
+                    "source": "event-store"}
+    return {"logs": [], "count": 0, "source": "event-store"}
 
 
 @app.get("/api/search")
@@ -3503,7 +4199,7 @@ async def health():
         "status": "ok",
         "version": "2.2.0",
         "ai": "configured" if AI_API_KEY else "missing",
-        "clickhouse": ch_status,
+        "store": ch_status,          # neutral: never expose the DB engine name
         "time": datetime.now(timezone.utc).isoformat(),
     }
 
@@ -3547,15 +4243,15 @@ async def storage_stats():
         return {"source": "disabled"}
 
     return {
-        "source": "clickhouse",
-        "clickhouse": {
+        "source": "event-store",
+        "store": {
             "total_logs":   osc.get_total_doc_count(),
             "unique_ips":   osc.get_unique_ip_count(),
             "baselines":    osc.count_baselines(),
             "deviations":   osc.get_deviation_total(),
             "retention":    "partition TTL (logs 90d, deviations 60d)",
         },
-        "recommendation": "storage is healthy - ClickHouse TTL manages retention automatically",
+        "recommendation": "storage is healthy - retention is managed automatically by store TTL",
     }
 
 

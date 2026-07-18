@@ -23,7 +23,9 @@ from __future__ import annotations
 # only run when the analyst explicitly approves the run.
 ACTIONS = {
     "enrich_reputation": {"label": "Enrich with in-house IP reputation", "mutates": False},
-    "enrich_abuseipdb":  {"label": "Enrich with AbuseIPDB (if configured)", "mutates": False},
+    # Action KEY stays enrich_abuseipdb (runs, history, feedback all key off it).
+    # Only the label is white-labelled — the buyer never learns the vendor.
+    "enrich_abuseipdb":  {"label": "Enrich with ReputationNet", "mutates": False},
     "tag_entity":        {"label": "Tag the entity for tracking", "mutates": False},
     "open_case":         {"label": "Open an investigation case", "mutates": False},
     "notify":            {"label": "Notify the SOC channel", "mutates": False},
@@ -136,3 +138,36 @@ def match_playbooks(incident: dict) -> list[dict]:
             out.append({"playbook": pb, "reasons": reasons})
     out.sort(key=lambda m: sev_rank.get(m["playbook"]["severity"], 0), reverse=True)
     return out
+
+
+# ── Customer-editable YAML playbooks ────────────────────────────────────────
+# The bank drops .yaml files into playbooks.d/ (a live volume mount — no image
+# rebuild) and they merge into the catalogue at startup. Same schema as the
+# built-ins above; an id collision means "override the built-in".
+def _load_yaml_playbooks() -> None:
+    import os, glob, logging
+    logger = logging.getLogger("cybersentinel.playbooks")
+    try:
+        import yaml
+    except ImportError:
+        return
+    for path in sorted(glob.glob(os.path.join(os.path.dirname(__file__), "playbooks.d", "*.yaml"))):
+        try:
+            with open(path, encoding="utf-8") as fh:
+                docs = yaml.safe_load(fh)
+            for p in (docs if isinstance(docs, list) else [docs]):
+                if not (isinstance(p, dict) and p.get("id") and p.get("steps")):
+                    logger.warning(f"skipping malformed playbook in {path}")
+                    continue
+                p.setdefault("severity", "medium")
+                p.setdefault("trigger", {})
+                p["source"] = "yaml:" + os.path.basename(path)
+                if p["id"] in PLAYBOOK_BY_ID:            # override built-in
+                    PLAYBOOKS[:] = [x for x in PLAYBOOKS if x["id"] != p["id"]]
+                PLAYBOOKS.append(p)
+                PLAYBOOK_BY_ID[p["id"]] = p
+        except Exception as e:
+            logger.warning(f"could not load playbook file {path}: {e}")
+
+
+_load_yaml_playbooks()

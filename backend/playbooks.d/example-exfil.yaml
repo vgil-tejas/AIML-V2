@@ -1,0 +1,26 @@
+# CyberSentinel custom playbook — edit freely; reload = restart backend.
+# Schema mirrors the built-ins: trigger predicates AND together; steps run in
+# order; any step with requires_approval: true waits for an analyst.
+- id: pb-exfil-attempt
+  name: Data exfiltration attempt response
+  description: >
+    Large or repeated outbound transfers to an untrusted external host.
+    Verify the DLP hit, contain the internal source, and preserve evidence.
+  severity: critical
+  trigger:
+    technique_prefixes: ["T1048", "T1041"]
+    threat_keywords: ["exfil", "dlp", "outbound transfer"]
+  steps:
+    - action: enrich_reputation
+      requires_approval: false
+    - action: tag_entity
+      params: { tag: exfil-suspect }
+      requires_approval: false
+    - action: open_case
+      params: { title: "Exfil attempt from {ip}" }
+      requires_approval: false
+    - action: block_ip
+      requires_approval: true
+    - action: notify
+      params: { channel: soc }
+      requires_approval: false

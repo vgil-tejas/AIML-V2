@@ -1,78 +1,73 @@
 /* ============================================================================
-   CyberSentinel — OBSIDIAN design system (v18, 2027 refresh)
+   CyberSentinel — LINEAR design system (v19)
    Loaded LAST — overrides the inline base styles and owns the entire look.
-   Identity: deep graphite-blue obsidian, electric-cyan primary, glass slate
-   surfaces, conic rings, bento grids, calm micro-motion, terminal-grade mono.
-   Violet is reserved exclusively for AI surfaces. Danger is coral, ok is mint.
+   Identity: near-black neutral canvas, flat opaque surfaces, hairline borders,
+   ONE indigo accent, small radii, no glow. Space and type carry the hierarchy,
+   not colour or light. Severity colours (danger/warn/ok) are the only chroma
+   allowed to compete with the accent — they carry meaning, so they earn it.
    ============================================================================ */
 
 /* ── Design tokens ─────────────────────────────────────────────────────── */
 :root {
-  --bg:        #04070d;
-  --bg-soft:   #080d17;
-  --panel:     rgba(13, 20, 34, 0.72);
-  --panel-2:   rgba(20, 30, 50, 0.55);
-  --surface:   #0d1524;
-  --border:    rgba(96, 165, 250, 0.13);
-  --line:      rgba(96, 165, 250, 0.13);
-  --text:      #e8f0fb;
-  --muted:     #8ea3c0;
-  --faint:     #5c7093;
+  /* Neutral ramp — Linear's near-black canvas. Opaque, not glass. */
+  --bg:        #08090a;
+  --bg-soft:   #0d0e10;
+  --panel:     #0f1011;          /* elevated surface */
+  --panel-2:   #141516;          /* one step further up */
+  --surface:   #131415;          /* inputs, wells */
+  --border:    rgba(255, 255, 255, 0.08);
+  --line:      rgba(255, 255, 255, 0.06);
+  --text:      #f7f8f8;
+  --muted:     #8a8f98;
+  --faint:     #62666d;
 
-  --accent:    #38bdf8;          /* electric cyan — the one primary */
-  --accent-2:  #22d3ee;          /* aqua support */
-  --neon-mag:  #c084fc;          /* AI violet — ONLY on AI surfaces */
-  --ai:        #c084fc;
-  --grad:      linear-gradient(135deg, #38bdf8 0%, #22d3ee 55%, #34d399 130%);
-  --grad-soft: linear-gradient(135deg, rgba(56,189,248,.14), rgba(52,211,153,.08));
-  --grad-ai:   linear-gradient(135deg, #c084fc 0%, #818cf8 100%);
+  --accent:    #5e6ad2;          /* indigo — the ONE primary */
+  --accent-2:  #7b86e6;          /* lighter indigo, hover/support */
+  --neon-mag:  #a78bfa;          /* AI violet — ONLY on AI surfaces */
+  --ai:        #a78bfa;
+  /* "Gradients" kept as tokens for compatibility, but flat by design. */
+  --grad:      #5e6ad2;
+  --grad-soft: rgba(94, 106, 210, 0.14);
+  --grad-ai:   #a78bfa;
 
-  --danger:    #fb7185;
-  --warn:      #fbbf24;
-  --ok:        #34d399;
+  --danger:    #eb5757;
+  --warn:      #f2c94c;
+  --ok:        #4cb782;
   --purple:    #a78bfa;
-  --glow:      0 0 30px;
+  --glow:      0 0 0;            /* neutralised — Linear does not glow */
 
-  --radius:    16px;
-  --radius-sm: 11px;
-  --radius-lg: 22px;
-  --shadow:    0 24px 60px -28px rgba(0,0,0,.8);
-  --shadow-sm: 0 10px 30px -20px rgba(0,0,0,.7);
-  --sans: 'Geist', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  --mono: 'Geist Mono', 'JetBrains Mono', ui-monospace, monospace;
+  --radius:    8px;
+  --radius-sm: 6px;
+  --radius-lg: 10px;
+  --shadow:    0 8px 24px rgba(0,0,0,.45), 0 2px 6px rgba(0,0,0,.3);
+  --shadow-sm: 0 2px 6px rgba(0,0,0,.28);
+  --sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Consolas, monospace;
 
-  --s1: 4px;   --s2: 8px;   --s3: 12px;  --s4: 16px;
-  --s5: 24px;  --s6: 32px;  --s7: 48px;  --s8: 64px;
-  --content-max: 1360px;
+  /* Spacing scale opened up — the congestion fix lives here. */
+  --s1: 4px;   --s2: 8px;   --s3: 14px;  --s4: 20px;
+  --s5: 28px;  --s6: 40px;  --s7: 56px;  --s8: 72px;
+  --content-max: 1280px;
 }
 
-/* ── Base canvas: obsidian + faint dot-grid + two aurora pools ─────────── */
+/* ── Base canvas: flat near-black. No aurora, no dot-grid. ─────────────── */
 html, body {
   height: 100%;
-  background:
-    radial-gradient(1000px 640px at 85% -12%, rgba(56,189,248,.10), transparent 58%),
-    radial-gradient(880px 620px at -8% 18%, rgba(34,211,238,.07), transparent 55%),
-    radial-gradient(760px 760px at 55% 118%, rgba(52,211,153,.05), transparent 60%),
-    var(--bg) !important;
+  background: var(--bg) !important;
   color: var(--text) !important;
   font-family: var(--sans) !important;
   -webkit-font-smoothing: antialiased;
-  letter-spacing: 0 !important;
+  -moz-osx-font-smoothing: grayscale;
+  letter-spacing: -0.01em !important;
 }
-body::before {
-  content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 0;
-  background-image: radial-gradient(rgba(142,163,192,.09) 1px, transparent 1px);
-  background-size: 26px 26px;
-  mask-image: radial-gradient(80% 70% at 50% 30%, #000 20%, transparent 90%);
-  opacity: .5;
-}
+body::before { display: none !important; }
 * { box-sizing: border-box; }
 
-::-webkit-scrollbar { width: 9px; height: 9px; }
-::-webkit-scrollbar-thumb { background: rgba(142,163,192,.22); border-radius: 20px; border: 2px solid transparent; background-clip: content-box; }
-::-webkit-scrollbar-thumb:hover { background: rgba(56,189,248,.45); background-clip: content-box; }
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-thumb { background: rgba(255,255,255,.10); border-radius: 20px; border: 2px solid transparent; background-clip: content-box; }
+::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,.18); background-clip: content-box; }
 ::-webkit-scrollbar-track { background: transparent; }
-::selection { background: rgba(56,189,248,.32); color: #fff; }
+::selection { background: rgba(94,106,210,.40); color: #fff; }
 
 /* Reduced motion: kill all decorative animation in one stroke */
 @media (prefers-reduced-motion: reduce) {
@@ -560,21 +555,13 @@ code, .mono, .ip { font-family: var(--mono); }
 .ip-chip:hover { background: rgba(56,189,248,.22); }
 .ip-chip b { color: var(--text); }
 
-/* ── Per-page accent identity (nav() sets body[data-page]) ─────────────── */
-body[data-page="overview"]      { --accent: #38bdf8; --accent-2: #22d3ee; }
-body[data-page="trail"]         { --accent: #22d3ee; --accent-2: #38bdf8; }
-body[data-page="logs"]          { --accent: #34d399; --accent-2: #22d3ee; }
-body[data-page="deviations"]    { --accent: #fbbf24; --accent-2: #fb923c; }
-body[data-page="bslexplorer"]   { --accent: #2dd4bf; --accent-2: #34d399; }
-body[data-page="aiinvestigate"] { --accent: #c084fc; --accent-2: #818cf8; }
-body[data-page="nlquery"]       { --accent: #c084fc; --accent-2: #818cf8; }
-body[data-page="ml"]            { --accent: #34d399; --accent-2: #22d3ee; }
-body[data-page="incidents"]     { --accent: #fb7185; --accent-2: #fb923c; }
-body[data-page="ueba"]          { --accent: #818cf8; --accent-2: #c084fc; }
-body[data-page="killchain"]     { --accent: #a78bfa; --accent-2: #38bdf8; }
-body[data-page="playbooks"]     { --accent: #38bdf8; --accent-2: #34d399; }
-body[data-page="reports"]       { --accent: #818cf8; --accent-2: #22d3ee; }
-body[data-page="intelligence"]  { --accent: #22d3ee; --accent-2: #34d399; }
+/* ── Per-page accent identity ──────────────────────────────────────────
+   Linear commits to ONE accent across the whole product; per-page hues read
+   as chromatic noise and steal attention from severity colour, which is the
+   only colour here that actually carries meaning. Every page is indigo now.
+   The sole exception is the AI surfaces, where violet is a real distinction. */
+body[data-page="aiinvestigate"],
+body[data-page="nlquery"]       { --accent: #a78bfa; --accent-2: #c4b5fd; }
 
 /* ── Deviations ────────────────────────────────────────────────────────── */
 .dev-sevbar { display: grid; grid-template-columns: repeat(5, 1fr); gap: var(--s4) !important; margin-bottom: 16px; }
@@ -651,6 +638,69 @@ body[data-page="intelligence"]  { --accent: #22d3ee; --accent-2: #34d399; }
 @media (max-width: 700px) { .dev-grid2 { grid-template-columns: 1fr; } }
 @media (max-width: 1000px) { .dev-layout { grid-template-columns: 1fr; } .dev-sevbar { grid-template-columns: repeat(3, 1fr); } }
 
+/* ── Deviations v5: differentiated BY IP ───────────────────────────────
+   19 behavioural baselines feed these alerts, so "which baseline tripped"
+   separates nothing — the IP is the unit of triage. One row per source IP:
+   overall risk, every pattern it tripped (with the concrete detail — which
+   internal host, escalated to what), last seen, one click to trail. IPs doing
+   more than one thing sort to the top. */
+.dev-burst {
+  display: flex; align-items: center; gap: var(--s4);
+  background: var(--panel); border: 1px solid var(--border);
+  border-left: 2px solid var(--warn);
+  border-radius: var(--radius); padding: var(--s4) var(--s5); margin-bottom: var(--s4);
+}
+.dev-burst.tight { border-left-color: var(--danger); }
+.db-n { font-family: var(--mono); font-size: 30px; font-weight: 600; line-height: 1;
+  letter-spacing: -.03em; color: var(--text); flex: 0 0 auto; font-variant-numeric: tabular-nums; }
+.dev-burst.tight .db-n { color: var(--danger); }
+.db-tx { font-size: 13px; line-height: 1.6; color: var(--muted); }
+.db-tx b { color: var(--text); font-weight: 600; }
+
+.dev-sevfilter { display: inline-flex; gap: 6px; flex-wrap: wrap; }
+.dev-sevfilter .chip { text-transform: capitalize; }
+
+/* ── the IP table ── */
+.dvt { border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; background: var(--panel); }
+.dvt-r {
+  display: grid; grid-template-columns: 175px 125px 1fr 185px 80px; gap: 12px;
+  align-items: center; padding: 9px 16px; border-bottom: 1px solid var(--line);
+  cursor: pointer; transition: background .1s;
+}
+.dvt-r:last-child { border-bottom: 0; }
+.dvt-r:hover, .dvt-r:focus-visible { background: rgba(255,255,255,.03); outline: none; }
+.dvt-head { background: var(--bg-soft); cursor: default; font-size: 11.5px; color: var(--muted);
+  padding: 10px 16px; position: sticky; top: 0; z-index: 2; }
+.dvt-head:hover { background: var(--bg-soft); }
+/* multi-pattern rows carry a hairline accent — they are the point of the sort */
+.dvt-r.multi { box-shadow: inset 2px 0 0 var(--danger); }
+.dvt-ip { font-family: var(--mono); font-size: 13px; color: var(--text);
+  display: flex; align-items: center; gap: 8px; font-variant-numeric: tabular-nums; }
+.dvt-n { font-style: normal; font-family: var(--sans); font-size: 10px; font-weight: 600;
+  color: #f28b8b; background: rgba(235,87,87,.12); border-radius: 4px; padding: 1px 6px; }
+.dvt-risk { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.dvt-score { font-family: var(--mono); font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.dvt-score i { font-style: normal; font-weight: 400; font-size: 10.5px; color: var(--faint); }
+.dvt-score.critical { color: #f28b8b; }
+.dvt-score.high     { color: #f0a868; }
+.dvt-score.medium   { color: #e6c264; }
+.dvt-score.low      { color: var(--muted); }
+.dvt-ev { font-size: 11px; color: var(--faint); font-family: var(--mono); white-space: nowrap; }
+.dvt-do { display: flex; gap: 6px; flex-wrap: wrap; min-width: 0; }
+.dvt-act { font-size: 11.5px; padding: 2px 9px; border-radius: 5px;
+  background: var(--surface); border: 1px solid var(--border); color: var(--muted);
+  white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.dvt-act.crit { background: rgba(235,87,87,.09); border-color: rgba(235,87,87,.25); color: #f28b8b; }
+.dvt-act.warn { background: rgba(242,201,76,.08); border-color: rgba(242,201,76,.25); color: #e6c264; }
+.dvt-when { font-family: var(--mono); font-size: 11px; color: var(--faint); white-space: nowrap; }
+.dvt-go { font-size: 11.5px; color: var(--faint); text-align: right; white-space: nowrap; }
+.dvt-r:hover .dvt-go { color: var(--accent-2); }
+@media (max-width: 1100px) {
+  .dvt-r { grid-template-columns: 150px 1fr 70px; }
+  .dvt-risk, .dvt-when,
+  .dvt-head span:nth-child(2), .dvt-head span:nth-child(4) { display: none; }
+}
+
 /* ── LOGIN ─────────────────────────────────────────────────────────────── */
 #login-screen {
   position: fixed; inset: 0; z-index: 9999;
@@ -725,9 +775,33 @@ body[data-page="intelligence"]  { --accent: #22d3ee; --accent-2: #34d399; }
 .dh-title { font-size: 26px; font-weight: 800; letter-spacing: -.5px; margin: 8px 0 6px; }
 .dh-sub { font-size: 13px; color: var(--muted); line-height: 1.65; max-width: 760px; }
 .dh-controls { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 18px; }
-.seg { display: inline-flex; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; background: var(--surface); }
-.seg-btn { border: 0; background: transparent; color: var(--muted); padding: 9px 16px; font-size: 12.5px; font-weight: 600; cursor: pointer; transition: all .13s; }
-.seg-btn.active { background: var(--accent); color: #041018; }
+/* Segmented control — the replacement for native <select> wherever the option
+   set is small and mutually exclusive. A native select's popup is drawn by the
+   OS and cannot be themed, so it always breaks a dark UI; this can't.
+   The 2px inset padding is what lets the active pill sit INSIDE the track. */
+.seg {
+  display: inline-flex; gap: 2px; padding: 2px;
+  border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-soft);
+}
+.seg-btn {
+  border: 0; background: transparent; color: var(--muted);
+  padding: 6px 14px; font-size: 12.5px; font-weight: 500; cursor: pointer;
+  font-family: var(--sans); letter-spacing: -.006em;
+  border-radius: var(--radius-sm); transition: background .12s, color .12s;
+}
+.seg-btn:hover:not(.active) { background: rgba(255,255,255,.05); color: var(--text); }
+.seg-btn.active { background: var(--accent); color: #fff; }
+.seg-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* compact variant — for segs that live inside a card header */
+.seg.seg-sm { border-radius: var(--radius-sm); }
+.seg.seg-sm .seg-btn { padding: 4px 10px; font-size: 11.5px; }
+
+/* Trail control bar: "Trail by [ IP | Username | Agent ]" reads as a sentence,
+   which the old "Trail by IP" select could only say one option at a time. */
+.trail-bar { display: flex; align-items: center; gap: var(--s3); flex-wrap: wrap; }
+.tmode { display: inline-flex; align-items: center; gap: 10px; flex: 0 0 auto; }
+.tmode-l { font-size: 12.5px; color: var(--muted); white-space: nowrap; }
+@media (max-width: 1100px) { .trail-bar #trail-input { flex: 1 1 100%; order: 9; } }
 .dh-input { flex: 1; min-width: 220px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
   padding: 10px 14px !important; color: var(--text); font-size: 13px; font-family: var(--mono); }
 .dh-input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(56,189,248,.16); }
@@ -818,6 +892,39 @@ body[data-page="intelligence"]  { --accent: #22d3ee; --accent-2: #34d399; }
 .rec-mit b { color: var(--accent); font-family: var(--mono); }
 .rec-q-list { display: grid; gap: 8px; }
 .rec-q { display: flex; align-items: center; gap: 12px; border: 1px solid var(--border); border-radius: 10px; padding: 10px 14px; background: var(--surface); }
+
+/* Active playbooks (Responder page) — the live catalogue: built-in + adopted */
+.pbx-list { display: grid; gap: 12px; }
+.pbx-card { border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: 12px; padding: 14px 16px; background: var(--surface); }
+.pbx-card.adopted { border-left-color: #a78bfa; }
+.pbx-top { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.pbx-name { font-size: 15px; font-weight: 700; }
+.pbx-sev { font-family: var(--mono); font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; padding: 2px 8px; border-radius: 6px; }
+.pbx-tag { margin-left: auto; font-family: var(--mono); font-size: 10px; letter-spacing: .06em; padding: 2px 9px; border-radius: 6px; text-transform: uppercase; }
+.pbx-tag.built { background: rgba(148,163,184,.14); color: var(--muted); }
+.pbx-tag.adopt { background: rgba(167,139,250,.16); color: #c4b5fd; border: 1px solid rgba(167,139,250,.4); }
+.pbx-desc { font-size: 12.5px; color: var(--muted); line-height: 1.55; margin: 8px 0 0; }
+.pbx-stats { display: flex; gap: 16px; flex-wrap: wrap; font-size: 12px; color: var(--muted); margin-top: 9px; }
+.pbx-stats b { color: var(--text); }
+.pbx-cov { font-family: var(--mono); color: var(--accent); }
+.pbx-steps { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 11px; }
+.pb-astep { font-family: var(--mono); font-size: 10.5px; padding: 3px 9px; border-radius: 6px; border: 1px solid var(--border); color: var(--muted); background: var(--surface); }
+.pb-astep.mut { border-color: rgba(251,191,36,.4); color: #fbbf24; }
+.pb-appr { font-size: 8.5px; letter-spacing: .06em; text-transform: uppercase; color: #fbbf24; margin-left: 5px; }
+.pbx-empty { font-size: 12.5px; color: var(--muted); padding: 6px 2px; }
+
+/* Collapsible cards — a "button on everything" so any card folds to its header,
+   leaving the page spacious. The chevron is absolute so it never collides with a
+   header's existing right-aligned badge (the header gets room via padding-right). */
+.card.cardx > .ch { position: relative; padding-right: 46px !important; cursor: pointer; user-select: none; }
+.cardx-chev { position: absolute; right: 12px; top: 50%; transform: translateY(-50%);
+  width: 24px; height: 24px; display: grid; place-items: center; border: 1px solid var(--border);
+  border-radius: 7px; color: var(--muted); font-size: 11px; background: var(--surface);
+  transition: transform .2s, color .15s, border-color .15s; }
+.card.cardx > .ch:hover .cardx-chev { color: var(--text); border-color: var(--accent); }
+.card.cardx.cardx-collapsed > .ch { border-bottom: 0; }
+.card.cardx.cardx-collapsed > .ch .cardx-chev { transform: translateY(-50%) rotate(-90deg); }
+.card.cardx.cardx-collapsed > :not(.ch) { display: none !important; }
 .rec-q-btns { display: flex; gap: 6px; flex-shrink: 0; }
 
 /* ════════════════════════════════════════════════════════════════════════
@@ -953,6 +1060,33 @@ body[data-page="intelligence"]  { --accent: #22d3ee; --accent-2: #34d399; }
 }
 .ti-head-l { display: inline-flex; align-items: center; }
 
+/* ── Intelligence accordion: all five module headers stack, one drops open ──
+   The five modules used to sit fully expanded (one full-width + two 2-up grids),
+   which meant scrolling past four bodies to reach the fifth. Now every header is
+   visible at once and the body reveals on click. The count chip stays in the
+   header, so a collapsed module still tells you whether it has anything. */
+.ti-acc { display: flex; flex-direction: column; gap: var(--s4); }
+.ti-item { overflow: hidden; }
+.ti-ah { cursor: pointer; user-select: none; gap: 10px; transition: background .16s; }
+.ti-ah:hover { background: rgba(56,189,248,.05); }
+.ti-ah:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.ti-ah .ti-count { margin-left: auto; }          /* chip hugs the chevron, not the title */
+.ti-chev {
+  flex: 0 0 auto; color: var(--faint); font-size: 11px; line-height: 1;
+  transition: transform .22s ease, color .16s;
+}
+.ti-item.open .ti-chev { transform: rotate(180deg); color: var(--accent); }
+
+/* 0fr → 1fr animates a panel of UNKNOWN height; a max-height guess would either
+   clip a long agent list or make short panels crawl open. */
+.ti-panel { display: grid; grid-template-rows: 0fr; transition: grid-template-rows .24s ease; }
+.ti-item.open .ti-panel { grid-template-rows: 1fr; }
+.ti-panel-in { overflow: hidden; min-height: 0; }
+@media (prefers-reduced-motion: reduce) {
+  .ti-panel { transition: none; }
+  .ti-chev { transition: none; }
+}
+
 /* ── HERO v2: verdict headline + START HERE queue (compact) ────────────── */
 .ops-hero { display: grid !important; grid-template-columns: 1.3fr auto 1fr; align-items: center; gap: 22px !important; padding: 18px 22px !important; }
 @media (max-width: 1000px) { .ops-hero { grid-template-columns: 1fr; } }
@@ -1062,4 +1196,526 @@ body[data-page="intelligence"]  { --accent: #22d3ee; --accent-2: #34d399; }
   .login-brand { display: none; }
   .shell { grid-template-columns: 1fr; }
   .sidebar { display: none; }
+}
+
+/* ════════════════════════════════════════════════════════════════════════
+   LINEAR FLATTEN LAYER
+   ────────────────────────────────────────────────────────────────────────
+   Everything above was authored for OBSIDIAN: coloured glow, glass blur,
+   gradient ink, aurora washes, hover lifts. The tokens can't reach those —
+   they're hardcoded rgba(56,189,248,…) — so this layer is where the old
+   identity is actually removed. Rule of thumb for anything added below:
+   depth comes from a hairline border and a flat surface step, never light.
+   ════════════════════════════════════════════════════════════════════════ */
+
+/* 1 ─ No glow. Any shadow tinted with a hue becomes a neutral shadow or none.
+      This one block kills the bulk of the old look. */
+.card, .panel, .metric, .tile, .box, .kpi, .stat-card,
+.threat-dial, .signal-matrix, .situation-board > *,
+.ops-hero, .ops-chip, .logs-toolbar, .cbox, .toast,
+.modal, .modal-content, .overlay-card, .drawer, .popover, .dropdown,
+.ent-card, .tev, .dev-card, .dev-sev-tile, .ueba-row, .ti-kpi,
+.rec-card, .pbx-card, .ds-tile, .ds-head, .dossier-hero, .login-card {
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  background-image: none !important;
+}
+.card, .panel, .cbox, .logs-toolbar, .ops-chip,
+.tile, .metric, .box, .kpi, .stat-card,
+.threat-dial, .signal-matrix, .situation-board > * {
+  background: var(--panel) !important;
+  border: 1px solid var(--border) !important;
+}
+.toast, .modal, .modal-content, .overlay-card, .drawer, .popover, .dropdown {
+  background: var(--panel-2) !important;
+  box-shadow: var(--shadow) !important;
+}
+
+/* 2 ─ Decorative edge-lights, scanlines, aurora washes and corner radials.
+      Each was a separate flourish; collectively they were the "fancy" noise. */
+.card::before, .panel::before,
+.sidebar::after, .topbar::after, .topbar h1::before,
+.metric::after, .ops-hero::after, .ti-kpi::after,
+.dev-sev-tile::before, .dev-sev-tile::after,
+.login-brand::after, .ni.active::before {
+  display: none !important;
+  content: none !important;
+}
+
+/* 3 ─ Gradient ink → solid. Linear sets hierarchy with weight and colour
+      value, not with a gradient swept through the glyphs. */
+.logo-title, .lf-sub, .login-brand h1,
+.mv-a, .mv-d, .ops-vol-n, .ops-red, .ops-ai, .ops-cyan {
+  background: none !important;
+  -webkit-background-clip: border-box !important;
+  background-clip: border-box !important;
+  -webkit-text-fill-color: currentColor !important;
+  text-shadow: none !important;
+  animation: none !important;
+}
+.logo-title, .login-brand h1, .mv-a, .ops-vol-n { color: var(--text) !important; }
+.mv-d, .ops-red { color: var(--danger) !important; }
+.ops-ai        { color: var(--ai) !important; }
+.ops-cyan, .lf-sub { color: var(--accent) !important; }
+
+/* 4 ─ Brand marks: flat indigo tile, no breathing glow. */
+.logo .brand-mark, .login-logo, .lf-mark, .ti-num {
+  background: var(--accent) !important;
+  box-shadow: none !important;
+  animation: none !important;
+}
+.logo .brand-mark { border-radius: var(--radius-sm) !important; }
+.ti-num { color: #fff !important; }
+
+/* 5 ─ Buttons: solid indigo primary, quiet neutral default. */
+.btn {
+  background: var(--surface) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: var(--radius-sm) !important;
+  font-weight: 500 !important;
+  transition: background .12s, border-color .12s !important;
+}
+.btn:hover {
+  background: var(--panel-2) !important;
+  border-color: rgba(255,255,255,.14) !important;
+  color: var(--text) !important;
+  transform: none !important;
+}
+.btn.pri, .btn.primary {
+  background: var(--accent) !important; color: #fff !important;
+  border: 1px solid transparent !important; font-weight: 500 !important;
+  box-shadow: none !important;
+}
+.btn.pri:hover, .btn.primary:hover {
+  background: var(--accent-2) !important; filter: none !important; box-shadow: none !important;
+}
+.btn.ai { background: rgba(167,139,250,.12) !important; color: #c4b5fd !important; border-color: rgba(167,139,250,.28) !important; }
+.btn.ai:hover { background: rgba(167,139,250,.2) !important; }
+.dev-card-foot .btn.ai { background: rgba(167,139,250,.12) !important; color: #c4b5fd !important; border: 1px solid rgba(167,139,250,.28) !important; }
+.login-btn:hover { transform: none !important; filter: none !important; }
+
+/* 6 ─ Focus: a single indigo ring, replacing the cyan halos. */
+input:focus, select:focus, textarea:focus, .field input:focus, .dh-input:focus {
+  border-color: var(--accent) !important;
+  box-shadow: 0 0 0 3px rgba(94,106,210,.22) !important;
+}
+.srch:focus-within { border-color: var(--accent) !important; box-shadow: 0 0 0 3px rgba(94,106,210,.22) !important; }
+input:not(.srch input), select, textarea { border-radius: var(--radius-sm) !important; background: var(--surface) !important; }
+
+/* 7 ─ Hover: colour and surface shift only. No lift, no coloured shadow —
+      a grid of cards that each rise on hover is what made this feel busy. */
+.page .card:hover, .metric:hover, .ent-card:hover, .tev:hover,
+.dev-card:hover, .dev-sev-tile:hover, .ueba-row:hover, .ti-kpi:hover,
+.nav-btn:hover:not(:disabled), .ops-chip-live:hover, .ops-start-item:hover {
+  transform: none !important;
+  box-shadow: none !important;
+  border-color: rgba(255,255,255,.14) !important;
+}
+.tbl tbody tr:hover, tr:hover td { background: rgba(255,255,255,.03) !important; }
+.ti-agent:hover, .ti-nov:hover, .dev-ip-row:hover, .ti-ah:hover { background: rgba(255,255,255,.03) !important; }
+.ops-start-item:hover { background: rgba(255,255,255,.04) !important; }
+.ni:hover { background: rgba(255,255,255,.05) !important; padding-left: 12px !important; }
+
+/* 8 ─ Nav active: flat indigo wash + solid rail, no gradient/glow. */
+.ni.active {
+  background: rgba(94,106,210,.16) !important;
+  color: var(--text) !important; font-weight: 500 !important;
+  box-shadow: inset 2px 0 0 var(--accent) !important;
+}
+.ndot { box-shadow: none !important; }
+.rec-dot, .ds-dot { box-shadow: none !important; }
+
+/* 9 ─ Typography: Linear's range is 400–600. The old 800/900 display weights
+      shouted; size and colour do the ranking now. */
+.main h1, .login-brand h1, .dh-title, .ds-entity, .logo-title,
+.ops-title, .login-card h2 { font-weight: 600 !important; letter-spacing: -.02em !important; }
+.main h2, .rec-title, .pbx-name, .ent-title, .ct, .card-title,
+.dev-card-type, .ti-agent-name, .matrix-title { font-weight: 550 !important; }
+.mval, .ops-chip-v, .metric-value, .kpi-value, .ti-kpi-n,
+.dev-sev-tile .dst-count, .ds-tile-n, .ds-gauge-n, .ops-vol-n {
+  font-weight: 600 !important; letter-spacing: -.03em !important;
+}
+.topbar h1 { font-size: 18px !important; font-weight: 600 !important; padding-left: 0 !important; }
+.main h1 { font-size: 22px !important; }
+/* Uppercase micro-labels: Linear keeps these calm, not tracked-out spaced caps. */
+.mlabel, .ops-chip-l, .metric-label, .kpi-label, .ti-kpi-l,
+.dev-sev-tile .dst-label, .ds-tile-l, .rec-sub, .ops-kicker, .dh-kicker {
+  letter-spacing: .04em !important; font-weight: 500 !important; font-size: 11px !important;
+  color: var(--muted) !important;
+}
+
+/* 10 ─ Radii: one small family. */
+.card, .panel, .cbox, .logs-toolbar, .ops-hero, .ops-chip, .metric, .tile,
+.dev-card, .ent-card, .tev, .rec-card, .pbx-card, .ueba-row, .ti-kpi,
+.dev-sev-tile, .ds-tile, .ds-head, .dossier-hero, .login-card, .ti-beacon {
+  border-radius: var(--radius) !important;
+}
+.badge, .pill, .tag, .chip-static, .chip, .flt-chip, .dial-pill,
+.ops-tape span, .ti-count, .ops-chip-live, .dh-pill { border-radius: var(--radius-sm) !important; }
+
+/* 11 ─ Badges/chips: flat tint + hairline, no inset ring glow. */
+.badge { font-weight: 500 !important; box-shadow: none !important; text-transform: none !important; letter-spacing: 0 !important; }
+.badge.critical { background: rgba(235,87,87,.14) !important;  color: #f28b8b !important; }
+.badge.high     { background: rgba(242,153,74,.14) !important;  color: #f0a868 !important; }
+.badge.medium   { background: rgba(242,201,76,.14) !important;  color: #e6c264 !important; }
+.badge.low      { background: rgba(76,183,130,.14) !important;  color: #6cc79b !important; }
+.chip { background: var(--surface) !important; border-color: var(--border) !important; font-weight: 500 !important; }
+.chip:hover { border-color: rgba(255,255,255,.16) !important; color: var(--text) !important; }
+.chip.active, .flt-chip.on, .seg-btn.active {
+  background: var(--accent) !important; color: #fff !important;
+  border-color: transparent !important; font-weight: 500 !important;
+}
+
+/* 12 ─ Motion: Linear is quick and quiet. The staggered card entrance made
+       every page-switch a small performance; keep only a short fade. */
+.page.active { animation: pageIn .16s ease !important; }
+.page.active > * { animation: none !important; }
+@keyframes pageIn { from { opacity: 0; } to { opacity: 1; } }
+.tev { animation: none !important; }
+.ueba-ring { animation: none !important; box-shadow: none !important; }
+.mv-pop { animation: none !important; }
+.ti-status.silent_critical, .dev-sev-ico.critical, .ops-chip-live.hot::before { animation: none !important; }
+.skl::after { background: linear-gradient(100deg, transparent 30%, rgba(255,255,255,.04) 50%, transparent 70%) !important; }
+
+/* 13 ─ Sidebar + topbar: opaque, hairline-separated. */
+.sidebar {
+  background: var(--bg-soft) !important;
+  border-right: 1px solid var(--border) !important;
+  backdrop-filter: none !important;
+}
+.topbar {
+  background: var(--bg) !important;
+  backdrop-filter: none !important;
+  border-bottom: 1px solid var(--border) !important;
+  border-radius: 0 !important;
+  padding: var(--s3) var(--s5) !important;
+}
+.logo { border-bottom: 1px solid var(--border); }
+
+/* 14 ─ Tables: Linear's are quiet — hairline rows, calm headers. */
+.tbl thead th, table th {
+  background: var(--bg-soft) !important; color: var(--muted) !important;
+  font-weight: 500 !important; letter-spacing: .02em !important;
+  text-transform: none !important; font-size: 11.5px !important;
+  border-bottom: 1px solid var(--border) !important;
+}
+.tbl tbody td, table td { border-bottom: 1px solid var(--line) !important; }
+
+/* 15 ─ Accent-tinted wells and rails inherit the indigo rather than cyan. */
+.dev-lead { background: rgba(94,106,210,.07) !important; border-left-color: var(--accent) !important; }
+.dev-card-ip { background: rgba(94,106,210,.10) !important; border-color: rgba(94,106,210,.24) !important; }
+.dev-card-ip:hover { background: rgba(94,106,210,.2) !important; }
+.ip-chip, .tev-url { background: rgba(94,106,210,.10) !important; color: #a5adea !important; border-color: rgba(94,106,210,.24) !important; }
+.ip-chip:hover { background: rgba(94,106,210,.2) !important; }
+.ti-count { background: rgba(94,106,210,.12) !important; color: #a5adea !important; border-color: rgba(94,106,210,.26) !important; }
+.ti-count.hot  { background: rgba(235,87,87,.13) !important; color: #f28b8b !important; border-color: rgba(235,87,87,.28) !important; }
+.ti-count.zero { background: rgba(76,183,130,.12) !important; color: #6cc79b !important; border-color: rgba(76,183,130,.24) !important; }
+.ti-finding.new_country { border-left-color: var(--accent) !important; background: rgba(94,106,210,.05) !important; }
+.ent-user { background: rgba(94,106,210,.14) !important; color: #a5adea !important; }
+.tev-svc  { background: rgba(94,106,210,.14) !important; color: #a5adea !important; }
+.ti-nov-badge { background: rgba(94,106,210,.14) !important; color: #a5adea !important; }
+.ti-cov-dot.on { box-shadow: none !important; }
+.tev-block::before, .tev-allow::before { box-shadow: none !important; }
+#trail-events::before { background: var(--border) !important; }
+.sig-fill, .rec-prog-f, .dev-sev-tile.all::before { background: var(--accent) !important; }
+.sig-fill.danger { background: var(--danger) !important; }
+.sig-fill.warn   { background: var(--warn) !important; }
+.dial-ring {
+  background: conic-gradient(from -90deg, var(--danger) calc(var(--risk) * 1%), rgba(255,255,255,.07) 0) !important;
+  box-shadow: none !important;
+}
+.ueba-ring { --c: var(--accent); background: conic-gradient(from -90deg, var(--c) calc(var(--p) * 1%), rgba(255,255,255,.07) 0) !important; }
+.ops-vol, .ops-start { background: var(--surface) !important; box-shadow: none !important; backdrop-filter: none !important; }
+.ops-start-head { color: var(--muted) !important; letter-spacing: .04em !important; font-weight: 500 !important; }
+.ti-kpi.hot .ti-kpi-n { text-shadow: none !important; }
+a:hover { color: var(--accent-2); }
+.nav-btn:hover:not(:disabled) { background: var(--panel-2) !important; }
+
+/* 16 ─ Breathing room. The spacing tokens opened the outer rhythm; these are
+       the inner paddings that were still tuned for the dense old look. */
+.card > .cb, .panel > .cb { padding: var(--s4) var(--s5) !important; }
+.card > .ch, .panel > .ch { padding: var(--s3) var(--s5) !important; }
+.tbl thead th, table th { padding: 10px 16px !important; }
+.tbl tbody td, table td { padding: 12px 16px !important; }
+.metric { padding: var(--s4) !important; }
+.ops-hero { padding: var(--s4) var(--s5) !important; gap: var(--s4) !important; }
+.dev-card { padding: var(--s4) !important; }
+.rec-card, .pbx-card { padding: var(--s4) !important; }
+.cbox { padding: var(--s4) !important; }
+.logs-toolbar { padding: var(--s3) var(--s4) !important; }
+
+/* 17 ─ Service decks. Each page header carried its own accent (set inline by
+       buildServiceDecks) plus a decorative motif wash — radar sweeps, scanlines,
+       meshes, chains. That was the single biggest source of "too fancy", and it
+       sat behind the one element on every page you actually read first.
+       The motif goes; the header becomes a plain titled band.
+       To bring per-service colour back, drop the --acc override below — the JS
+       accent map at SERVICES is untouched and still supplies each hue. */
+.page { --acc: var(--accent) !important; --acc-soft: rgba(94,106,210,.12) !important; }
+.svc-fx { display: none !important; }
+.svc-hd {
+  background: var(--panel) !important;
+  background-image: none !important;
+  border: 1px solid var(--border) !important;
+  border-radius: var(--radius) !important;
+  box-shadow: none !important;
+  padding: var(--s4) var(--s5) !important;
+  margin-bottom: var(--s5) !important;
+}
+.svc-hd::after { display: none !important; content: none !important; }
+.svc-glyph {
+  background: rgba(94,106,210,.12) !important;
+  color: var(--accent) !important;
+  filter: none !important;
+  border-radius: var(--radius-sm) !important;
+}
+.svc-eyebrow { color: var(--muted) !important; font-weight: 500 !important; letter-spacing: .02em !important; }
+.svc-eyebrow i { background: var(--ok) !important; box-shadow: none !important; animation: none !important; }
+.svc-title { font-weight: 600 !important; letter-spacing: -.02em !important; }
+.svc-tag { color: var(--muted) !important; }
+.sv-chip { background: var(--surface) !important; border: 1px solid var(--border) !important; box-shadow: none !important; border-radius: var(--radius-sm) !important; }
+.sv-chip.acc .v { color: var(--accent) !important; }
+
+/* 18 ─ Typography: terminal → Linear.
+       The shell dressed its labels as terminal output: monospace, UPPERCASE,
+       tracked to .2–.3em, at 8–9px. That combination is why the UI reads as
+       both cramped and clumsy — the type is too small to read comfortably yet
+       each word is stretched wide, so it wastes space and gains nothing.
+       Linear's rule: Inter, sentence case, tight tracking, ~11px floor, and
+       monospace ONLY where glyphs must align (numerals, IPs, IDs, code). */
+.rail .logo-title, .rail .logo-sub, .sfooter .srow,
+.svc-eyebrow, .sv-chip .k, .ops-kpi .kl, .ops-fleet-t,
+.cmdk-item .ci, .cmdk-item .ck, .src-badge, .dial-pill, .ops-tape span,
+.matrix-state, .rec-sub, .ent-lbl, .ent-kind, .flt-lbl, .dev-sec-tag {
+  font-family: var(--sans) !important;
+  letter-spacing: -.006em !important;
+  text-transform: none !important;
+  font-weight: 500 !important;
+}
+/* Nothing structural below 11px — that's Inter's comfortable floor. */
+.rail .logo-sub, .svc-eyebrow, .sv-chip .k, .ops-kpi .kl, .ops-fleet-t,
+.cmdk-item .ci, .cmdk-item .ck, .ent-lbl, .ent-kind, .flt-lbl,
+.dev-sec-tag, .rec-sub, .src-badge, .log-eid {
+  font-size: 11px !important;
+}
+.rail .logo-title { font-size: 13.5px !important; font-weight: 600 !important; letter-spacing: -.02em !important; }
+.mlabel, .ops-chip-l, .metric-label, .kpi-label, .ti-kpi-l,
+.dev-sev-tile .dst-label, .ds-tile-l, .ops-kicker, .dh-kicker, .ops-start-head,
+.ds-eyebrow, .ti-nov-badge, .ti-status, .ti-gap-tag, .ds-mit-prio, .pbx-sev, .pbx-tag {
+  font-family: var(--sans) !important; text-transform: none !important;
+  letter-spacing: -.006em !important; font-weight: 500 !important;
+}
+/* Mono allowlist: numerals and identifiers only. */
+.mval, .ops-chip-v, .metric-value, .kpi-value, .ti-kpi-n, .ops-kpi .kv,
+.ops-vol-n, .dev-sev-tile .dst-count, .ds-tile-n, .ds-gauge-n,
+.ip, .ip-chip, .dev-ip-addr, .dev-card-ip, .ent-card-ip, .tev-url, .tev-id,
+.tev-eid, .tev-head .tts, .log-eid, .mitre-tag, .inc-id, .logs-count,
+.rank-ip, .rank-score, code, .mono, pre, .ds-entity, .pb-astep, .pbx-cov {
+  font-family: var(--mono) !important;
+  letter-spacing: 0 !important;
+  font-variant-numeric: tabular-nums;
+}
+
+/* NOTE: the service-deck "chamfered console" skin is NOT overridable from
+   here — index.html opens a second <style> AFTER theme.css (see its comment
+   at "sits AFTER theme.css on purpose"), so those rules always win. They are
+   fixed at source in that block instead. */
+
+/* ══ v20: Calm Authority additions ═══════════════════════════════════════ */
+
+/* Severity ramp — the ONLY reserved chroma. info→watch→elevated→critical.
+   Never use these for decoration. */
+:root {
+  --sev-info:     #58a6ff;   /* muted blue — informational */
+  --sev-watch:    #f2c94c;   /* amber — worth a glance */
+  --sev-elevated: #f0883e;   /* orange — needs attention soon */
+  --sev-critical: #eb5757;   /* red — act now */
+}
+
+/* ── Rail pipeline-health strip (bottom of sidebar) ────────────────────── */
+.rail-health {
+  position: sticky; bottom: 0; margin-top: auto;
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 16px; font-size: 11px; color: var(--muted);
+  background: var(--bg-soft); border-top: 1px solid var(--line);
+  cursor: default; user-select: none;
+}
+.rh-dot {
+  width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+  background: var(--faint);
+}
+.rh-dot.ok   { background: var(--ok); }
+.rh-dot.warn { background: var(--sev-elevated); animation: rhpulse 2s ease-in-out infinite; }
+.rh-dot.down { background: var(--sev-critical); animation: rhpulse 1.2s ease-in-out infinite; }
+@keyframes rhpulse { 50% { opacity: .35 } }
+body.rail-min .rh-txt { display: none; }
+
+/* ── Density: Comfortable (default) vs Compact ─────────────────────────── */
+body.compact {
+  --s3: 10px; --s4: 14px; --s5: 20px; --s6: 28px; --s7: 40px; --s8: 52px;
+}
+body.compact .main { font-size: 12.5px; }
+body.compact table td, body.compact table th { padding-top: 4px; padding-bottom: 4px; }
+body.compact .card { padding: 12px 14px; }
+.density-btn { white-space: nowrap; }
+/* rail-health needs the sidebar to be a column so margin-top:auto pins it */
+.sidebar { display: flex; flex-direction: column; }
+.sidebar .nav.spine { flex: 1 0 auto; }
+
+/* ── Logs: story view + facets (Part 3) ────────────────────────────────── */
+.logs-presets, .logs-facets { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+.facet-group { display: inline-flex; align-items: center; gap: 6px; margin-right: 10px; }
+.facet-label { font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: var(--faint); }
+.facet-chip b { font-weight: 600; color: var(--muted); margin-left: 2px; }
+.logs-story { display: flex; flex-direction: column; }
+.lg-row { display: flex; align-items: baseline; gap: 8px; padding: 7px 4px; border-bottom: 1px solid var(--line); font-size: 12.5px; line-height: 1.5; }
+.lg-row:hover { background: rgba(255,255,255,.02); }
+.lg-ts { font-family: var(--mono); font-size: 10.5px; color: var(--faint); white-space: nowrap; min-width: 128px; }
+.lg-sent { flex: 1; min-width: 0; }
+.lg-ip { font-family: var(--mono); color: var(--accent-2); cursor: pointer; }
+.lg-ip:hover { text-decoration: underline; }
+.lg-port, .lg-meta { font-family: var(--mono); font-size: 11px; color: var(--muted); }
+.lg-arr { color: var(--faint); }
+.lg-rule { color: var(--text); font-style: normal; font-weight: 500; }
+.lg-pv { background: none; border: 0; padding: 0 1px; font: inherit; color: var(--muted);
+  border-bottom: 1px dashed rgba(255,255,255,.2); cursor: pointer; }
+.lg-pv:hover { color: var(--text); border-bottom-color: var(--accent); }
+.lg-x { background: none; border: 1px solid var(--border); border-radius: 4px; color: var(--muted);
+  cursor: pointer; font-size: 12px; line-height: 1; padding: 2px 7px; }
+.lg-x:hover { color: var(--text); border-color: var(--accent); }
+.lg-raw { padding: 8px 12px 12px 140px; border-bottom: 1px solid var(--line); background: var(--bg-soft); }
+.lg-kv { font-size: 11px; border-collapse: collapse; }
+.lg-kv td { padding: 2px 14px 2px 0; vertical-align: top; }
+.lg-kv td:first-child { font-family: var(--mono); color: var(--faint); white-space: nowrap; }
+.lg-kv td:last-child { font-family: var(--mono); color: var(--muted); word-break: break-all; }
+/* jargon guard */
+abbr.jg { text-decoration: none; border-bottom: 1px dotted rgba(255,255,255,.3); cursor: help; }
+
+/* ── Part 5: case workbench + intel hub + connectors ───────────────────── */
+.case-row { border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 10px 12px; margin-bottom: 8px; }
+.case-top { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.case-id { font-family: var(--mono); font-size: 11px; color: var(--faint); }
+.case-title { font-size: 13px; font-weight: 500; }
+.case-ctl { display: flex; align-items: center; gap: 10px; margin-top: 8px; flex-wrap: wrap; }
+.case-in { background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
+  color: var(--text); font-size: 12px; padding: 5px 9px; width: 120px; }
+.case-in.case-notes { flex: 1; min-width: 180px; }
+.case-audit { margin-top: 8px; border-top: 1px solid var(--line); padding-top: 8px; }
+.ca-line { font-size: 11px; color: var(--muted); padding: 2px 0; }
+.ca-ts { font-family: var(--mono); color: var(--faint); margin-right: 8px; }
+.intel-hub { margin-top: 12px; border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 10px 12px; }
+.ih-head { font-size: 12px; margin-bottom: 8px; }
+.ih-row { display: flex; align-items: baseline; gap: 10px; font-size: 12px; padding: 4px 0; border-top: 1px solid var(--line); flex-wrap: wrap; }
+.ih-src { min-width: 110px; font-weight: 500; }
+.ih-verdict { font-family: var(--mono); font-size: 10.5px; padding: 1px 7px; border-radius: 4px;
+  background: rgba(255,255,255,.05); color: var(--muted); }
+.iv-malicious, .iv-exposed-vulnerable { color: var(--sev-critical); background: rgba(235,87,87,.12); }
+.iv-suspicious { color: var(--sev-elevated); background: rgba(240,136,62,.12); }
+.iv-clean, .iv-benign-scanner { color: var(--ok); background: rgba(76,183,130,.10); }
+.ih-ev { flex: 1; color: var(--muted); min-width: 200px; }
+.ih-link { font-size: 11px; color: var(--accent-2); text-decoration: none; }
+.ih-cached { font-size: 9px; letter-spacing: .08em; text-transform: uppercase; color: var(--faint); }
+.ih-note { margin-top: 8px; font-size: 11px; color: var(--ok); }
+.conn-chip { display: inline-flex; align-items: center; gap: 8px; border: 1px solid var(--border);
+  border-radius: 8px; padding: 8px 14px; font-size: 12.5px; color: var(--muted); }
+.conn-chip .conn-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--faint); }
+.conn-chip.armed { color: var(--text); }
+.conn-chip.armed .conn-dot { background: var(--ok); }
+.conn-state { font-size: 10px; letter-spacing: .07em; text-transform: uppercase; color: var(--faint); }
+
+/* ── Part 6 accessibility: severity NEVER by colour alone (WCAG) ─────────── */
+/* A shape glyph precedes every severity badge, so the level survives greyscale,
+   colour-blindness, and a wall-mounted SOC screen at an angle. */
+.badge.critical::before,
+.badge.high::before,
+.badge.medium::before,
+.badge.low::before,
+.badge.blocked::before { font-size: .85em; margin-right: 4px; font-weight: 700; }
+.badge.critical::before { content: "▲"; }   /* up-triangle = act now */
+.badge.high::before     { content: "◆"; }   /* diamond       = elevated */
+.badge.medium::before   { content: "■"; }   /* square        = watch */
+.badge.low::before      { content: "●"; }   /* dot           = info */
+.badge.blocked::before  { content: "✕"; margin-right: 3px; }
+/* don't double-glyph badges that already carry an inline symbol (e.g. "✓ allowed") */
+.badge.low[data-noglyph]::before { content: none; }
+
+/* ── Deviations: de-congestion at scale ────────────────────────────────── */
+.dev-sevrow { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-bottom: 8px; }
+.dev-typerow { display: flex; gap: 6px; align-items: center; overflow-x: auto; padding-bottom: 6px;
+  scrollbar-width: thin; -webkit-overflow-scrolling: touch; }
+.dev-typerow::-webkit-scrollbar { height: 6px; }
+.dev-typelabel { font-size: 10px; letter-spacing: .06em; text-transform: uppercase; color: var(--faint);
+  white-space: nowrap; flex-shrink: 0; }
+.dev-typerow .chip { white-space: nowrap; flex-shrink: 0; }
+.dvt-more { text-align: center; padding: 14px; font-size: 12px; color: var(--muted);
+  border-top: 1px solid var(--line); margin-top: 4px; }
+.dvt-more .btn { margin-left: 10px; }
+
+/* ── Kill Chain: top-IP picker + identity/DHCP attribution ─────────────── */
+.kc-topip { display: inline-flex; align-items: center; gap: 8px; background: var(--surface);
+  border: 1px solid var(--border); border-radius: 8px; padding: 5px 10px 5px 6px; cursor: pointer;
+  transition: border-color .12s, transform .12s; }
+.kc-topip:hover { border-color: var(--accent); transform: translateY(-1px); }
+.kc-topip-ip { font-family: var(--mono); font-size: 12.5px; color: var(--text); }
+.kc-idnote { font-size: 12.5px; color: var(--muted); margin-bottom: 14px; line-height: 1.55; }
+.kc-idgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+@media (max-width: 720px) { .kc-idgrid { grid-template-columns: 1fr; } }
+.kc-idlabel { font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: var(--faint); margin-bottom: 8px; }
+.kc-idrow { display: flex; flex-wrap: wrap; gap: 6px; }
+.kc-idchip { display: inline-flex; align-items: center; gap: 6px; font-family: var(--mono); font-size: 12px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 4px 8px; }
+.kc-idchip i { font-style: normal; font-size: 10px; color: var(--faint);
+  background: rgba(255,255,255,.06); border-radius: 4px; padding: 0 5px; }
+
+/* ══ Deviations v6 — outstanding & readable ══════════════════════════════ */
+/* KPI strip */
+.dev-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px; margin-bottom: 14px; }
+.dev-kpi { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 14px 16px; }
+.dev-kpi .dk-n { font-family: var(--mono); font-size: 26px; font-weight: 650; line-height: 1.1;
+  letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.dev-kpi .dk-l { font-size: 10.5px; color: var(--muted); margin-top: 4px; letter-spacing: .02em; }
+.dev-kpi.hot .dk-n  { color: var(--sev-elevated); }
+.dev-kpi.crit .dk-n { color: var(--sev-critical); }
+
+/* toolbar: quiet search field, actions right */
+.dev-toolbar { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.dev-searchwrap { display: flex; align-items: center; gap: 8px; flex: 0 1 340px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 7px 12px; }
+.dev-searchwrap:focus-within { border-color: var(--accent); }
+.dev-searchwrap input { flex: 1; background: none; border: 0; outline: none; color: var(--text);
+  font-size: 12.5px; font-family: var(--sans); }
+.dev-sevfilter { display: block; margin-bottom: 12px; }
+
+/* rows: taller, calmer, severity told by word + colour edge (never colour alone) */
+.dvt-r { grid-template-columns: 215px 190px 1fr 160px 70px; padding: 12px 18px; }
+.dvt-head { font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase; }
+.dvt-r.sev-critical { box-shadow: inset 3px 0 0 var(--sev-critical); }
+.dvt-r.sev-high     { box-shadow: inset 3px 0 0 var(--sev-elevated); }
+.dvt-r.sev-medium   { box-shadow: inset 3px 0 0 var(--sev-watch); }
+.dvt-r.sev-low      { box-shadow: inset 3px 0 0 rgba(255,255,255,.10); }
+.dvt-r.multi.sev-critical, .dvt-r.multi { box-shadow: inset 3px 0 0 var(--sev-critical); }
+.dvt-ip { font-size: 13.5px; flex-wrap: wrap; }
+.dvt-sev { font-style: normal; font-size: 9.5px; font-weight: 600; letter-spacing: .07em;
+  text-transform: uppercase; border-radius: 4px; padding: 1px 6px; }
+.dvt-sev.critical { color: #f8b4b4; background: rgba(235,87,87,.14); }
+.dvt-sev.high     { color: #f6c8a0; background: rgba(240,136,62,.13); }
+.dvt-sev.medium   { color: #efdb9e; background: rgba(242,201,76,.11); }
+.dvt-sev.low      { color: var(--muted); background: rgba(255,255,255,.06); }
+/* risk cell: score + mini bar + context, stacked tight */
+.dvt-risk { display: grid; grid-template-columns: auto 1fr; grid-template-rows: auto auto;
+  column-gap: 10px; row-gap: 3px; align-items: center; }
+.dvt-bar { height: 5px; border-radius: 3px; background: rgba(255,255,255,.07); overflow: hidden; }
+.dvt-barfill { display: block; height: 100%; border-radius: 3px; }
+.dvt-barfill.critical { background: var(--sev-critical); }
+.dvt-barfill.high     { background: var(--sev-elevated); }
+.dvt-barfill.medium   { background: var(--sev-watch); }
+.dvt-barfill.low      { background: var(--faint); }
+.dvt-risk .dvt-ev { grid-column: 1 / -1; }
+.dvt-act { font-size: 12px; line-height: 1.5; padding: 3px 10px; }
+.dvt-go { opacity: 0; transform: translateX(-4px); transition: .14s; color: var(--accent-2); font-weight: 500; }
+.dvt-r:hover .dvt-go { opacity: 1; transform: translateX(0); }
+@media (max-width: 1100px) {
+  .dvt-r { grid-template-columns: 170px 1fr 70px; }
 }

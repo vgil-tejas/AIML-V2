@@ -387,7 +387,7 @@ def policy_report(days: int = 7) -> dict:
     rows = _q(
         f"""
         WITH {_PID_EXPR} AS pid
-        SELECT pid                                          AS policy_id,
+        SELECT pid                                          AS pol_id,
                count()                                      AS hits,
                countIf(action IN {_ALLOWED})                AS allowed,
                countIf(action IN {_BLOCKED})                AS blocked,
@@ -400,7 +400,7 @@ def policy_report(days: int = 7) -> dict:
         FROM {LOGS_TABLE}
         WHERE {_FW_FILTER} AND ts >= now() - INTERVAL {{days:UInt32}} DAY
         GROUP BY pid
-        HAVING policy_id != ''
+        HAVING pid != ''
         ORDER BY hits DESC
         LIMIT 100
         """,
@@ -416,7 +416,7 @@ def policy_report(days: int = 7) -> dict:
                                set(filter(None, r["countries_before"] or [])))
         went_quiet = prior_avg >= 20 and h24 == 0
         pol = {
-            "policy_id": str(r["policy_id"]),
+            "policy_id": str(r["pol_id"]),
             "hits": hits, "hits_24h": h24,
             "allowed": int(r["allowed"]), "blocked": int(r["blocked"]),
             "src_count": int(r["src_count"]), "dst_count": int(r["dst_count"]),

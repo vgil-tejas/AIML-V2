@@ -7,14 +7,15 @@
   <title>CyberSentinel SOC Console</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <!-- Inter as a VARIABLE font (wght@100..900): the static instance list only
+       shipped whole hundreds, so intermediate weights snapped to the nearest.
+       Geist is dropped — Inter is the typeface Linear actually uses, and two
+       near-identical grotesks loading at once bought nothing but latency. -->
   <link
-    href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap"
-    rel="stylesheet">
-  <!-- Geist + Geist Mono: the premium typeface behind Vercel/Linear-grade UIs -->
-  <link
-    href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700;800;900&family=Geist+Mono:wght@400;500;600;700&display=swap"
+    href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,100..900&family=JetBrains+Mono:wght@400;500;600&display=swap"
     rel="stylesheet">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+  <script src="logo-data.js"></script>
   <style>
     :root {
       --bg: #0d1117;
@@ -2014,60 +2015,539 @@
       min-width: 60px;
       color: transparent !important;
     }
+
+    /* ══ Neural Core hero upgrade — orbital gauge, holo verdict border, ══
+       ══ service fleet panel, live-wire marquee, command palette ══ */
+    @property --spin { syntax: '<angle>'; initial-value: 0deg; inherits: false; }
+
+    .ops-main { position: relative; overflow: hidden; }
+    .ops-main::before {
+      content: ""; position: absolute; inset: -1px; border-radius: 8px; padding: 1px; pointer-events: none; z-index: 0;
+      background: conic-gradient(from var(--spin), transparent 0%, rgba(94,106,210,.55) 7%, transparent 15%,
+                  transparent 50%, rgba(167,139,250,.45) 57%, transparent 65%);
+      -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+      -webkit-mask-composite: xor; mask-composite: exclude;
+      animation: spinBorder 8s linear infinite;
+    }
+    @keyframes spinBorder { to { --spin: 360deg; } }
+    .ops-main > * { position: relative; z-index: 1; }
+    @media (prefers-reduced-motion: reduce) { .ops-main::before { animation: none; } }
+
+    .ops-kpis { display: grid; grid-template-columns: repeat(4,1fr); gap: 0; margin-top: 14px;
+      border-top: 1px solid rgba(255,255,255,.16); padding-top: 12px; max-width: 520px; }
+    .ops-kpi { padding-right: 12px; }
+    .ops-kpi + .ops-kpi { padding-left: 12px; border-left: 1px solid rgba(255,255,255,.16); }
+    .ops-kpi .kl { font-family: var(--mono); font-size: 8.5px; letter-spacing: .16em; text-transform: uppercase; color: var(--faint); }
+    .ops-kpi .kv { font-family: var(--mono); font-size: 18px; font-weight: 800; margin-top: 3px; letter-spacing: -.02em; }
+    .ops-kpi .kv.d { color: var(--danger); } .ops-kpi .kv.a { color: var(--accent); } .ops-kpi .kv.v { color: var(--ai); }
+
+    /* orbital canvas layered inside the existing dial-ring (real --risk still drives the ring) */
+    .dial-ring { overflow: visible; }
+    #core-orbit { position: absolute; inset: -32px; pointer-events: none; }
+
+    /* live-wire marquee — reuses .ops-tape / chip content, just makes it scroll */
+    .ops-tape.marquee { overflow: hidden; white-space: nowrap; mask-image: linear-gradient(90deg,transparent,#000 4%,#000 94%,transparent); }
+    .ops-tape.marquee #ops-live-chips { display: inline-flex; gap: 10px; animation: tapeScroll 34s linear infinite; }
+    .ops-tape.marquee:hover #ops-live-chips { animation-play-state: paused; }
+    @keyframes tapeScroll { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+    @media (prefers-reduced-motion: reduce) { .ops-tape.marquee #ops-live-chips { animation: none; } }
+
+    /* service fleet panel — 4th hero column, white-labeled product names */
+    .ops-fleet {
+      background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+      padding: 14px 15px; box-shadow: 0 18px 44px rgba(0,0,0,.24); display: flex; flex-direction: column;
+    }
+    .ops-fleet-t { font-size: 10px; text-transform: uppercase; letter-spacing: .14em; color: var(--faint); margin-bottom: 9px; font-family: var(--mono); }
+    .ops-fleet-row {
+      display: flex; align-items: center; gap: 8px; padding: 6px 0;
+      border-bottom: 1px solid rgba(255,255,255,.08); font-family: var(--mono); font-size: 10.5px; color: var(--muted);
+      cursor: pointer; transition: color .15s;
+    }
+    .ops-fleet-row:hover { color: var(--text); }
+    .ops-fleet-row:last-child { border-bottom: none; }
+    .ops-fleet-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 6px var(--ok); flex-shrink: 0; }
+    .ops-fleet-dot.warn { background: var(--warn); box-shadow: 0 0 6px var(--warn); }
+    .ops-fleet-dot.ai { background: var(--ai); box-shadow: 0 0 6px var(--ai); }
+    .ops-fleet-lat { margin-left: auto; font-size: 9px; color: var(--faint); }
+
+    /* ══ Command palette — Ctrl+K ══ */
+    .cmdk-trigger {
+      display: flex; align-items: center; gap: 7px; padding: 7px 11px; border: 1px solid var(--line);
+      border-radius: 8px; font-family: var(--mono); font-size: 10.5px; color: var(--faint); cursor: pointer;
+      background: var(--panel); transition: .15s; white-space: nowrap;
+    }
+    .cmdk-trigger:hover { border-color: rgba(94,106,210,.4); color: var(--muted); }
+    .cmdk-trigger kbd { margin-left: 4px; font-size: 9px; padding: 2px 6px; border: 1px solid var(--line); border-radius: 5px; background: var(--bg3); }
+    .cmdk-overlay {
+      position: fixed; inset: 0; z-index: 400; display: none; align-items: flex-start; justify-content: center;
+      padding-top: 13vh; background: rgba(2,4,10,.7); backdrop-filter: blur(6px);
+    }
+    .cmdk-overlay.open { display: flex; }
+    .cmdk-box {
+      width: min(560px,92vw); border: 1px solid rgba(94,106,210,.5); border-radius: 14px;
+      background: rgba(10,17,29,.97); overflow: hidden;
+      box-shadow: 0 40px 100px -30px rgba(0,0,0,.9), 0 0 60px -20px rgba(94,106,210,.25);
+    }
+    .cmdk-in { display: flex; align-items: center; gap: 10px; padding: 13px 16px; border-bottom: 1px solid var(--line); }
+    .cmdk-in .pr { font-family: var(--mono); color: var(--accent); font-size: 13px; }
+    .cmdk-in input { flex: 1; background: none; border: 0; outline: none; color: var(--text); font-family: var(--mono); font-size: 13px; }
+    .cmdk-list { max-height: 320px; overflow-y: auto; padding: 7px; }
+    .cmdk-item { display: flex; align-items: center; gap: 10px; padding: 9px 11px; border-radius: 8px; cursor: pointer; font-size: 12.5px; color: var(--muted); }
+    .cmdk-item:hover, .cmdk-item.sel { background: rgba(94,106,210,.08); color: var(--text); }
+    .cmdk-item .ci { font-family: var(--mono); font-size: 9px; color: var(--faint); text-transform: uppercase; letter-spacing: .1em; width: 52px; flex-shrink: 0; }
+    .cmdk-item .ck { margin-left: auto; font-family: var(--mono); font-size: 8.5px; color: var(--faint); letter-spacing: .1em; }
+
+    @media (max-width: 1200px) { .ops-hero { grid-template-columns: 1fr 1fr; } .ops-fleet { grid-column: 1/-1; } }
+
+    /* The sidebar is the Neural Spine now — its styles live in the block after
+       theme.css (they have to load last to out-weigh theme.css's !important). */
+    .logo-title b { color: var(--accent); font-weight: 700; }
+    @keyframes nxHue { to { filter: hue-rotate(360deg); } }
+    .sfooter .srow { font-family: var(--mono); letter-spacing: .12em; text-transform: uppercase; }
+
+    /* ══ Overview = embedded Neural Command deck. Sized by JS to fill the pane exactly
+       (see fitNeuralDeck) so there is never a double scrollbar. ══ */
+    #page-overview.page { padding: 0; max-width: none; }
+    #neural-overview-frame {
+      width: 100%; display: block; background: #02040a;
+      border: 1px solid rgba(255,255,255,.13); border-radius: 14px;
+      box-shadow: 0 24px 60px -28px rgba(0,0,0,.8);
+    }
   </style>
   <!-- enhance.css (old neon theme) disabled — theme.css is now the single source of truth -->
-  <link rel="stylesheet" href="theme.css?v=24-ml-vol">
+  <!-- BUMP this version on every theme.css change — it is what invalidates
+       browsers that cached the old URL. Forgetting it while nginx cached CSS
+       for 1h caused the unstyled-page bug on 17 Jul 2026. -->
+  <link rel="stylesheet" href="theme.css?v=37-hardening">
+
+  <style>
+    /* ══════════════════════════════════════════════════════════════════════
+       NEURAL SPINE — the command rail.
+       Not a list of links: a circuit. A photon runs down the spine trace, each
+       destination is a hex node docked to it by an elbow, and the active node
+       locks on with a chamfered carrier + scan sweep. Ctrl+B collapses it to a
+       node-only column where the hexes alone carry the map.
+       This block sits AFTER theme.css on purpose — theme.css owns .sidebar/.ni
+       with !important, so these rules have to come last (and out-specify) to win.
+       ══════════════════════════════════════════════════════════════════════ */
+    :root { --rail-w: 246px; --rail-line: rgba(255,255,255,.08); }
+    body.rail-min { --rail-w: 76px; }
+    .shell {
+      grid-template-columns: var(--rail-w) 1fr !important;
+      transition: grid-template-columns .3s cubic-bezier(.4,0,.2,1);
+    }
+
+    .sidebar.rail {
+      padding: 16px 12px 12px !important;
+      overflow: hidden !important;               /* the list scrolls, the rail doesn't */
+      gap: 0 !important;
+      background: var(--bg-soft) !important;
+    }
+    /* Per-section nav hues (--nc) are set inline on each .ni. Linear runs ONE
+       accent, so they're overridden here rather than edited out of 14 tags —
+       !important is what lets a stylesheet beat an inline custom property. */
+    .rail .nav.spine .ni { --nc: #5e6ad2 !important; }
+
+    /* ── Brand ─────────────────────────────────────────────────────────── */
+    .rail .rail-core {
+      display: flex; align-items: center; gap: 11px; position: relative;
+      padding: 2px 2px 15px !important; margin-bottom: 0 !important;
+      border-bottom: 1px solid var(--rail-line) !important;
+    }
+    .rail .nx-mark {
+      width: 32px; height: 32px; flex: 0 0 auto; border-radius: 6px; position: relative;
+      display: grid; place-items: center; overflow: hidden;
+      background: #5e6ad2;
+      box-shadow: none;
+    }
+    .rail .nx-mark::after {                       /* one calm core dot, no pulse */
+      content: ''; position: absolute; width: 8px; height: 8px; border-radius: 50%;
+      background: #fff; box-shadow: none;
+    }
+    @keyframes coreBeat { 0%,100% { opacity: .5; transform: scale(.75) } 50% { opacity: 1; transform: scale(1.15) } }
+    .rail .logo-title { font-family: var(--sans); font-size: 13.5px !important; letter-spacing: -.02em; font-weight: 600 !important; }
+    .rail .logo-sub {
+      display: flex; align-items: center; gap: 5px;
+      font-family: var(--sans); font-size: 11px !important; letter-spacing: -.006em !important; color: var(--faint) !important;
+    }
+    .rail .logo-sub .lock { width: 5px; height: 5px; border-radius: 50%; background: var(--ok); box-shadow: none; }
+    .rail .rail-btn {
+      position: absolute; right: -6px; top: 4px; width: 20px; height: 20px; padding: 0;
+      display: grid; place-items: center; cursor: pointer; font-size: 10px; line-height: 1;
+      color: var(--faint); background: rgba(255,255,255,.04);
+      border: 1px solid var(--rail-line); border-radius: 6px; transition: .16s;
+    }
+    .rail .rail-btn:hover { color: var(--text); border-color: rgba(255,255,255,.16); background: rgba(255,255,255,.08); }
+
+    /* ── The nav list ──────────────────────────────────────────────────── */
+    .rail .nav.spine {
+      position: relative; flex: 1; gap: 0 !important;
+      padding: 14px 2px 18px !important;
+      overflow-y: auto; overflow-x: hidden; scrollbar-width: none;
+    }
+    .rail .nav.spine::-webkit-scrollbar { width: 0 }
+    /* the animated spine trace + running photon are gone — calmer, cleaner */
+    .rail .spine-trace, .rail .photon { display: none !important; }
+
+    /* ── Section labels: quiet dividers with a clear gap above each group ── */
+    .rail .nav.spine .ns {
+      display: flex; align-items: center; position: relative;
+      padding: 22px 12px 8px !important;
+      font-family: var(--sans); font-size: 11px !important; font-weight: 500 !important;
+      letter-spacing: .01em !important; color: var(--faint) !important; text-transform: none;
+    }
+    .rail .nav.spine .ns:first-child { padding-top: 6px !important; }
+
+    /* ── Nav rows ──────────────────────────────────────────────────────── */
+    .rail .nav.spine .ni {
+      position: relative; display: flex; align-items: center; gap: 12px; margin: 3px 0;
+      padding: 9px 12px !important;
+      border-radius: 6px !important; background: transparent !important; box-shadow: none;
+      color: var(--muted) !important; font-size: 13px !important; font-weight: 500 !important;
+      transition: color .12s, background .12s;
+    }
+    /* the node is a simple status dot in the section's colour (no hexagons/rings) */
+    .rail .nav.spine .node {
+      position: static; margin: 0; flex: 0 0 auto; width: 6px; height: 6px; border-radius: 50%;
+      clip-path: none; background: currentColor; opacity: .4; box-shadow: none;
+      transition: opacity .12s;
+    }
+    .rail .nav.spine .node::after { content: none; }
+    .rail .nav.spine .nix { display: none; }        /* stage numbers dropped — less clutter */
+    .rail .nav.spine .nlab { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .rail .nav.spine .nbadge {
+      font-family: var(--mono); font-size: 9.5px; letter-spacing: .02em; color: var(--faint);
+      background: rgba(255,255,255,.06); border: 1px solid transparent;
+      padding: 1px 5px; border-radius: 4px; margin-left: 6px;
+    }
+    .rail .nav.spine .nbadge:empty { display: none }
+    .rail .nav.spine .nbadge.hot { color: #f28b8b; background: rgba(235,87,87,.13); border-color: transparent }
+
+    .rail .nav.spine .ni:hover {
+      background: rgba(255,255,255,.05) !important; color: var(--text) !important;
+      padding: 9px 12px !important;
+    }
+    .rail .nav.spine .ni:hover .node { opacity: .8; box-shadow: none; }
+
+    /* active — flat indigo wash + a thin left bar. No glow, no colour-mix hue. */
+    .rail .nav.spine .ni.active {
+      background: rgba(94,106,210,.16) !important;
+      color: var(--text) !important; font-weight: 500 !important;
+      box-shadow: inset 2px 0 0 var(--nc);
+    }
+    .rail .nav.spine .ni.active .node { opacity: 1; color: var(--nc); box-shadow: none; }
+
+    /* ── Collapsed: a centred column of dots ───────────────────────────── */
+    body.rail-min .rail .core-txt,
+    body.rail-min .rail .nav.spine .nlab,
+    body.rail-min .rail .nav.spine .nix,
+    body.rail-min .rail .nav.spine .ns span { display: none !important; }
+    body.rail-min .rail .rail-core { justify-content: center; padding-bottom: 12px !important; }
+    body.rail-min .rail .rail-btn { right: 0; top: -6px; }
+    body.rail-min .rail .nav.spine .ns { padding: 12px 0 6px !important; justify-content: center; }
+    body.rail-min .rail .nav.spine .ns::before { content: ''; width: 18px; height: 1px; background: var(--rail-line); }
+    body.rail-min .rail .nav.spine .ni,
+    body.rail-min .rail .nav.spine .ni:hover { padding: 10px 0 !important; justify-content: center; }
+    body.rail-min .rail .nav.spine .node { width: 12px; height: 12px; opacity: .8; }
+    body.rail-min .rail .nav.spine .nbadge {    /* the count collapses to an alert pip on the node's shoulder */
+      position: absolute; top: 5px; left: 50%; margin: 0 0 0 7px; padding: 0;
+      width: 6px; height: 6px; border-radius: 50%; font-size: 0; overflow: hidden;
+      background: #5e6ad2; border-color: transparent;
+      box-shadow: none;
+    }
+    body.rail-min .rail .nav.spine .nbadge.hot { background: #eb5757; box-shadow: none }
+
+    /* ══════════════════════════════════════════════════════════════════════
+       SERVICE DECKS — every page below Overview gets the same treatment.
+       Each one is a MICROSERVICE with its own identity: its own accent, its own
+       signature motif behind the header, its own live vitals. Everything here is
+       chrome — the markup, the IDs and every onclick underneath are untouched, so
+       every button does exactly what it did before.
+       --acc is set per page by buildServiceDecks(); all of this inherits from it.
+       ══════════════════════════════════════════════════════════════════════ */
+    .page { --acc: #5e6ad2; --acc-soft: rgba(94,106,210,.12); }
+
+    /* flat floor — the aurora radials are gone with the rest of the glow */
+    .main { background: transparent !important; }
+    .page:not(#page-overview) { padding-bottom: 56px; }
+
+    /* ── Service header ───────────────────────────────────────────────── */
+    .svc-hd {
+      position: relative; overflow: hidden;
+      display: flex; align-items: flex-end; justify-content: space-between; gap: 28px; flex-wrap: wrap;
+      padding: 26px 28px; margin-bottom: 22px;
+      border: 1px solid rgba(255,255,255,.14); border-radius: 16px;
+      background:
+        radial-gradient(80% 140% at 0% 0%, color-mix(in srgb, var(--acc) 13%, transparent), transparent 62%),
+        linear-gradient(180deg, rgba(10,16,28,.9), rgba(4,7,13,.92));
+      box-shadow: 0 28px 70px -50px #000;
+    }
+    .svc-hd::after {                      /* the accent runs the full bottom edge */
+      content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 1px;
+      background: linear-gradient(90deg, var(--acc), transparent 65%);
+      box-shadow: 0 0 14px color-mix(in srgb, var(--acc) 60%, transparent);
+    }
+    .svc-fx { position: absolute; inset: 0; pointer-events: none; opacity: .5; }
+    .svc-id { position: relative; display: flex; gap: 18px; align-items: flex-start; min-width: 0; }
+    .svc-glyph {
+      flex: 0 0 auto; width: 46px; height: 46px; display: grid; place-items: center;
+      font-size: 19px; color: var(--acc); margin-top: 2px;
+      clip-path: polygon(50% 0, 100% 25%, 100% 75%, 50% 100%, 0 75%, 0 25%);
+      background: color-mix(in srgb, var(--acc) 14%, transparent);
+      filter: drop-shadow(0 0 10px color-mix(in srgb, var(--acc) 55%, transparent));
+    }
+    .svc-eyebrow {
+      font-family: var(--sans); font-size: 11px; font-weight: 500; letter-spacing: -.006em; text-transform: none;
+      color: var(--muted); margin-bottom: 8px; display: flex; align-items: center; gap: 8px;
+    }
+    .svc-eyebrow i { width: 5px; height: 5px; border-radius: 50%; background: var(--acc); box-shadow: 0 0 8px var(--acc); font-style: normal; animation: coreBeat 2.4s ease-in-out infinite; }
+    .svc-title {
+      font-size: 27px !important; font-weight: 800 !important; letter-spacing: -.7px;
+      margin: 0 0 8px !important; line-height: 1.1; color: #f2f8ff !important;
+    }
+    .svc-tag { margin: 0; max-width: 62ch; font-size: 13px; line-height: 1.65; color: #8a8f98; }
+    .svc-stats { position: relative; display: flex; gap: 10px; flex-wrap: wrap; }
+    .sv-chip {
+      display: flex; flex-direction: column; gap: 4px; min-width: 92px; padding: 10px 14px;
+      background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.12);
+      clip-path: polygon(0 0, calc(100% - 8px) 0, 100% 8px, 100% 100%, 8px 100%, 0 calc(100% - 8px));
+    }
+    .sv-chip .k { font-family: var(--sans); font-size: 11px; letter-spacing: -.006em; text-transform: none; color: var(--muted); font-weight: 500; }
+    .sv-chip .v { font-family: var(--mono); font-size: 19px; font-weight: 700; color: #eaf6ff; line-height: 1; }
+    .sv-chip.hot .v { color: #f28b8b; }
+    .sv-chip.acc .v { color: var(--acc); }
+    .sv-chip.txt .v { font-size: 12px; letter-spacing: .04em; padding: 4px 0; }
+
+    /* signature motifs — one per service, so no two decks read the same */
+    .svc-fx[data-motif="radar"] {
+      background: conic-gradient(from 0deg, color-mix(in srgb, var(--acc) 22%, transparent), transparent 28%);
+      animation: fxSpin 7s linear infinite; transform-origin: 8% 120%;
+    }
+    .svc-fx[data-motif="scan"] {
+      background: repeating-linear-gradient(180deg, color-mix(in srgb, var(--acc) 9%, transparent) 0 1px, transparent 1px 7px);
+      animation: fxScan 6s linear infinite;
+    }
+    .svc-fx[data-motif="mesh"] {
+      background-image: radial-gradient(color-mix(in srgb, var(--acc) 32%, transparent) 1px, transparent 1px);
+      background-size: 22px 22px; animation: fxDrift 14s linear infinite; opacity: .3;
+    }
+    .svc-fx[data-motif="wave"] {
+      background: repeating-linear-gradient(90deg, color-mix(in srgb, var(--acc) 16%, transparent) 0 2px, transparent 2px 14px);
+      -webkit-mask-image: radial-gradient(60% 100% at 80% 120%, #000, transparent);
+              mask-image: radial-gradient(60% 100% at 80% 120%, #000, transparent);
+      animation: fxSlide 9s linear infinite;
+    }
+    .svc-fx[data-motif="chain"] {
+      background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--acc) 12%, transparent) 0 1px, transparent 1px 12px);
+      animation: fxSlide 11s linear infinite reverse;
+    }
+    .svc-fx[data-motif="pulse"] {
+      background: repeating-radial-gradient(circle at 92% 130%, color-mix(in srgb, var(--acc) 16%, transparent) 0 1px, transparent 1px 26px);
+      animation: fxBreathe 5s ease-in-out infinite;
+    }
+    .svc-fx[data-motif="grid"] {
+      background-image:
+        linear-gradient(color-mix(in srgb, var(--acc) 13%, transparent) 1px, transparent 1px),
+        linear-gradient(90deg, color-mix(in srgb, var(--acc) 13%, transparent) 1px, transparent 1px);
+      background-size: 34px 34px;
+      -webkit-mask-image: linear-gradient(180deg, transparent, #000);
+              mask-image: linear-gradient(180deg, transparent, #000);
+      animation: fxDrift 20s linear infinite;
+    }
+    @keyframes fxSpin { to { transform: rotate(360deg) } }
+    @keyframes fxScan { to { background-position: 0 140px } }
+    @keyframes fxDrift { to { background-position: 60px 60px } }
+    @keyframes fxSlide { to { background-position: 120px 0 } }
+    @keyframes fxBreathe { 0%,100% { opacity: .35 } 50% { opacity: .7 } }
+
+    /* ── Cards inside a service deck: targeting frames, not boxes ─────── */
+    .page:not(#page-overview) .card {
+      border-radius: 14px !important;
+      background: linear-gradient(180deg, rgba(10,16,28,.72), rgba(4,7,14,.82)) !important;
+      border: 1px solid rgba(255,255,255,.12) !important;
+    }
+    .page:not(#page-overview) .card::after {   /* corner brackets in the service accent */
+      content: ''; position: absolute; inset: 9px; pointer-events: none; border-radius: 4px;
+      border: 1px solid transparent;
+      border-image: linear-gradient(135deg, var(--acc), transparent 22%, transparent 78%, var(--acc)) 1;
+      opacity: .35; transition: opacity .2s;
+    }
+    .page:not(#page-overview) .card:hover::after { opacity: .8 }
+    /* A bracket is absolutely positioned against the card's padding box, so on a card
+       that scrolls sideways (the logs table) its right edge lands INSIDE the table and
+       reads as a stray vertical line. Scrolling cards get no bracket. */
+    .page:not(#page-overview) .card[style*="overflow"]::after { content: none; }
+    .page:not(#page-overview) .card:hover { border-color: color-mix(in srgb, var(--acc) 34%, transparent) !important; }
+    .page:not(#page-overview) .card > .ch {
+      padding: 15px 20px !important; gap: 12px;
+      border-bottom: 1px solid rgba(255,255,255,.1);
+      background: linear-gradient(90deg, color-mix(in srgb, var(--acc) 7%, transparent), transparent 55%);
+    }
+    .page:not(#page-overview) .card > .ch .ct {
+      position: relative; padding-left: 0;
+      font-family: var(--sans) !important; font-size: 13px !important; font-weight: 550 !important;
+      letter-spacing: -.01em !important; text-transform: none; color: var(--text) !important;
+    }
+    /* the glowing accent bar beside every card title is gone with the rest of the glow */
+    .page:not(#page-overview) .card > .ch .ct::before { content: none; }
+    .page:not(#page-overview) .card > .cb { padding: 20px !important; }
+
+    /* ── Tables: console readouts ─────────────────────────────────────── */
+    .page:not(#page-overview) .tbl thead th, .page:not(#page-overview) table th {
+      font-family: var(--sans) !important; font-size: 11.5px !important; font-weight: 500 !important;
+      letter-spacing: .02em !important; text-transform: none; color: var(--muted) !important;
+      padding: 10px 16px !important; background: var(--bg-soft) !important;
+      border-bottom: 1px solid var(--border) !important;
+    }
+    .page:not(#page-overview) .tbl tbody td, .page:not(#page-overview) table td {
+      padding: 12px 16px !important; font-size: 12.5px;
+      border-bottom: 1px solid rgba(255,255,255,.06) !important;
+    }
+    .page:not(#page-overview) .tbl tbody tr { position: relative; }
+    .page:not(#page-overview) .tbl tbody tr:hover td {
+      background: color-mix(in srgb, var(--acc) 7%, transparent) !important;
+    }
+    .page:not(#page-overview) .tbl tbody tr:hover td:first-child {
+      box-shadow: inset 3px 0 0 var(--acc);
+    }
+
+    /* ── Controls: plain Linear controls. ──────────────────────────────
+       These were "chamfered hardware": border-radius 0 with a clip-path notch
+       cut from each corner, monospace UPPERCASE tracked to .12em. It shouted,
+       and it sat on the buttons you press most. Now they're ordinary controls
+       that match the rest of the system. */
+    .page:not(#page-overview) .btn {
+      border-radius: var(--radius-sm) !important; font-family: var(--sans); font-size: 13px !important;
+      letter-spacing: -.006em; text-transform: none; padding: 8px 14px !important;
+      clip-path: none;
+    }
+    .page:not(#page-overview) .btn.pri {
+      background: var(--accent) !important;
+      color: #fff !important;
+      box-shadow: none !important;
+    }
+    .page:not(#page-overview) .btn:not(.pri):hover {
+      border-color: rgba(255,255,255,.14) !important;
+      color: var(--text) !important;
+    }
+    .page:not(#page-overview) input:not(.srch input),
+    .page:not(#page-overview) select,
+    .page:not(#page-overview) textarea {
+      border-radius: var(--radius-sm) !important; background: var(--surface) !important;
+      border: 1px solid var(--border) !important; font-size: 13px !important;
+      clip-path: none;
+    }
+    .page:not(#page-overview) input:focus,
+    .page:not(#page-overview) select:focus,
+    .page:not(#page-overview) textarea:focus {
+      border-color: color-mix(in srgb, var(--acc) 60%, transparent) !important;
+      box-shadow: 0 0 0 3px color-mix(in srgb, var(--acc) 12%, transparent) !important;
+    }
+    .page:not(#page-overview) .chip {
+      border-radius: var(--radius-sm) !important; font-family: var(--sans); font-size: 12.5px; letter-spacing: -.006em;
+      text-transform: none; padding: 7px 13px;
+      clip-path: none;
+    }
+    .page:not(#page-overview) .chip.active {
+      background: var(--acc) !important; color: #fff !important; border-color: transparent !important;
+      box-shadow: none;
+    }
+    /* metrics / KPI tiles pick up the service accent */
+    .page:not(#page-overview) .metric::after,
+    .page:not(#page-overview) .kpi::after {
+      background: radial-gradient(circle, color-mix(in srgb, var(--acc) 16%, transparent), transparent 70%) !important;
+    }
+    .page:not(#page-overview) .mval,
+    .page:not(#page-overview) .metric-value { color: #eaf6ff !important; }
+
+    @media (max-width: 900px) {
+      .svc-hd { flex-direction: column; align-items: stretch; gap: 18px; padding: 20px; }
+      .svc-title { font-size: 22px !important; }
+    }
+    @media (prefers-reduced-motion: reduce) { .svc-fx, .svc-eyebrow i { animation: none !important; } }
+  </style>
 </head>
 
 <body>
 
   <div class="shell">
-    <aside class="sidebar">
-      <div class="logo">
-        <div class="brand-mark">
-          <img src="logo.png" alt="" onerror="if(!this.dataset.f){this.dataset.f=1;this.src='logo.svg'}else{this.style.display='none';this.nextElementSibling.style.display='block'}">
-          <svg style="display:none" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M12 2l8 3v6c0 5-3.5 8.5-8 11-4.5-2.5-8-6-8-11V5l8-3z"/><path d="M9 12l2 2 4-4"/>
-          </svg>
+    <!-- ══ NEURAL SPINE — the command rail. Every destination is a hex node
+         docked to a live circuit trace. Collapses to a node-only column (Ctrl+B). ══ -->
+    <aside class="sidebar rail" id="rail">
+      <div class="logo rail-core">
+        <div class="brand-mark nx-mark" aria-hidden="true"></div>
+        <div class="core-txt">
+          <div class="logo-title">CYBER<b>SENTINEL</b></div>
+          <div class="logo-sub"><i class="lock"></i>Neural Command</div>
         </div>
-        <div>
-          <div class="logo-title">CyberSentinel</div>
-          <div class="logo-sub">SOC Console</div>
-        </div>
+        <button class="rail-btn" id="rail-btn" onclick="toggleRail()" title="Collapse rail — Ctrl+B"
+          aria-label="Collapse rail">&#10216;</button>
       </div>
-      <nav class="nav">
-        <div class="ns">Monitor</div>
-        <div class="ni active" onclick="nav('overview')"><span class="ndot nd-r"></span>Overview</div>
-        <div class="ni" onclick="nav('trail')"><span class="ndot nd-w"></span>IP Trail</div>
-        <div class="ni" onclick="nav('logs')"><span class="ndot nd-g"></span>Logs Explorer</div>
-        <div class="ni" onclick="nav('intelligence')"><span class="ndot" style="background:var(--accent-2);color:var(--accent-2)"></span>Intelligence</div>
-        <div class="ns">Baselines</div>
-        <div class="ni" onclick="nav('deviations')"><span class="ndot nd-r"></span>Deviations</div>
-        <div class="ni" onclick="nav('bslexplorer')"><span class="ndot nd-w"></span>Baseline Explorer</div>
-        <div class="ns">AI Analysis</div>
-        <div class="ni" onclick="nav('aiinvestigate')"><span class="ndot" style="background:var(--ai)"></span>AI Investigator</div>
-        <div class="ni" onclick="nav('nlquery')"><span class="ndot" style="background:var(--ai)"></span>SOC Query</div>
-        <div class="ns">Detection</div>
-        <div class="ni" onclick="nav('ml')"><span class="ndot nd-g"></span>ML Anomaly</div>
-        <div class="ns">Threat Intel</div>
-        <div class="ni" onclick="nav('incidents')"><span class="ndot nd-r"></span>Incidents</div>
-        <div class="ni" onclick="nav('ueba')"><span class="ndot" style="background:var(--ai)"></span>UEBA</div>
-        <div class="ni" onclick="nav('killchain')"><span class="ndot" style="background:var(--purple)"></span>Kill Chain</div>
-        <div class="ns">Response</div>
-        <div class="ni" onclick="nav('playbooks')"><span class="ndot" style="background:var(--accent)"></span>Playbooks</div>
-        <div class="ns">Reporting</div>
-        <div class="ni" onclick="nav('reports')"><span class="ndot" style="background:var(--ai)"></span>Reports</div>
+
+      <nav class="nav spine">
+        <span class="spine-trace" aria-hidden="true"><i class="photon"></i></span>
+
+        <div class="ns"><span>Command</span></div>
+        <div class="ni active" data-label="Overview" title="Overview" onclick="nav('overview')" style="--nc:#5e6ad2">
+          <span class="node"></span><i class="nix">01</i><span class="nlab">Overview</span><span class="nbadge" id="rb-overview"></span>
+        </div>
+        <div class="ni" data-label="Incidents" title="Incidents" onclick="nav('incidents')" style="--nc:#eb5757">
+          <span class="node"></span><i class="nix">02</i><span class="nlab">Incidents</span><span class="nbadge" id="rb-inc"></span>
+        </div>
+
+        <div class="ns"><span>Detect</span></div>
+        <div class="ni" data-label="Deviations" title="Deviations" onclick="nav('deviations')" style="--nc:#eb5757">
+          <span class="node"></span><i class="nix">03</i><span class="nlab">Deviations</span><span class="nbadge" id="rb-dev"></span>
+        </div>
+        <div class="ni" data-label="UEBA · Identity" title="UEBA · Identity" onclick="nav('ueba')" style="--nc:#a78bfa">
+          <span class="node"></span><i class="nix">04</i><span class="nlab">UEBA &middot; Identity</span><span class="nbadge" id="rb-ueba"></span>
+        </div>
+        <div class="ni" data-label="Anomalies · ML" title="Anomalies · ML" onclick="nav('ml')" style="--nc:#a78bfa">
+          <span class="node"></span><i class="nix">05</i><span class="nlab">Anomalies &middot; ML</span><span class="nbadge" id="rb-ml"></span>
+        </div>
+        <div class="ni" data-label="Baseline Explorer" title="Baseline Explorer" onclick="nav('bslexplorer')" style="--nc:#f2c94c">
+          <span class="node"></span><i class="nix">06</i><span class="nlab">Baseline Explorer</span><span class="nbadge"></span>
+        </div>
+
+        <div class="ns"><span>Investigate</span></div>
+        <div class="ni" data-label="IP Trail" title="IP Trail" onclick="nav('trail')" style="--nc:#f2c94c">
+          <span class="node"></span><i class="nix">07</i><span class="nlab">IP Trail</span><span class="nbadge" id="rb-trail"></span>
+        </div>
+        <div class="ni" data-label="Logs Explorer" title="Logs Explorer" onclick="nav('logs')" style="--nc:#4cb782">
+          <span class="node"></span><i class="nix">08</i><span class="nlab">Logs Explorer</span><span class="nbadge" id="rb-logs"></span>
+        </div>
+        <div class="ni" data-label="AI Investigator" title="AI Investigator" onclick="nav('aiinvestigate')" style="--nc:#a78bfa">
+          <span class="node"></span><i class="nix">09</i><span class="nlab">AI Investigator</span><span class="nbadge"></span>
+        </div>
+        <div class="ni" data-label="SOC Query" title="SOC Query" onclick="nav('nlquery')" style="--nc:#a78bfa">
+          <span class="node"></span><i class="nix">10</i><span class="nlab">SOC Query</span><span class="nbadge"></span>
+        </div>
+
+        <div class="ns"><span>Intel</span></div>
+        <div class="ni" data-label="Intelligence" title="Intelligence" onclick="nav('intelligence')" style="--nc:#4cb782">
+          <span class="node"></span><i class="nix">11</i><span class="nlab">Intelligence</span><span class="nbadge" id="rb-intel"></span>
+        </div>
+        <div class="ni" data-label="Kill Chain" title="Kill Chain" onclick="nav('killchain')" style="--nc:#a78bfa">
+          <span class="node"></span><i class="nix">12</i><span class="nlab">Kill Chain</span><span class="nbadge" id="rb-kc"></span>
+        </div>
+
+        <div class="ns"><span>Operate</span></div>
+        <div class="ni" data-label="Responder · Playbooks" title="Responder · Playbooks" onclick="nav('playbooks')" style="--nc:#5e6ad2">
+          <span class="node"></span><i class="nix">13</i><span class="nlab">Responder</span><span class="nbadge" id="rb-pb"></span>
+        </div>
+        <div class="ni" data-label="Reports" title="Reports" onclick="nav('reports')" style="--nc:#8a8f98">
+          <span class="node"></span><i class="nix">14</i><span class="nlab">Reports</span><span class="nbadge"></span>
+        </div>
+        <div class="ni" data-label="Settings" title="Settings" onclick="nav('settings')" style="--nc:#8a8f98">
+          <span class="node"></span><i class="nix">15</i><span class="nlab">Settings</span><span class="nbadge"></span>
+        </div>
       </nav>
-      <div class="sfooter">
-        <div class="srow"><span class="pulse"></span>Backend API</div>
-        <div class="srow" id="ml-status"><span
-            style="width:6px;height:6px;border-radius:50%;background:var(--muted);display:inline-block"></span> ML
-          Engine</div>
-        <div class="srow" id="ai-status"><span
-            style="width:6px;height:6px;border-radius:50%;background:var(--muted);display:inline-block"></span> AI
-          Engine</div>
-        <div style="font-size:10px;color:var(--muted);margin-top:6px" id="last-ref">—</div>
+
+      <div class="rail-health" id="rail-health" title="Pipeline health">
+        <span class="rh-dot" id="rh-dot"></span>
+        <span class="rh-txt" id="rh-txt">checking&hellip;</span>
       </div>
+
     </aside>
     <main class="main">
       <div class="topbar">
@@ -2084,179 +2564,17 @@
           <input id="ip-search" placeholder="Search IP…" onkeydown="if(event.key==='Enter')doSearch()" />
         </div>
         <button class="btn" onclick="doSearch()">Search</button>
-        <button class="btn pri" onclick="refreshAll()">↻ Refresh</button>
+        <div class="cmdk-trigger" onclick="openCmdk()">⌘ Command<kbd>Ctrl K</kbd></div>
+      </div>
+      <div class="cmdk-overlay" id="cmdk-overlay">
+        <div class="cmdk-box">
+          <div class="cmdk-in"><span class="pr">&#10095;</span><input id="cmdk-input" placeholder="Jump to a section, or trace an IP / user / host…" autocomplete="off" /></div>
+          <div class="cmdk-list" id="cmdk-list"></div>
+        </div>
       </div>
       <div id="page-overview" class="page active">
-        <section class="ops-hero">
-          <div class="ops-main">
-            <div class="ops-kicker"><span class="ops-live-dot"></span>CyberSentinel AI &middot; autonomous triage</div>
-            <div class="ops-title" id="ops-posture"><span class="ops-ai">ML</span> is reading the wire&hellip;</div>
-            <div class="ops-copy" id="ops-copy">Anomaly model, behavioural baselines and identity risk engines are correlating live telemetry&hellip;</div>
-            <div class="ops-tape" id="ops-live-chips"></div>
-          </div>
-          <div class="ops-vol" title="Total events ingested and retained in the log store">
-            <div class="ops-vol-n" id="ops-total">&mdash;</div>
-            <div class="ops-vol-l">logs ingested</div>
-          </div>
-          <div class="ops-start">
-            <div class="ops-start-head">START HERE <span class="ops-start-sub">your top moves, ranked</span></div>
-            <div id="ops-start-list">
-              <div class="empty" style="padding:14px">Ranking priorities&hellip;</div>
-            </div>
-          </div>
-        </section>
-        <section class="situation-board">
-          <div class="threat-dial">
-            <div class="dial-ring" id="threat-dial" style="--risk:0">
-              <div class="dial-core">
-                <span id="threat-index">0</span>
-                <small>Threat Index</small>
-              </div>
-            </div>
-            <div class="dial-caption" id="threat-caption">Waiting for live telemetry.</div>
-            <div class="dial-meta">
-              <span class="dial-pill" id="dial-hot">HOT 0</span>
-              <span class="dial-pill" id="dial-alerts">ALERTS 0</span>
-            </div>
-          </div>
-          <div class="signal-matrix">
-            <div class="matrix-head">
-              <div class="matrix-title">Signal Strength</div>
-              <div class="matrix-state" id="matrix-state">SYNCING</div>
-            </div>
-            <div class="signal-row">
-              <div class="signal-name">Hot IPs</div>
-              <div class="sig-track">
-                <div class="sig-fill danger" id="sig-hot"></div>
-              </div>
-              <div class="sig-value" id="sig-hot-v">0</div>
-            </div>
-            <div class="signal-row">
-              <div class="signal-name">Critical</div>
-              <div class="sig-track">
-                <div class="sig-fill danger" id="sig-critical"></div>
-              </div>
-              <div class="sig-value" id="sig-critical-v">0</div>
-            </div>
-            <div class="signal-row">
-              <div class="signal-name">Deviations</div>
-              <div class="sig-track">
-                <div class="sig-fill warn" id="sig-alerts"></div>
-              </div>
-              <div class="sig-value" id="sig-alerts-v">0</div>
-            </div>
-            <div class="signal-row">
-              <div class="signal-name">Coverage</div>
-              <div class="sig-track">
-                <div class="sig-fill" id="sig-coverage"></div>
-              </div>
-              <div class="sig-value" id="sig-coverage-v">0%</div>
-            </div>
-          </div>
-          <div class="response-queue">
-            <div class="queue-head">
-              <div class="queue-title">Response Queue</div>
-              <div class="queue-state">TOP ACTIVE SOURCES</div>
-            </div>
-            <div class="watchlist" id="watchlist">
-              <div class="empty" style="padding:18px">Waiting for hot IP telemetry</div>
-            </div>
-          </div>
-        </section>
-        <div class="mg">
-          <div class="metric">
-            <div class="mlabel">Total logs</div>
-            <div class="mval mv-a" id="m-total">—</div>
-            <div class="msub">ingested</div>
-          </div>
-          <div class="metric">
-            <div class="mlabel">Unique IPs</div>
-            <div class="mval mv-a" id="m-ips">—</div>
-            <div class="msub">tracked</div>
-          </div>
-          <div class="metric">
-            <div class="mlabel">Hot IPs</div>
-            <div class="mval mv-d" id="m-hot">—</div>
-            <div class="msub">high/critical</div>
-          </div>
-          <div class="metric">
-            <div class="mlabel">Baseline alerts</div>
-            <div class="mval mv-d" id="m-balerts">—</div>
-            <div class="msub">deviations fired</div>
-          </div>
-          <div class="metric">
-            <div class="mlabel">Critical IPs</div>
-            <div class="mval mv-d" id="m-crit">—</div>
-            <div class="msub">P0 flagged</div>
-          </div>
-        </div>
-        <div class="cg2">
-          <div class="cbox">
-            <h3>Activity pulse — last 24h</h3>
-            <div class="cwrap"><canvas id="ch-trend"></canvas></div>
-          </div>
-          <div class="cbox">
-            <h3>Severity split</h3>
-            <div class="cwrap"><canvas id="ch-sev"></canvas></div>
-          </div>
-        </div>
-        <div class="cg2">
-          <div class="cbox">
-            <h3>Top threats (real categories)</h3>
-            <div class="cwrap"><canvas id="ch-threats"></canvas></div>
-          </div>
-          <div class="cbox">
-            <h3>Baseline deviation types</h3>
-            <div class="cwrap"><canvas id="ch-devtypes"></canvas></div>
-          </div>
-        </div>
-
-        <!-- ── Entity spotlight: top sources with the people/machines behind them ── -->
-        <div class="card" style="margin-bottom:20px">
-          <div class="ch">
-            <span class="ct">Priority Entities</span>
-            <span style="font-size:11px;color:var(--muted)">Highest-pressure sources — resolved to who / what was on them</span>
-          </div>
-          <div class="cb">
-            <div class="entity-spot" id="entity-spot">
-              <div class="empty" style="padding:18px">Resolving entities…</div>
-            </div>
-          </div>
-        </div>
-
-        <!-- ── Source IPs & Identities: every IP, every user/host behind it ── -->
-        <div class="card" style="overflow-x:auto">
-          <div class="ch">
-            <span class="ct">Source IPs &amp; Identities</span>
-            <span id="hot-count" style="font-size:11px;color:var(--muted)"></span>
-          </div>
-          <div class="cb" style="padding-bottom:0">
-            <input id="hot-filter" oninput="renderHotTable()" placeholder="Filter by IP, user or host…"
-              style="width:100%;max-width:340px;background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:7px 11px;color:var(--text);font-size:12px;outline:none;margin-bottom:6px" />
-            <div style="font-size:11px;color:var(--muted);margin-bottom:8px">
-              An IP is a <b>location</b>, not an identity. Each row resolves to a real <b>user</b> when one was
-              captured; otherwise to the reporting <b>sensor</b> (the CyberSentinel agent that logged it, e.g.
-              <code>agent-19</code> / <code>BANK-DC-01</code> — a machine, not a person).
-              <span class="ent-nouser">no user</span> = no username on those events; <span class="tev-warn">&#9888;</span> = raw IP only.
-            </div>
-          </div>
-          <table class="tbl">
-            <thead>
-              <tr>
-                <th>Source IP</th>
-                <th>Resolved identity</th>
-                <th>Users on IP</th>
-                <th>Agents on IP</th>
-                <th>Events</th>
-                <th>Top threat</th>
-                <th>Severity</th>
-                <th>Last seen</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody id="hot-tbody"></tbody>
-          </table>
-        </div>
+        <iframe id="neural-overview-frame" src="overview-neural.html?v=2"
+          title="Neural Command Overview" loading="eager"></iframe>
       </div>
       <!-- ══ TELEMETRY INTELLIGENCE: value from the 95% of logs that never alert ══ -->
       <div id="page-intelligence" class="page">
@@ -2265,85 +2583,119 @@
           <span class="ti-live" style="margin-left:auto" id="ti-updated">LIVE</span>
         </div>
         <div class="ti-strip">
-          <div class="ti-kpi" onclick="document.getElementById('ti-silence').scrollIntoView({behavior:'smooth'})">
+          <!-- each KPI opens its module below, rather than scrolling to a wall of open cards -->
+          <div class="ti-kpi" onclick="toggleTI('ti-silence', true)">
             <div class="ti-kpi-n" id="ti-k-silent">—</div>
             <div class="ti-kpi-l">Agents silent / degraded</div>
             <div class="ti-kpi-s">stopped or dropped reporting</div>
           </div>
-          <div class="ti-kpi" onclick="document.getElementById('ti-firstseen').scrollIntoView({behavior:'smooth'})">
+          <div class="ti-kpi" onclick="toggleTI('ti-firstseen', true)">
             <div class="ti-kpi-n" id="ti-k-nov">—</div>
             <div class="ti-kpi-l">Novelties (7d)</div>
             <div class="ti-kpi-s">first-ever users, binaries, countries</div>
           </div>
-          <div class="ti-kpi" onclick="document.getElementById('ti-beacons').scrollIntoView({behavior:'smooth'})">
+          <div class="ti-kpi" onclick="toggleTI('ti-beacons', true)">
             <div class="ti-kpi-n" id="ti-k-beacons">—</div>
             <div class="ti-kpi-l">Suspected beacons</div>
             <div class="ti-kpi-s">machine-regular flows (C2 pattern)</div>
           </div>
-          <div class="ti-kpi" onclick="document.getElementById('ti-policies').scrollIntoView({behavior:'smooth'})">
+          <div class="ti-kpi" onclick="toggleTI('ti-policies', true)">
             <div class="ti-kpi-n" id="ti-k-pol">—</div>
             <div class="ti-kpi-l">Policy findings</div>
             <div class="ti-kpi-s">firewall policy drift / surges</div>
           </div>
-          <div class="ti-kpi" onclick="document.getElementById('ti-coverage').scrollIntoView({behavior:'smooth'})">
+          <div class="ti-kpi" onclick="toggleTI('ti-coverage', true)">
             <div class="ti-kpi-n" id="ti-k-blind">—</div>
             <div class="ti-kpi-l">Agents with blind spots</div>
             <div class="ti-kpi-s">missing process / auth / FIM telemetry</div>
           </div>
         </div>
 
-        <div class="card" id="ti-silence">
-          <div class="ch">
-            <span class="ct ti-head-l"><span class="ti-num">1</span>Silence Sentinel — who stopped reporting</span>
-            <span id="ti-c-silence" class="ti-count">…</span>
+        <!-- All five modules stack as headers; clicking one drops its results open.
+             The bodies keep their original ids, so the renderers fill them whether the
+             panel is open or shut — opening is purely a reveal, never a re-fetch. -->
+        <div class="ti-acc">
+          <div class="card ti-item open" id="ti-silence">
+            <div class="ch ti-ah" role="button" tabindex="0" aria-expanded="true" aria-controls="ti-silence-body">
+              <span class="ct ti-head-l"><span class="ti-num">1</span>Silence Sentinel — who stopped reporting</span>
+              <span id="ti-c-silence" class="ti-count">…</span>
+              <span class="ti-chev" aria-hidden="true">▾</span>
+            </div>
+            <div class="ti-panel"><div class="ti-panel-in">
+              <div class="cb" id="ti-silence-body"><div class="empty">Loading agent health…</div></div>
+            </div></div>
           </div>
-          <div class="cb" id="ti-silence-body"><div class="empty">Loading agent health…</div></div>
-        </div>
 
-        <div class="ti-grid">
-          <div class="card" id="ti-firstseen">
-            <div class="ch">
+          <div class="card ti-item" id="ti-firstseen">
+            <div class="ch ti-ah" role="button" tabindex="0" aria-expanded="false" aria-controls="ti-firstseen-body">
               <span class="ct ti-head-l"><span class="ti-num">2</span>First-Seen Ledger — org-wide novelty</span>
               <span id="ti-c-firstseen" class="ti-count">…</span>
+              <span class="ti-chev" aria-hidden="true">▾</span>
             </div>
-            <div class="cb" id="ti-firstseen-body"><div class="empty">Building novelty ledger…</div></div>
+            <div class="ti-panel"><div class="ti-panel-in">
+              <div class="cb" id="ti-firstseen-body"><div class="empty">Building novelty ledger…</div></div>
+            </div></div>
           </div>
-          <div class="card" id="ti-beacons">
-            <div class="ch">
+
+          <div class="card ti-item" id="ti-beacons">
+            <div class="ch ti-ah" role="button" tabindex="0" aria-expanded="false" aria-controls="ti-beacons-body">
               <span class="ct ti-head-l"><span class="ti-num">3</span>Beaconing — heartbeats in allowed traffic</span>
               <span id="ti-c-beacons" class="ti-count">…</span>
+              <span class="ti-chev" aria-hidden="true">▾</span>
             </div>
-            <div class="cb" id="ti-beacons-body"><div class="empty">Analysing flow timing…</div></div>
+            <div class="ti-panel"><div class="ti-panel-in">
+              <div class="cb" id="ti-beacons-body"><div class="empty">Analysing flow timing…</div></div>
+            </div></div>
           </div>
-        </div>
 
-        <div class="ti-grid">
-          <div class="card" id="ti-policies">
-            <div class="ch">
+          <div class="card ti-item" id="ti-policies">
+            <div class="ch ti-ah" role="button" tabindex="0" aria-expanded="false" aria-controls="ti-policies-body">
               <span class="ct ti-head-l"><span class="ti-num">4</span>Firewall Policy Analytics — drift &amp; surges</span>
               <span id="ti-c-policies" class="ti-count">…</span>
+              <span class="ti-chev" aria-hidden="true">▾</span>
             </div>
-            <div class="cb" id="ti-policies-body"><div class="empty">Profiling policies…</div></div>
+            <div class="ti-panel"><div class="ti-panel-in">
+              <div class="cb" id="ti-policies-body"><div class="empty">Profiling policies…</div></div>
+            </div></div>
           </div>
-          <div class="card" id="ti-coverage">
-            <div class="ch">
+
+          <div class="card ti-item" id="ti-coverage">
+            <div class="ch ti-ah" role="button" tabindex="0" aria-expanded="false" aria-controls="ti-coverage-body">
               <span class="ct ti-head-l"><span class="ti-num">5</span>Blind-Spot Map — where you can't see</span>
               <span id="ti-c-coverage" class="ti-count">…</span>
+              <span class="ti-chev" aria-hidden="true">▾</span>
             </div>
-            <div class="cb" id="ti-coverage-body"><div class="empty">Mapping telemetry coverage…</div></div>
+            <div class="ti-panel"><div class="ti-panel-in">
+              <div class="cb" id="ti-coverage-body"><div class="empty">Mapping telemetry coverage…</div></div>
+            </div></div>
           </div>
         </div>
       </div>
 
       <div id="page-trail" class="page">
         <div class="card" style="margin-bottom:16px">
-          <div class="cb" style="display:flex;gap:10px">
-            <select id="trail-mode" onchange="onTrailModeChange()"
-              style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:8px 10px;color:var(--text);font-size:13px;outline:none">
-              <option value="ip">Trail by IP</option>
-              <option value="username">Trail by Username</option>
-              <option value="host">Trail by Agent</option>
-            </select>
+          <div class="cb trail-bar">
+            <!-- Mode picker. This was a native <select>, which can never match a
+                 custom dark theme — its popup is drawn by the OS, not the page.
+                 With only three mutually-exclusive options a segmented control is
+                 strictly better: every choice is visible, it's one click instead
+                 of two, and it's ours to style.
+                 #trail-mode stays as a hidden input because it's the single source
+                 of truth: goTrailEntity() sets .value directly and then calls
+                 onTrailModeChange(), so the buttons follow the VALUE, not the click. -->
+            <div class="tmode">
+              <span class="tmode-l">Trail by</span>
+              <div class="seg" id="trail-seg" role="radiogroup" aria-label="Trail by"
+                   data-seg="trail-mode" data-onchange="onTrailModeChange" onkeydown="segKeys(event)">
+                <button type="button" class="seg-btn active" role="radio" aria-checked="true"
+                        data-val="ip" onclick="segPick(this,'ip')">IP</button>
+                <button type="button" class="seg-btn" role="radio" aria-checked="false"
+                        data-val="username" onclick="segPick(this,'username')">Username</button>
+                <button type="button" class="seg-btn" role="radio" aria-checked="false"
+                        data-val="host" onclick="segPick(this,'host')">Agent</button>
+              </div>
+            </div>
+            <input type="hidden" id="trail-mode" value="ip">
             <input id="trail-input" placeholder="Enter IP (e.g. 85.11.187.36)"
               onkeydown="if(event.key==='Enter')loadTrail()"
               style="flex:1;background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:8px 12px;color:var(--text);font-size:13px;outline:none" />
@@ -2437,13 +2789,21 @@
           </div>
           <div class="logs-sev">
             <label>Min level</label>
-            <select id="logs-minlevel" onchange="loadLogs()">
-              <option value="0">All levels</option>
-              <option value="1">≥ 1</option>
-              <option value="4">≥ 4 (medium+)</option>
-              <option value="8">≥ 8 (high+)</option>
-              <option value="12">≥ 12 (critical)</option>
-            </select>
+            <!-- was a native <select>; see segRender() for why -->
+            <div class="seg" role="radiogroup" aria-label="Minimum level"
+                 data-seg="logs-minlevel" data-onchange="loadLogs" onkeydown="segKeys(event)">
+              <button type="button" class="seg-btn active" role="radio" aria-checked="true"
+                      data-val="0" onclick="segPick(this,'0')">All</button>
+              <button type="button" class="seg-btn" role="radio" aria-checked="false"
+                      data-val="1" onclick="segPick(this,'1')">≥ 1</button>
+              <button type="button" class="seg-btn" role="radio" aria-checked="false"
+                      data-val="4" onclick="segPick(this,'4')">Medium+</button>
+              <button type="button" class="seg-btn" role="radio" aria-checked="false"
+                      data-val="8" onclick="segPick(this,'8')">High+</button>
+              <button type="button" class="seg-btn" role="radio" aria-checked="false"
+                      data-val="12" onclick="segPick(this,'12')">Critical</button>
+            </div>
+            <input type="hidden" id="logs-minlevel" value="0">
             <button class="btn pri" onclick="loadLogs()">↻ Refresh</button>
           </div>
           <div class="logs-search">
@@ -2451,11 +2811,26 @@
               onkeydown="if(event.key==='Enter')loadLogs()" />
             <button class="btn pri" onclick="loadLogs()">Search</button>
             <button class="btn" onclick="document.getElementById('logs-q').value='';loadLogs()">Clear</button>
+            <div class="seg" role="radiogroup" aria-label="View" data-seg="logs-view"
+                 data-onchange="renderLogs" onkeydown="segKeys(event)" style="margin-left:auto">
+              <button type="button" class="seg-btn active" role="radio" aria-checked="true" data-val="story" onclick="segPick(this,'story')">Story</button>
+              <button type="button" class="seg-btn" role="radio" aria-checked="false" data-val="table" onclick="segPick(this,'table')">Table</button>
+            </div>
+            <input type="hidden" id="logs-view" value="story">
           </div>
+          <div class="logs-presets">
+            <span style="font-size:10px;letter-spacing:.08em;color:var(--faint);text-transform:uppercase">Presets</span>
+            <button class="chip" onclick="logsPreset('bruteforce','0')">Brute force</button>
+            <button class="chip" onclick="logsPreset('web_attack','0')">Web attacks</button>
+            <button class="chip" onclick="logsPreset('privilege_escalation','0')">Privilege escalation</button>
+            <button class="chip" onclick="logsPreset('','12')">Critical only</button>
+          </div>
+          <div class="logs-facets" id="logs-facets"></div>
         </div>
         <div class="card" style="overflow-x:auto">
           <div class="logs-count" id="logs-count">—</div>
-          <table class="tbl">
+          <div id="logs-story" class="logs-story"></div>
+          <table class="tbl" id="logs-table">
             <thead>
               <tr>
                 <th>Time</th><th>Source IP</th><th>Platform</th><th>Threat</th>
@@ -2469,27 +2844,32 @@
         </div>
       </div>
       <div id="page-deviations" class="page">
-        <!-- severity summary tiles (click to filter) -->
-        <div class="dev-sevbar" id="dev-sevbar"></div>
-        <!-- toolbar -->
+        <!-- ═══════════════════════════════════════════════════════════════
+             Grouped by PATTERN, not listed as rows.
+             The old page rendered one card per alert: a severity tile bar, a
+             290px IP list, then N text-wall cards. But the "Why it matters" and
+             "Recommended action" prose comes from alertWhy(TYPE) — it is per
+             TYPE, not per alert. With 176 alerts across 2 types that printed
+             the same two explanations 150 and 26 times. And the alerts are not
+             independent: all 176 fired inside one minute, so they are bursts,
+             not a queue. Group by type, say the explanation once, and lead with
+             when it happened — that is what the data actually is.
+             ═══════════════════════════════════════════════════════════════ -->
+        <!-- KPI strip: the state of the page in four numbers -->
+        <div class="dev-kpis" id="dev-kpis"></div>
+        <div id="dev-burst"></div>
         <div class="dev-toolbar">
-          <input id="dev-search" placeholder="Filter by IP or deviation type…" oninput="renderDeviations()">
-          <button class="btn" onclick="buildAllBaselines()">↻ Rebuild baselines</button>
-          <button class="btn pri" onclick="loadDeviations()">↻ Reload</button>
-          <span id="dev-status" class="muted" style="font-size:12px"></span>
+          <div class="dev-searchwrap">
+            <svg width="13" height="13" fill="none" stroke="var(--faint)" viewBox="0 0 24 24">
+              <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35" stroke-linecap="round"/></svg>
+            <input id="dev-search" placeholder="Filter by IP or pattern…" oninput="devLimit=60;renderDeviations()">
+          </div>
+          <span id="dev-status" class="muted" style="font-size:11px;margin-left:auto"></span>
+          <button class="btn" onclick="buildAllBaselines()" title="Recompute every behavioural baseline from current history">Rebuild baselines</button>
         </div>
-        <!-- two-column: affected IPs + alert feed -->
-        <div class="dev-layout">
-          <div class="card dev-ips-card">
-            <div class="ch"><span class="ct">Affected IPs</span><span id="dev-ip-count" class="muted" style="font-size:11px"></span></div>
-            <div id="dev-ip-list" class="dev-ip-list"></div>
-          </div>
-          <div class="card dev-feed-card">
-            <div class="ch"><span class="ct">Deviation alerts</span><span id="dev-total" class="muted" style="font-size:11px"></span></div>
-            <div id="dev-list" class="dev-list">
-              <div class="empty" style="padding:24px;text-align:center;color:var(--muted)">Loading deviations…</div>
-            </div>
-          </div>
+        <span id="dev-sevfilter" class="dev-sevfilter"></span>
+        <div id="dev-patterns" class="dev-patterns">
+          <div class="empty" style="padding:24px;text-align:center;color:var(--muted)">Loading deviations…</div>
         </div>
       </div>
       <div id="page-bslexplorer" class="page">
@@ -2594,11 +2974,17 @@
           <div class="ch">
             <span class="ct">⚖ Risk watch-list <span style="font-size:11px;color:var(--muted);font-weight:400">— time-decayed risk, stale activity fades</span></span>
             <span style="display:flex;gap:6px;align-items:center">
-              <select id="rba-dim" onchange="loadEntityRisk()" style="background:var(--bg3);color:var(--fg);border:1px solid var(--border);border-radius:5px;padding:3px 8px;font-size:12px">
-                <option value="ip">By source IP</option>
-                <option value="user">By user</option>
-                <option value="host">By host</option>
-              </select>
+              <!-- was a native <select>; see segRender() for why -->
+              <div class="seg seg-sm" role="radiogroup" aria-label="Group risk by"
+                   data-seg="rba-dim" data-onchange="loadEntityRisk" onkeydown="segKeys(event)">
+                <button type="button" class="seg-btn active" role="radio" aria-checked="true"
+                        data-val="ip" onclick="segPick(this,'ip')">Source IP</button>
+                <button type="button" class="seg-btn" role="radio" aria-checked="false"
+                        data-val="user" onclick="segPick(this,'user')">User</button>
+                <button type="button" class="seg-btn" role="radio" aria-checked="false"
+                        data-val="host" onclick="segPick(this,'host')">Host</button>
+              </div>
+              <input type="hidden" id="rba-dim" value="ip">
               <button class="btn" style="font-size:11px" onclick="loadEntityRisk()">↻</button>
             </span>
           </div>
@@ -2613,9 +2999,17 @@
         </div>
         <div style="display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap;align-items:center">
           <button class="btn pri" onclick="loadIncidents()">↻ Refresh triage queue</button>
-          <span style="font-size:12px;color:var(--muted);align-self:center">Correlated campaigns and host incidents — sorted by priority</span>
+          <span style="font-size:12px;color:var(--muted);align-self:center">Correlated campaigns and host incidents — priority is risk-based (fused entity risk, not raw rule level)</span>
+          <span id="noise-stat" style="margin-left:auto;font-size:11px;color:var(--ok)"></span>
         </div>
         <div id="incidents-body"><div class="card"><div class="cb empty">Loading…</div></div></div>
+
+        <!-- ── Case workbench: New → Investigating → Contained → Closed ── -->
+        <div class="card" style="margin-top:16px">
+          <div class="ch"><span class="ct">Case workbench</span>
+            <span class="ti-why">every action is audit-logged · closing requires a disposition — that verdict trains the feedback loop</span></div>
+          <div class="cb" id="cases-body"><div class="empty">Loading cases…</div></div>
+        </div>
       </div>
 
       <div id="page-ueba" class="page">
@@ -2664,13 +3058,21 @@
       <div id="page-killchain" class="page">
         <div class="card" style="margin-bottom:16px">
           <div class="cb" style="display:flex;gap:10px">
-            <input id="kc-ip" placeholder="Enter IP address…"
+            <input id="kc-ip" placeholder="Enter or paste an IP address…"
+              onkeydown="if(event.key==='Enter')loadKillChain()"
               style="flex:1;background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:8px 12px;color:var(--text);font-size:13px;outline:none" />
             <button class="btn pri" onclick="loadKillChain()">Analyse kill chain</button>
             <button class="btn ai" onclick="groundedAI()">Grounded AI brief</button>
           </div>
         </div>
+        <!-- Top IPs quick-pick: don't make the analyst guess an address -->
+        <div class="card" id="kc-topips-card" style="margin-bottom:16px">
+          <div class="ch"><span class="ct">Top IPs to investigate</span>
+            <span style="font-size:11px;color:var(--muted)">highest fused risk — click to analyse its kill chain</span></div>
+          <div class="cb" id="kc-topips"><span style="color:var(--muted);font-size:12px">Loading…</span></div>
+        </div>
         <div id="kc-panel" style="display:none">
+          <div id="kc-identity-card" class="card" style="margin-bottom:16px;display:none"></div>
           <div id="kc-summary-card" class="card" style="margin-bottom:16px"></div>
           <div class="card" style="margin-bottom:16px">
             <div class="ch"><span class="ct" id="kc-title">Attack Timeline</span></div>
@@ -2803,10 +3205,66 @@
             </div>
           </div>
         </div>
+        <!-- ── Active playbooks: the live catalogue responding to incidents ── -->
+        <div id="active-playbooks" style="margin-bottom:20px"></div>
+
         <div id="pb-recommender" style="margin-bottom:16px"><div class="empty" style="padding:30px">Loading recommender…</div></div>
 
       </div>
+      <div id="page-settings" class="page">
+        <div class="card" id="demo-card" style="margin-bottom:16px;display:none">
+          <div class="ch"><h3>Demo mode — scripted attack replay</h3></div>
+          <p style="color:var(--muted);font-size:12px;margin:6px 0 12px">
+            Replays a 4-act attack — <b>recon → brute force → lateral movement → exfil attempt</b> —
+            through the <b>real</b> ingestion pipeline (classification, baselines, ML, incidents all fire).
+            The attacker is <span style="font-family:var(--mono)">198.51.100.66</span> (TEST-NET, never a real host).
+            Watch the Overview light up act by act. <b>Disabled on production</b> so it can never write into the live dataset.</p>
+          <div style="display:flex;gap:10px;align-items:center">
+            <button class="btn pri" id="demo-btn" onclick="runDemo()">▶ Run demo attack</button>
+            <span id="demo-status" style="font-size:12px;color:var(--muted)"></span>
+          </div>
+        </div>
+        <div class="card" style="margin-bottom:16px">
+          <div class="ch"><h3>Threat-intel connectors</h3></div>
+          <p style="color:var(--muted);font-size:12px;margin:6px 0 12px">
+            Each provider is a self-contained connector — outbound-only, cached in the event store, fail-soft
+            (an intel outage never blocks triage). Add the matching key in <span style="font-family:var(--mono)">.env</span> to arm one.</p>
+          <div id="intel-conn-body" style="display:flex;flex-wrap:wrap;gap:10px"></div>
+        </div>
+        <div class="card">
+          <div class="ch"><h3>Field coverage — is every ingested field earning its keep?</h3>
+            <div class="seg" role="radiogroup" aria-label="Coverage window" data-seg="cov-window"
+                 data-onchange="loadFieldCoverage" onkeydown="segKeys(event)">
+              <button type="button" class="seg-btn" role="radio" aria-checked="false" data-val="24" onclick="segPick(this,'24')">Last 24h</button>
+              <button type="button" class="seg-btn" role="radio" aria-checked="false" data-val="168" onclick="segPick(this,'168')">7 days</button>
+              <button type="button" class="seg-btn active" role="radio" aria-checked="true" data-val="0" onclick="segPick(this,'0')">All time</button>
+            </div>
+            <input type="hidden" id="cov-window" value="0">
+          </div>
+          <p style="color:var(--muted);font-size:12px;margin:6px 0 14px">
+            Every column the pipeline maps from Wazuh, with its fill rate over the chosen window.
+            A near-zero row is either a broken parser <b>or</b> a log source (endpoint, sysmon, web)
+            that simply isn't sending yet — this table is how you tell the difference on day one.
+          </p>
+          <div id="cov-note" style="font-size:12px;color:var(--muted);margin-bottom:10px"></div>
+          <div style="overflow-x:auto">
+            <table class="tbl" id="cov-tbl">
+              <thead><tr><th>Column</th><th style="min-width:220px">Fill rate</th><th>Filled / total</th><th>What it drives</th></tr></thead>
+              <tbody id="cov-tbody"><tr><td colspan="4" style="text-align:center;color:var(--muted);padding:24px">Loading…</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
       <div id="page-reports" class="page">
+        <div class="card" style="margin-bottom:16px;border-left:3px solid var(--accent)">
+          <div class="ch"><span class="ct">Executive summary — board-ready</span></div>
+          <div class="cb" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+            <span style="font-size:12px;color:var(--muted)">Events triaged, incidents, true/false positives, MTTR,
+              intel coverage — every number pulled live. Print to PDF for the board.</span>
+            <a class="btn pri" style="text-decoration:none" href="/api/report/executive?days=7" target="_blank" rel="noopener">Open weekly report ↗</a>
+            <a class="btn" style="text-decoration:none" href="/api/report/executive?days=30" target="_blank" rel="noopener">Monthly ↗</a>
+          </div>
+        </div>
         <div class="term-panel">
           <div class="term-title">SOC Reports</div>
           <div class="term-grid">
@@ -2849,9 +3307,6 @@
     const API = '/api';
     const ML  = '/api/ml';
 
-    function openGrafana() {
-      window.open('/grafana/d/cs-ingestion/cybersentinel-logs-explorer', '_blank');
-    }
     async function openClickHousePlay(ip) {
       const q = ip
         ? `SELECT ts, src_ip, dst_ip, dst_port, threat_type, severity, rule_level, mitre_tactic, mitre_technique, country, agent, username, proc_cmdline, full_log FROM cybersentinel.logs WHERE src_ip = '${ip}' ORDER BY ts DESC LIMIT 500 FORMAT JSONCompact`
@@ -2878,7 +3333,7 @@
         }).join('');
         return `<tr>${cells}</tr>`;
       }).join('');
-      const title = ip ? `Logs — ${ip}` : 'Raw Logs — cybersentinel.logs';
+      const title = ip ? `Logs — ${ip}` : 'Raw Logs — event stream';
       const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${title}</title>
 <style>body{margin:0;background:#0d1117;color:#c9d1d9;font-family:monospace;font-size:12px}
 h2{padding:12px 16px;margin:0;background:#161b22;border-bottom:1px solid #30363d;font-size:14px;color:#58a6ff}
@@ -2966,6 +3421,32 @@ tr:hover td{background:#161b22}</style></head>
       get(`${API}/telemetry/policies`).then(renderPolicies);
       get(`${API}/telemetry/coverage`).then(renderCoverage);
     }
+    /* ── Intelligence accordion ──
+       One module open at a time, so the five headers stay on screen together.
+       Clicking the open one shuts it (nothing forced open). Data is fetched on page
+       load regardless of what's expanded — toggling never triggers a request. */
+    const TI_MODULES = ['ti-silence', 'ti-firstseen', 'ti-beacons', 'ti-policies', 'ti-coverage'];
+    function toggleTI(id, forceOpen) {
+      const card = document.getElementById(id);
+      if (!card) return;
+      const willOpen = forceOpen || !card.classList.contains('open');
+      TI_MODULES.forEach(m => {
+        const c = document.getElementById(m);
+        if (!c) return;
+        const open = m === id && willOpen;
+        c.classList.toggle('open', open);
+        c.querySelector('.ti-ah')?.setAttribute('aria-expanded', String(open));
+      });
+      if (willOpen) card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+    document.querySelectorAll('#page-intelligence .ti-ah').forEach(h => {
+      const id = h.closest('.ti-item').id;
+      h.addEventListener('click', () => toggleTI(id));
+      h.addEventListener('keydown', e => {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleTI(id); }
+      });
+    });
+
     function renderSilence(d) {
       const el = document.getElementById('ti-silence-body');
       if (!d || !d.agents) { el.innerHTML = '<div class="empty">No agent telemetry yet.</div>'; return; }
@@ -3008,7 +3489,7 @@ tr:hover td{background:#161b22}</style></head>
       if (d.rare_binaries && d.rare_binaries.length) {
         h += `<div style="font-size:11px;color:var(--muted);font-weight:700;letter-spacing:.8px;text-transform:uppercase;margin:14px 0 6px">Rare binaries (prevalence ≤ 2 machines)</div>` +
           d.rare_binaries.slice(0, 8).map(x =>
-            `<div class="ti-nov"><span class="ti-nov-badge" style="background:rgba(251,191,36,.15);color:#fcd34d">RARE</span>
+            `<div class="ti-nov"><span class="ti-nov-badge" style="background:rgba(242,201,76,.15);color:#e6c264">RARE</span>
              <span class="ti-nov-txt"><b>${escapeHTML(x.proc_image)}</b> — on ${x.on_agents} machine${x.on_agents > 1 ? 's' : ''}, ${x.runs} runs</span></div>`).join('');
       }
       el.innerHTML = h || '<div class="empty">Nothing new in the window — the environment is stable.</div>';
@@ -3105,19 +3586,21 @@ tr:hover td{background:#161b22}</style></head>
         deviations: 'Baseline Deviations', bslexplorer: 'Baseline Explorer',
         aiinvestigate: 'AI Investigator', nlquery: 'SOC Query', ml: 'ML Anomaly',
         incidents: 'Incident Triage', ueba: 'UEBA — Users & Entities', killchain: 'ATT&CK Kill Chain',
-        playbooks: 'Response Playbooks', reports: 'Reports',
+        playbooks: 'Response Playbooks', reports: 'Reports', settings: 'Settings',
       };
       document.getElementById('page-title').textContent = T[name] || name;
       document.body.dataset.page = name;
-      if (name === 'overview') { refreshAll(); }
+      setTimeout(() => { try { jargonize(pageEl); } catch (e) { } }, 1200);
+      if (name === 'overview') { refreshAll(); requestAnimationFrame(fitNeuralDeck); }
       if (name === 'logs') loadLogs();
       if (name === 'intelligence') loadIntelligence();
       if (name === 'ml') loadAnomalies();
       if (name === 'deviations') loadDeviations();
-      if (name === 'incidents') { loadIncidents(); loadEntityRisk(); loadAttackCoverage(); }
+      if (name === 'incidents') { loadIncidents(); loadEntityRisk(); loadAttackCoverage(); loadCases(); }
       if (name === 'playbooks') loadPlaybooksPage();
+      if (name === 'settings') { loadFieldCoverage(); loadIntelConnectors(); loadDemoCard(); }
       if (name === 'ueba') loadUEBA();
-      if (name === 'killchain') { /* loaded on-demand via goKillChain or manual input */ }
+      if (name === 'killchain') { loadKCTopIPs(); }
       if (name === 'users') { loadUsers(); loadTopologyStatus(); }
       if (name === 'auditlog') loadAuditLog();
     }
@@ -3156,14 +3639,14 @@ tr:hover td{background:#161b22}</style></head>
         return await r.json();
       } catch (e) { toast('API: ' + e.message, 'err'); return null; }
     }
-    const COLORS = ['#38bdf8', '#34d399', '#fbbf24', '#fb7185', '#c084fc', '#fb923c', '#22d3ee', '#a3e635', '#818cf8', '#f472b6'];
-    const CHART_GRID = 'rgba(96,165,250,.08)', CHART_TICK = '#8ea3c0';
+    const COLORS = ['#5e6ad2', '#4cb782', '#f2c94c', '#eb5757', '#a78bfa', '#f2994a', '#7b86e6', '#a3e635', '#7b86e6', '#f472b6'];
+    const CHART_GRID = 'rgba(255,255,255,.08)', CHART_TICK = '#8ea3c0';
     function pie(id, counts, palette) {
       const labels = Object.keys(counts), data = Object.values(counts);
       if (charts[id]) charts[id].destroy();
       charts[id] = new Chart(document.getElementById(id).getContext('2d'), {
         type: 'doughnut',
-        data: { labels, datasets: [{ data, backgroundColor: (palette || COLORS).slice(0, labels.length), borderWidth: 2, borderColor: '#04070d', hoverOffset: 6 }] },
+        data: { labels, datasets: [{ data, backgroundColor: (palette || COLORS).slice(0, labels.length), borderWidth: 2, borderColor: '#08090a', hoverOffset: 6 }] },
         options: {
           responsive: true, maintainAspectRatio: false, cutout: '68%',
           animation: { animateRotate: true, duration: 900, easing: 'easeOutQuart' },
@@ -3171,7 +3654,7 @@ tr:hover td{background:#161b22}</style></head>
         }
       });
     }
-    function bar(id, labels, data, color = '#38bdf8', horizontal = false) {
+    function bar(id, labels, data, color = '#5e6ad2', horizontal = false) {
       if (charts[id]) charts[id].destroy();
       charts[id] = new Chart(document.getElementById(id).getContext('2d'), {
         type: 'bar',
@@ -3482,6 +3965,14 @@ tr:hover td{background:#161b22}</style></head>
         [s, hot, mlh] = await Promise.all([get(`${API}/stats`), get(`${API}/hot-ips`), get(`${ML}/health`)]);
       }
       if (!s) return;
+      // Overview is now the self-contained Neural Command deck (overview-neural.html,
+      // embedded as an iframe), so the old hero/dial/chart DOM no longer exists here.
+      // The sidebar status readouts are gone too — every write below goes through
+      // setStatus(), which no-ops when the element isn't in the DOM.
+      if (!document.getElementById('ops-posture')) {
+        if (hot) { HOT_IPS = hot; }
+        return;
+      }
       document.querySelectorAll('.skel').forEach(el => el.classList.remove('skel'));
       const totalLogs = Number(s.total_logs || 0);
       const hotCount = (s.hot_ips || []).length;
@@ -3529,27 +4020,30 @@ tr:hover td{background:#161b22}</style></head>
       const covValue = document.getElementById('sig-coverage-v');
       if (covEl) covEl.style.width = coverage + '%';
       if (covValue) covValue.textContent = coverage + '%';
+      setNum('kpi-hot', hotCount);
+      setNum('kpi-crit', criticalCount);
+      setNum('kpi-dev', alertCount);
+      const kpiCov = document.getElementById('kpi-cov');
+      if (kpiCov) kpiCov.textContent = coverage + '%';
+      const fleetVaultN = document.getElementById('fleet-vault-n');
+      if (fleetVaultN) fleetVaultN.textContent = totalLogs.toLocaleString();
       renderHero(s, hot || [], { hotCount, criticalCount, alertCount, totalLogs });
-      document.getElementById('last-ref').textContent = 'Refreshed ' + new Date().toLocaleTimeString();
       const aiReady = s.ai_configured;
-      document.getElementById('ai-status').innerHTML = aiReady
-        ? '<span style="width:6px;height:6px;border-radius:50%;background:var(--ai);display:inline-block"></span> AI ready'
-        : '<span style="width:6px;height:6px;border-radius:50%;background:var(--warn);display:inline-block"></span> AI key missing';
       if (s.threat_counts && Object.keys(s.threat_counts).length) {
         const top = Object.entries(s.threat_counts)
           .filter(([k]) => k && k !== 'unknown')
           .sort((a, b) => b[1] - a[1]).slice(0, 8);
-        bar('ch-threats', top.map(([k]) => k.replace(/_/g, ' ')), top.map(([, v]) => v), '#38bdf8', true);
+        bar('ch-threats', top.map(([k]) => k.replace(/_/g, ' ')), top.map(([, v]) => v), '#5e6ad2', true);
       }
       if (s.alert_type_counts && Object.keys(s.alert_type_counts).length) pie('ch-devtypes', s.alert_type_counts);
       // Severity split donut (severity_counts already ships in /api/stats)
       if (s.severity_counts && Object.keys(s.severity_counts).length) {
         const order = ['critical', 'high', 'medium', 'low', 'unknown'];
-        const sevPal = { critical: '#fb7185', high: '#fb923c', medium: '#fbbf24', low: '#34d399', unknown: '#5c7093' };
+        const sevPal = { critical: '#eb5757', high: '#f2994a', medium: '#f2c94c', low: '#4cb782', unknown: '#62666d' };
         const sc = {};
         order.forEach(k => { if (s.severity_counts[k]) sc[k] = s.severity_counts[k]; });
         Object.keys(s.severity_counts).forEach(k => { if (!(k in sc) && s.severity_counts[k]) sc[k] = s.severity_counts[k]; });
-        pie('ch-sev', sc, Object.keys(sc).map(k => sevPal[k] || '#818cf8'));
+        pie('ch-sev', sc, Object.keys(sc).map(k => sevPal[k] || '#7b86e6'));
       }
       // 24h activity pulse from the hourly rollup (one cheap cached call)
       get(`${API}/trend/hourly?hours=24`).then(r => {
@@ -3561,8 +4055,8 @@ tr:hover td{background:#161b22}</style></head>
         }
         const lab = r.trend.map(p => toIST(p.hour).replace(/.*?(\d{1,2}:\d{2}).*/, '$1'));
         area('ch-trend', lab, [
-          { label: 'all events', data: r.trend.map(p => p.total), color: '#38bdf8' },
-          { label: 'high/critical', data: r.trend.map(p => p.hot), color: '#fb7185' },
+          { label: 'all events', data: r.trend.map(p => p.total), color: '#5e6ad2' },
+          { label: 'high/critical', data: r.trend.map(p => p.hot), color: '#eb5757' },
         ]);
       });
       if (hot) {
@@ -3589,9 +4083,10 @@ tr:hover td{background:#161b22}</style></head>
         renderHotTable();
       }
       if (mlh) {
-        document.getElementById('ml-status').innerHTML = mlh.model_ready
-          ? '<span style="width:6px;height:6px;border-radius:50%;background:var(--ok);display:inline-block"></span> ML ready'
-          : '<span style="width:6px;height:6px;border-radius:50%;background:var(--warn);display:inline-block"></span> Not trained';
+        const fleetMlDot = document.getElementById('fleet-ml-dot');
+        const fleetMlLat = document.getElementById('fleet-ml-lat');
+        if (fleetMlDot) fleetMlDot.className = 'ops-fleet-dot ' + (mlh.model_ready ? 'ai' : 'warn');
+        if (fleetMlLat) fleetMlLat.textContent = mlh.model_ready ? 'trained' : 'training';
       }
       } catch(e) { console.error('refreshAll error:', e); }
     }
@@ -3629,9 +4124,61 @@ tr:hover td{background:#161b22}</style></head>
       await aiFullInvestigate();
     }
     const TRAIL_PLACEHOLDER = { ip: 'Enter IP (e.g. 85.11.187.36)', username: 'Enter username (e.g. jdoe)', host: 'Enter agent name (e.g. Harsh_777)' };
+    /* ── Segmented controls ────────────────────────────────────────────────
+       Replaces native <select> wherever the option set is small and mutually
+       exclusive. A select's popup is drawn by the OS and can't be themed, so it
+       always breaks a dark UI.
+
+       Wiring: a hidden <input> holds the value and IS the source of truth; the
+       .seg renders FROM that value, never from the click. That's what lets code
+       set the value directly (goTrailEntity does exactly this) and still have the
+       right segment light up.
+         <div class="seg" data-seg="<inputId>" data-onchange="<fnName>">
+           <button class="seg-btn" data-val="…">…</button>
+       ------------------------------------------------------------------- */
+    function segRender(seg) {
+      if (typeof seg === 'string') seg = document.querySelector(`[data-seg="${seg}"]`);
+      if (!seg) return;
+      const input = document.getElementById(seg.dataset.seg);
+      if (!input) return;
+      seg.querySelectorAll('.seg-btn').forEach(b => {
+        const on = b.dataset.val === input.value;
+        b.classList.toggle('active', on);
+        b.setAttribute('aria-checked', on ? 'true' : 'false');
+        b.tabIndex = on ? 0 : -1;        /* roving tabstop: the group is ONE tab stop */
+      });
+    }
+    function segPick(btn, val) {
+      const seg = btn.closest('.seg');
+      document.getElementById(seg.dataset.seg).value = val;
+      segRender(seg);
+      const fn = seg.dataset.onchange;
+      if (fn && typeof window[fn] === 'function') window[fn]();
+    }
+    /* A radiogroup is expected to move with arrows — a native <select> gave that
+       for free, so replacing it means replacing that too. */
+    function segKeys(ev) {
+      const step = { ArrowLeft: -1, ArrowUp: -1, ArrowRight: 1, ArrowDown: 1 }[ev.key];
+      if (!step) return;
+      ev.preventDefault();
+      const seg = ev.currentTarget;
+      const btns = [...seg.querySelectorAll('.seg-btn')];
+      const input = document.getElementById(seg.dataset.seg);
+      const cur = Math.max(0, btns.findIndex(b => b.dataset.val === input.value));
+      const next = btns[(cur + step + btns.length) % btns.length];
+      input.value = next.dataset.val;
+      segRender(seg);
+      next.focus();
+      const fn = seg.dataset.onchange;
+      if (fn && typeof window[fn] === 'function') window[fn]();
+    }
+
+    /* Trail-specific: also swaps the input's placeholder. goTrailEntity() sets
+       #trail-mode.value then calls this, so the segment sync must live here. */
     function onTrailModeChange() {
-      const m = document.getElementById('trail-mode').value;
+      const m = document.getElementById('trail-mode').value || 'ip';
       document.getElementById('trail-input').placeholder = TRAIL_PLACEHOLDER[m] || TRAIL_PLACEHOLDER.ip;
+      segRender('trail-mode');
     }
     async function loadTrail() {
       const mode = document.getElementById('trail-mode').value || 'ip';
@@ -3774,8 +4321,8 @@ tr:hover td{background:#161b22}</style></head>
       const act = (e.action || '').toLowerCase();
       const blocked = ['deny', 'denied', 'drop', 'dropped', 'block', 'blocked', 'reject', 'rejected'].includes(act);
       const allowed = ['allow', 'allowed', 'accept', 'accepted', 'permit', 'permitted', 'pass'].includes(act);
-      const actHtml = blocked ? '<span class="badge critical">BLOCKED</span>'
-                    : allowed ? '<span class="badge low">ALLOWED</span>' : '';
+      const actHtml = blocked ? '<span class="badge critical">Blocked</span>'
+                    : allowed ? '<span class="badge low">Allowed</span>' : '';
       const ent = e.entity || {};
       const ident = ent.label
         ? `${escapeHTML(deEsc(ent.label))} <span class="tev-etype">${ent.type || ''}</span>` +
@@ -3905,7 +4452,7 @@ tr:hover td{background:#161b22}</style></head>
       currentReportTimeframe = r.timeframe || timeframe;
       editor.value = r.report;
       preview.innerHTML = formatReportText(r.report);
-      btnStatus.textContent = `Generated from ${r.source || 'available'} data · ${r.generated_at ? String(r.generated_at).substring(0, 19) : ''}`;
+      btnStatus.textContent = `Generated from live security data · ${r.generated_at ? String(r.generated_at).substring(0, 19) : ''}`;
       toast('Report ready', 'ok');
     }
 
@@ -3979,12 +4526,22 @@ tr:hover td{background:#161b22}</style></head>
   <title>${escapeHTML(name.replace(/_/g, ' '))}</title>
   <style>
     body { font-family: Arial, sans-serif; color: #151b23; margin: 28px; line-height: 1.55; }
+    .vgil-hdr { display: flex; align-items: center; justify-content: space-between;
+      border-bottom: 2px solid #e30613; padding-bottom: 12px; margin-bottom: 22px; }
+    .vgil-hdr img { height: 42px; }
+    .vgil-hdr .doc { text-align: right; font-size: 11px; color: #6b7280; }
     table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 12px; }
     th, td { border: 1px solid #d0d7de; padding: 7px; vertical-align: top; text-align: left; }
     th { background: #f6f8fa; }
   </style>
 </head>
-<body>${formatReportText(reportText)}</body>
+<body>
+  <div class="vgil-hdr">
+    <img src="${window.VGIL_LOGO || ''}" alt="Virtual Galaxy Infotech Ltd">
+    <div class="doc">CyberSentinel — SOC Report</div>
+  </div>
+  ${formatReportText(reportText)}
+</body>
 </html>`, 'text/html', `${name}.html`);
         return toast('HTML report downloaded', 'ok');
       }
@@ -4006,6 +4563,10 @@ tr:hover td{background:#161b22}</style></head>
   <title>${title}</title>
   <style>
     body { font-family: Arial, sans-serif; color: #151b23; margin: 28px; line-height: 1.55; }
+    .vgil-hdr { display: flex; align-items: center; justify-content: space-between;
+      border-bottom: 2px solid #e30613; padding-bottom: 12px; margin-bottom: 22px; }
+    .vgil-hdr img { height: 42px; }
+    .vgil-hdr .doc { text-align: right; font-size: 11px; color: #6b7280; line-height: 1.4; }
     h2 { font-size: 24px; margin: 0 0 14px; }
     h3 { font-size: 16px; margin: 22px 0 8px; border-bottom: 1px solid #d0d7de; padding-bottom: 6px; }
     p { margin: 8px 0; }
@@ -4015,10 +4576,15 @@ tr:hover td{background:#161b22}</style></head>
     th, td { border: 1px solid #d0d7de; padding: 7px; vertical-align: top; text-align: left; }
     th { background: #f6f8fa; }
     code { font-family: Consolas, Menlo, monospace; }
-    @media print { body { margin: 18mm; } button { display: none; } }
+    @media print { body { margin: 14mm; } button { display: none; }
+      .vgil-hdr { position: running(header); } }
   </style>
 </head>
 <body>
+  <div class="vgil-hdr">
+    <img src="${window.VGIL_LOGO || 'vgil-logo.png'}" alt="Virtual Galaxy Infotech Ltd">
+    <div class="doc">CyberSentinel — SOC Report<br>${new Date().toLocaleString()}</div>
+  </div>
   ${body}
   <script>
     window.onload = () => { window.focus(); window.print(); };
@@ -4043,11 +4609,12 @@ tr:hover td{background:#161b22}</style></head>
       } else {
         h += `<div style="margin-top:6px;color:var(--muted)">In-house reputation: no events from this IP in retained telemetry.</div>`;
       }
-      // AbuseIPDB external booster (optional) ---------------------------------
-      if (d.abuseipdb) { const a = d.abuseipdb; h += `<div style="margin-top:6px"><b>AbuseIPDB:</b> <span style="color:${a.score > 50 ? 'var(--danger)' : a.score > 25 ? 'var(--warn)' : 'var(--ok)'}">${a.score}/100</span> &nbsp;|&nbsp; <b>Country:</b> ${a.country} &nbsp;|&nbsp; <b>ISP:</b> ${a.isp} &nbsp;|&nbsp; <b>Tor:</b> ${a.is_tor ? 'Yes' : 'No'}</div>`; }
+      // ReputationNet external booster (optional). The payload keys stay vendor-named
+      // (that's the API contract); only what the buyer READS is the product's name.
+      if (d.abuseipdb) { const a = d.abuseipdb; h += `<div style="margin-top:6px"><b>ReputationNet:</b> <span style="color:${a.score > 50 ? 'var(--danger)' : a.score > 25 ? 'var(--warn)' : 'var(--ok)'}">${a.score}/100</span> &nbsp;|&nbsp; <b>Country:</b> ${a.country} &nbsp;|&nbsp; <b>ISP:</b> ${a.isp} &nbsp;|&nbsp; <b>Tor:</b> ${a.is_tor ? 'Yes' : 'No'}</div>`; }
       else {
         const st = d.abuseipdb_status || 'not_configured';
-        const msg = { not_configured: 'AbuseIPDB not configured (add ABUSEIPDB_KEY to .env)', bad_key: 'AbuseIPDB key rejected (401/403) - check the key', rate_limited: 'AbuseIPDB rate limit hit (free tier = 1000/day)', unreachable: 'AbuseIPDB unreachable' }[st] || `AbuseIPDB: ${st}`;
+        const msg = { not_configured: 'ReputationNet not enabled for this deployment', bad_key: 'ReputationNet credentials rejected — check the feed key', rate_limited: 'ReputationNet daily quota reached', unreachable: 'ReputationNet unreachable' }[st] || `ReputationNet: ${st}`;
         h += `<div style="margin-top:6px;color:var(--muted)">${msg}</div>`;
       }
       // STIX2 threat-intel relationships (actor / campaign / malware) ---------
@@ -4055,7 +4622,7 @@ tr:hover td{background:#161b22}</style></head>
       if (ti && ti.available) {
         const chips = (arr, color, icon) => (arr || []).map(x => `<span class="badge" style="background:${color}22;color:${color};border:1px solid ${color}55;margin-right:4px">${icon} ${x}</span>`).join('');
         let tih = `<div style="margin-top:8px"><b>Threat intel:</b> `;
-        tih += chips(ti.actors, 'var(--danger)', '👤') + chips(ti.campaigns, 'var(--warn)', '🎯') + chips(ti.malware, '#c084fc', '🦠');
+        tih += chips(ti.actors, 'var(--danger)', '👤') + chips(ti.campaigns, 'var(--warn)', '🎯') + chips(ti.malware, '#a78bfa', '🦠');
         if (!ti.actors.length && !ti.campaigns.length && !ti.malware.length) {
           const r0 = (ti.relations || [])[0] || {};
           tih += `<span style="color:var(--muted)">${r0.note || 'flagged'} (${r0.source || 'intel'})</span>`;
@@ -4140,11 +4707,118 @@ tr:hover td{background:#161b22}</style></head>
       logsRange = { mins: 0, from: f, to: t };
       loadLogs();
     }
+    // ── Jargon guard: every acronym explains itself on hover ──────────────
+    // A junior analyst must never need to google a term the dashboard uses.
+    const JARGON = {
+      'UEBA': 'User & Entity Behaviour Analytics — learns each identity\'s normal pattern and flags deviations',
+      'MITRE': 'MITRE ATT&CK — the industry map of real attacker tactics and techniques',
+      'ATT&CK': 'MITRE ATT&CK — the industry map of real attacker tactics and techniques',
+      'TTP': 'Tactics, Techniques & Procedures — how an attacker operates',
+      'IOC': 'Indicator of Compromise — an artifact (IP, hash, domain) known to be malicious',
+      'SIEM': 'Security Information & Event Management — this platform\'s product category',
+      'SOC': 'Security Operations Center — the team watching this dashboard',
+      'SOAR': 'Security Orchestration, Automation & Response — automated response playbooks',
+      'ML': 'Machine Learning — the anomaly model scoring entities against learned behaviour',
+      'UEBA · Identity': 'User & Entity Behaviour Analytics',
+      'MTTD': 'Mean Time To Detect — how fast a threat is spotted',
+      'MTTR': 'Mean Time To Respond — how fast a threat is contained',
+      'RBA': 'Risk-Based Alerting — alert priority keyed to fused entity risk, not raw rule level',
+      'EDR': 'Endpoint Detection & Response — the host sensors (Wazuh) feeding this platform',
+      'FP': 'False Positive — flagged, but investigated and found harmless',
+      'TP': 'True Positive — flagged, and confirmed to be a real threat',
+      'RFC1918': 'Private internal address space (10.x, 192.168.x, 172.16-31.x) — never routable from the internet',
+      'CDB': 'Constant database — Wazuh\'s list-matching store',
+      'MISP': 'Malware Information Sharing Platform — open-source threat-intel exchange',
+      'OTX': 'AlienVault Open Threat Exchange — community threat-intel pulses',
+    };
+    const _JG_RE = new RegExp('\\b(' + Object.keys(JARGON)
+      .filter(k => /^[A-Z0-9&]+$/.test(k)).sort((a, b) => b.length - a.length).join('|')
+      .replace(/&/g, '&(?:amp;)?') + ')\\b', 'g');
+    function jargonize(root) {
+      // Only headings/labels — never inside inputs, code, or log content.
+      (root || document).querySelectorAll(
+        'h1, h2, h3, h4, .ct, .card-t, th, .facet-label, .ti-kpi-l, .ti-why, .term, .logo-sub, .nlab'
+      ).forEach(el => {
+        if (el.dataset.jg || el.querySelector('input,select,textarea,abbr')) return;
+        const html = el.innerHTML;
+        if (!_JG_RE.test(html)) { _JG_RE.lastIndex = 0; return; }
+        _JG_RE.lastIndex = 0;
+        el.innerHTML = html.replace(_JG_RE, m => {
+          const key = m.replace('&amp;', '&');
+          return JARGON[key] ? `<abbr class="jg" title="${escapeHTML(JARGON[key])}">${m}</abbr>` : m;
+        });
+        el.dataset.jg = '1';
+      });
+    }
+    document.addEventListener('DOMContentLoaded', () => jargonize());
+
+    // ── Settings: demo mode + connectors ─────────────────────────────────
+    async function runDemo() {
+      const btn = document.getElementById('demo-btn'), st = document.getElementById('demo-status');
+      btn.disabled = true; st.textContent = 'Replaying attack through the pipeline…';
+      const r = await fetch(`${API}/demo/run`, { method: 'POST' }).then(x => x.ok ? x.json() : null).catch(() => null);
+      if (!r) { btn.disabled = false; st.textContent = 'Demo failed to start'; return; }
+      const poll = setInterval(async () => {
+        const s = await get(`${API}/demo/status`);
+        if (s && !s.running) {
+          clearInterval(poll); btn.disabled = false;
+          st.innerHTML = `✓ <b>${s.inserted}</b> events replayed — open the <a href="#" onclick="nav('overview');return false">Overview</a>: patient zero is 10.0.10.5`;
+          toast('Demo attack replayed — the Overview verdict has flipped', 'ai', '◈');
+        } else st.textContent = `Replaying… ${s ? s.inserted : 0} events in`;
+      }, 1500);
+    }
+    async function loadDemoCard() {
+      // Only reveal the demo control where the backend actually allows it.
+      const s = await get(`${API}/demo/status`);
+      const card = document.getElementById('demo-card');
+      if (card) card.style.display = (s && s.enabled) ? '' : 'none';
+    }
+    async function loadIntelConnectors() {
+      const r = await get(`${API}/intel/hub-status`);
+      const el = document.getElementById('intel-conn-body');
+      if (!el || !r) return;
+      el.innerHTML = Object.entries(r.connectors || {}).map(([k, v]) => `
+        <div class="conn-chip ${v.configured ? 'armed' : ''}">
+          <span class="conn-dot"></span>${escapeHTML(v.label)}
+          <span class="conn-state">${v.configured ? 'armed' : 'no key'}</span>
+        </div>`).join('');
+    }
+
+    // ── Settings: field coverage report ──────────────────────────────────
+    async function loadFieldCoverage() {
+      const h = document.getElementById('cov-window')?.value ?? '0';
+      const r = await get(`${API}/fields/coverage?hours=${h}`);
+      const tb = document.getElementById('cov-tbody');
+      if (!r || !r.fields || !r.fields.length) {
+        tb.innerHTML = '<tr><td colspan="4" style="text-align:center;color:var(--muted);padding:24px">No data in this window</td></tr>';
+        return;
+      }
+      document.getElementById('cov-note').innerHTML =
+        `<b>${r.total.toLocaleString()}</b> events in window · ` +
+        `<b>${r.fields.filter(f => f.pct >= 50).length}</b> of ${r.fields.length} columns above 50% fill`;
+      tb.innerHTML = r.fields.map(f => {
+        const col = f.pct >= 80 ? 'var(--ok)' : f.pct >= 20 ? 'var(--sev-watch)' : f.pct > 0 ? 'var(--sev-elevated)' : 'var(--faint)';
+        return `<tr>
+          <td style="font-family:var(--mono);font-size:12px">${f.column}</td>
+          <td><div style="display:flex;align-items:center;gap:8px">
+            <div style="flex:1;height:6px;background:rgba(255,255,255,.06);border-radius:3px;overflow:hidden">
+              <div style="width:${f.pct}%;height:100%;background:${col}"></div></div>
+            <span style="font-family:var(--mono);font-size:11px;min-width:48px;text-align:right">${f.pct}%</span></div></td>
+          <td style="font-family:var(--mono);font-size:11px;color:var(--muted)">${f.filled.toLocaleString()} / ${r.total.toLocaleString()}</td>
+          <td style="font-size:12px;color:var(--muted)">${f.purpose}</td>
+        </tr>`;
+      }).join('');
+    }
+
     async function loadLogs() {
       const lvl = document.getElementById('logs-minlevel').value || 1;
       const term = (document.getElementById('logs-q')?.value || '').trim();
       let q = `${API}/logs?limit=1000&min_level=${lvl}`;
-      if (logsRange.mins) q += `&minutes=${logsRange.mins}`;
+      // "All time" (mins = 0) has to actually mean all time. Omitting the param lets
+      // the API fall back to its own short default window, which returns nothing the
+      // moment the newest event is older than that window — the Logs Explorer then
+      // opens empty on a vault holding 10k events. Only skip it for an explicit range.
+      if (!logsRange.from && !logsRange.to) q += `&minutes=${logsRange.mins || 99999999}`;
       if (logsRange.from) q += `&start=${encodeURIComponent(logsRange.from)}`;
       if (logsRange.to) q += `&end=${encodeURIComponent(logsRange.to)}`;
       if (term) q += `&q=${encodeURIComponent(term)}`;
@@ -4152,7 +4826,97 @@ tr:hover td{background:#161b22}</style></head>
       if (!r) return;
       document.getElementById('logs-count').textContent =
         `${r.count} log${r.count === 1 ? '' : 's'}` + (term ? ` matching "${term}"` : '');
-      const rows = (r.logs || []).map(e => {
+      LOGS_ROWS = r.logs || [];
+      renderFacets(LOGS_ROWS);
+      renderLogs();
+    }
+
+    // ── Logs: shared state + view switch ────────────────────────────────────
+    let LOGS_ROWS = [];
+    function logsPreset(term, lvl) {
+      document.getElementById('logs-q').value = term;
+      const seg = document.querySelector('[data-seg="logs-minlevel"]');
+      const btn = seg && seg.querySelector(`[data-val="${lvl}"]`);
+      if (btn) segPick(btn, lvl); else loadLogs();
+    }
+    function pivotLogs(term) {
+      document.getElementById('logs-q').value = term;
+      loadLogs();
+    }
+    function renderFacets(rows) {
+      // client-side facets over the loaded window: click any value to filter
+      const dims = [['severity', 'Severity'], ['threat_type', 'Threat'], ['country', 'Country'], ['agent', 'Agent'], ['action', 'Action']];
+      const el = document.getElementById('logs-facets');
+      if (!el) return;
+      el.innerHTML = dims.map(([k, label]) => {
+        const counts = {};
+        rows.forEach(r => { const v = r[k]; if (v && v !== 'unknown') counts[v] = (counts[v] || 0) + 1; });
+        const top = Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 5);
+        if (!top.length) return '';
+        return `<div class="facet-group"><span class="facet-label">${label}</span>${
+          top.map(([v, c]) => `<button class="chip facet-chip" onclick="pivotLogs('${escapeHTML(v).replace(/'/g, "\\'")}')"
+            title="Filter to ${escapeHTML(v)}">${escapeHTML(String(v).replace(/_/g, ' '))} <b>${c}</b></button>`).join('')}</div>`;
+      }).join('');
+    }
+    function renderLogs() {
+      const mode = document.getElementById('logs-view')?.value || 'story';
+      document.getElementById('logs-table').style.display = mode === 'table' ? '' : 'none';
+      document.getElementById('logs-story').style.display = mode === 'story' ? '' : 'none';
+      if (mode === 'story') renderLogsStory(); else renderLogsTable();
+    }
+
+    // ── Story view: every event as a sentence, every field a pivot ──────────
+    function renderLogsStory() {
+      const el = document.getElementById('logs-story');
+      if (!LOGS_ROWS.length) {
+        el.innerHTML = '<div style="text-align:center;color:var(--muted);padding:24px">No logs in this range</div>';
+        return;
+      }
+      const pv = (v, label) => `<button class="lg-pv" onclick="pivotLogs('${escapeHTML(v).replace(/'/g, "\\'")}')"
+        title="Filter to ${escapeHTML(label || v)}">${escapeHTML(label || v)}</button>`;
+      el.innerHTML = LOGS_ROWS.slice(0, 400).map((e, i) => {
+        const sev = e.severity || 'low';
+        const act = (e.action || '').toLowerCase();
+        const blocked = ['deny', 'denied', 'drop', 'dropped', 'block', 'blocked', 'reject', 'rejected'].includes(act);
+        const allowed = ['allow', 'allowed', 'accept', 'accepted', 'permit', 'permitted', 'pass'].includes(act);
+        const bits = [];
+        bits.push(`<span class="lg-ip" onclick="goTrail('${e.src_ip}')" title="Open ${e.src_ip} in IP Trail">${e.src_ip || '—'}</span>`);
+        if (e.dst_ip) bits.push(` <span class="lg-arr">→</span> <span class="lg-ip" onclick="goTrail('${e.dst_ip}')" title="Open ${e.dst_ip} in IP Trail">${e.dst_ip}</span>${e.dst_port ? `<span class="lg-port">:${escapeHTML(e.dst_port)}</span>` : ''}`);
+        bits.push(` — ${pv(e.threat_type, e.threat_label || (e.threat_type || 'event').replace(/_/g, ' '))}`);
+        if (e.rule) bits.push(`: <i class="lg-rule">${escapeHTML(e.rule.substring(0, 90))}</i>`);
+        if (e.user_display) bits.push(` as ${pv(e.user_display)}`);
+        if (e.agent) bits.push(` on ${pv(e.agent)}`);
+        const meta = [];
+        if (e.rule_id) meta.push(`rule ${e.rule_id}`);
+        if (e.rule_level) meta.push(`level ${e.rule_level}`);
+        if (e.mitre_technique) meta.push(`<button class="lg-pv" onclick="pivotLogs('${escapeHTML(e.mitre_technique)}')">${escapeHTML(e.mitre_technique)}</button>`);
+        if (meta.length) bits.push(` <span class="lg-meta">(${meta.join(', ')})</span>`);
+        if (e.country) bits.push(` from ${pv(e.country)}`);
+        return `<div class="lg-row">
+          <span class="lg-ts" title="${escapeHTML(e.ts_raw || e['@timestamp'] || '')}">${toIST(e.ts_raw || e['@timestamp'])}</span>
+          <span class="badge ${sev}">${sev}</span>
+          ${blocked ? '<span class="badge blocked">blocked</span>' : allowed ? '<span class="badge low" data-noglyph>✓ allowed</span>' : ''}
+          <span class="lg-sent">${bits.join('')}</span>
+          <button class="lg-x" onclick="toggleLogRaw(${i})" title="Show all captured fields">⋯</button>
+        </div>
+        <div class="lg-raw" id="lg-raw-${i}" style="display:none"></div>`;
+      }).join('');
+    }
+    function toggleLogRaw(i) {
+      const el = document.getElementById('lg-raw-' + i);
+      if (!el) return;
+      if (el.style.display === 'none') {
+        const e = LOGS_ROWS[i] || {};
+        const skip = new Set(['_ts', 'threat_label', 'entity', 'log_source', 'user_display']);
+        el.innerHTML = '<table class="lg-kv">' + Object.entries(e)
+          .filter(([k, v]) => !skip.has(k) && v !== '' && v !== 0 && v != null)
+          .map(([k, v]) => `<tr><td>${escapeHTML(k)}</td><td>${escapeHTML(typeof v === 'object' ? JSON.stringify(v) : String(v)).substring(0, 500)}</td></tr>`).join('') + '</table>';
+        el.style.display = '';
+      } else el.style.display = 'none';
+    }
+
+    function renderLogsTable() {
+      const rows = LOGS_ROWS.map(e => {
         const act = (e.action || '').toLowerCase();
         const blocked = ['deny','denied','drop','dropped','block','blocked','reject','rejected'].includes(act);
         const allowed = ['allow','allowed','accept','accepted','permit','permitted','pass'].includes(act);
@@ -4356,77 +5120,182 @@ tr:hover td{background:#161b22}</style></head>
     }
     // ── Deviations (modern, severity-grouped, filterable) ────────────────
     let devAlerts = [];
-    let devFilter = { sev: null };
+    let devRisk = {};
+    let devFilter = { sev: null, type: null };
+    let devLimit = 60;   // rows shown before "show more" — keeps the page fast at scale
+    function devShowMore() { devLimit += 100; renderDeviations(); }
+
     async function loadDeviations(sev = null) {
       if (sev !== null) devFilter.sev = sev;
       const el = document.getElementById('dev-status');
       if (el) el.textContent = 'Loading…';
-      const r = await get(`${API}/alerts?limit=500`);
+      /* entity-risk rides along: the alerts say what tripped, entity-risk says
+         how hot the IP is overall — together one row answers "what is this IP
+         doing" without leaving the page. */
+      const [r, er] = await Promise.all([
+        get(`${API}/alerts?limit=500`),
+        get(`${API}/entity-risk?dim=ip&limit=500`),
+      ]);
       if (!r) { if (el) el.textContent = 'Failed to load'; return; }
       devAlerts = r.alerts || [];
+      devRisk = {};
+      ((er && er.entities) || []).forEach(e => { devRisk[e.entity] = e; });
       if (el) el.textContent = `${devAlerts.length} alerts`;
-      const t = document.getElementById('dev-total');
-      if (t) t.textContent = `${r.total || devAlerts.length} total`;
       renderDeviations();
     }
-    function setDevSev(sev) { devFilter.sev = sev; renderDeviations(); }
+    function setDevSev(sev) { devFilter.sev = sev; devLimit = 60; renderDeviations(); }
+    function setDevType(t) { devFilter.type = devFilter.type === t ? null : t; devLimit = 60; renderDeviations(); }
+
+    const DEV_RANK = { critical: 4, high: 3, medium: 2, low: 1 };
+    const ipNum = ip => ip.split('.').reduce((a, o) => a * 256 + (+o || 0), 0);
+
+    function devSpan(rows) {
+      const ts = rows.map(a => a.ts).filter(Boolean).sort();
+      if (!ts.length) return null;
+      const a = new Date(ts[0]), b = new Date(ts[ts.length - 1]);
+      const secs = Math.round((b - a) / 1000);
+      const human = secs < 60 ? `${secs}s` : secs < 3600 ? `${Math.round(secs / 60)}m`
+                  : secs < 86400 ? `${Math.round(secs / 3600)}h` : `${Math.round(secs / 86400)}d`;
+      return { first: ts[0], last: ts[ts.length - 1], secs, human, single: secs === 0 };
+    }
+
+    /* rule_escalation's "baseline_avg" is a raw 1–4 float (low=1 … critical=4)
+       averaged over past events — e.g. 2.459. Printing that number is not
+       English; nobody knows what scale it's on. Translate it back to the word
+       a human actually thinks in. */
+    function sevWord(score) {
+      const n = +score;
+      if (!isFinite(n)) return 'unknown';
+      const bands = [[1, 'low'], [2, 'medium'], [3, 'high'], [4, 'critical']];
+      let best = bands[0];
+      for (const b of bands) if (Math.abs(b[0] - n) < Math.abs(best[0] - n)) best = b;
+      return best[1];
+    }
+
+    /* One alert → one plain-language "doing" chip. The type name alone doesn't
+       differentiate (19 behavioural baselines feed these); the DETAILS do —
+       which internal host it reached, escalated from what it normally does. */
+    function devDoing(a) {
+      const d = a.details || {};
+      if (a.type === 'internal_host_reached')
+        return { cls: 'crit', txt: `touched an internal host (${d.internal_dst || 'unknown host'})` };
+      if (a.type === 'rule_escalation')
+        return {
+          cls: 'warn',
+          txt: `jumped to ${d.new_severity || 'critical'} severity — this IP is usually only ${sevWord(d.baseline_avg)}`,
+        };
+      return { cls: '', txt: (a.type || 'deviation').replace(/_/g, ' ') };
+    }
+
+    /* Deviations, differentiated BY IP. One row per source IP: overall risk,
+       every pattern it tripped (with the concrete detail), last seen, trace.
+       IPs that tripped multiple patterns sort to the top — those are the ones
+       doing more than one bad thing at once. */
     function renderDeviations() {
-      const rank = { critical: 4, high: 3, medium: 2, low: 1 };
-      const counts = { critical: 0, high: 0, medium: 0, low: 0 };
-      devAlerts.forEach(a => { const s = a.severity || 'low'; if (counts[s] != null) counts[s]++; });
-      // severity summary tiles
-      const order = [['critical', 'Critical'], ['high', 'High'], ['medium', 'Medium'], ['low', 'Low']];
-      document.getElementById('dev-sevbar').innerHTML =
-        `<button class="dev-sev-tile all ${!devFilter.sev ? 'active' : ''}" onclick="setDevSev(null)"><span class="dst-count">${devAlerts.length}</span><span class="dst-label">All</span></button>` +
-        order.map(([k, label]) => `<button class="dev-sev-tile ${k} ${devFilter.sev === k ? 'active' : ''}" onclick="setDevSev('${k}')"><span class="dst-count">${counts[k]}</span><span class="dst-label">${label}</span></button>`).join('');
-      // filter
       const q = (document.getElementById('dev-search')?.value || '').toLowerCase().trim();
       let list = devAlerts.slice();
       if (devFilter.sev) list = list.filter(a => (a.severity || 'low') === devFilter.sev);
+      if (devFilter.type) list = list.filter(a => a.type === devFilter.type);
       if (q) list = list.filter(a => (a.ip || '').includes(q) || (a.type || '').toLowerCase().includes(q));
-      list.sort((a, b) => (rank[b.severity] || 0) - (rank[a.severity] || 0) || (b.ts || '').localeCompare(a.ts || ''));
-      // affected IPs column
+
+      /* filter chips: severities AND patterns — only values that actually occur */
+      const present = {}, typesAll = {};
+      devAlerts.forEach(a => {
+        const sv = a.severity || 'low';
+        present[sv] = (present[sv] || 0) + 1;
+        typesAll[a.type] = (typesAll[a.type] || 0) + 1;
+      });
+      const sevKeys = Object.keys(present).sort((x, y) => (DEV_RANK[y] || 0) - (DEV_RANK[x] || 0));
+      // Severity chips stay inline; the pattern chips (up to ~19 baselines) go in
+      // their own horizontally-scrollable strip so they never wall off the table.
+      const typeEntries = Object.entries(typesAll).sort((a, b) => b[1] - a[1]);
+      document.getElementById('dev-sevfilter').innerHTML =
+        `<div class="dev-sevrow">
+          <button class="chip ${!devFilter.sev && !devFilter.type ? 'active' : ''}" onclick="devFilter={sev:null,type:null};devLimit=60;renderDeviations()">All ${devAlerts.length}</button>` +
+          sevKeys.map(k => `<button class="chip ${devFilter.sev === k ? 'active' : ''}" onclick="setDevSev(devFilter.sev==='${k}'?null:'${k}')">${k} ${present[k]}</button>`).join('') +
+        `</div>
+         <div class="dev-typerow" title="Filter by baseline / pattern — scrolls when there are many">
+           <span class="dev-typelabel">${typeEntries.length} pattern${typeEntries.length === 1 ? '' : 's'}:</span>` +
+          typeEntries.map(([t, n]) =>
+            `<button class="chip tchip ${devFilter.type === t ? 'active' : ''}" onclick="setDevType('${escapeHTML(t)}')">${escapeHTML(t.replace(/_/g, ' '))} ${n}</button>`).join('') +
+        `</div>`;
+
+      /* burst banner — the one-line context that these fired together */
+      const sp = devSpan(list);
+      const types = [...new Set(list.map(a => a.type))];
+      const ipsAll = new Set(list.map(a => a.ip));
+      const tight = sp && sp.secs <= 300;
+      document.getElementById('dev-burst').innerHTML = !list.length ? '' : `
+        <div class="dev-burst${tight ? ' tight' : ''}">
+          <div class="db-n">${ipsAll.size}</div>
+          <div class="db-tx">
+            <b>${ipsAll.size} IPs</b> tripped <b>${types.length}</b> pattern${types.length === 1 ? '' : 's'}
+            (${list.length} alerts)${sp ? `, all inside <b>${sp.human}</b> on <b>${toIST(sp.first).split(',')[0]}</b>` : ''}.
+            ${tight ? `One coordinated burst — the table ranks the IPs; the ones doing <b>more than one thing</b> are on top.` : ''}
+          </div>
+        </div>`;
+
+      /* ── the IP table ── */
       const byIP = {};
       list.forEach(a => { (byIP[a.ip] = byIP[a.ip] || []).push(a); });
-      const ips = Object.entries(byIP).sort((x, y) => y[1].length - x[1].length);
-      document.getElementById('dev-ip-count').textContent = `${ips.length}`;
-      document.getElementById('dev-ip-list').innerHTML = ips.length ? ips.map(([ip, als]) => {
-        const top = als.map(a => a.severity || 'low').sort((a, b) => (rank[b] || 0) - (rank[a] || 0))[0] || 'low';
-        return `<div class="dev-ip-row ${top}" onclick="goTrail('${ip}')"><span class="dev-ip-dot"></span><span class="dev-ip-addr">${ip}</span><span class="dev-ip-count">${als.length}</span></div>`;
-      }).join('') : '<div class="muted" style="padding:14px;font-size:12px">No IPs match</div>';
-      // alert feed
-      document.getElementById('dev-list').innerHTML = list.length ?
-        list.map(renderDevCard).join('') :
-        '<div class="empty" style="padding:24px;text-align:center;color:var(--muted)">No deviations match this filter</div>';
+      const rows = Object.entries(byIP).map(([ip, als]) => {
+        const risk = devRisk[ip];
+        const worst = als.map(a => a.severity || 'low').sort((a, b) => (DEV_RANK[b] || 0) - (DEV_RANK[a] || 0))[0];
+        const last = als.map(a => a.ts || '').sort().pop();
+        return { ip, als, risk, worst, last };
+      }).sort((x, y) => y.als.length - x.als.length
+          || ((y.risk && y.risk.score) || 0) - ((x.risk && x.risk.score) || 0)
+          || (DEV_RANK[y.worst] || 0) - (DEV_RANK[x.worst] || 0)
+          || ipNum(x.ip) - ipNum(y.ip));
+
+      /* KPI strip — the page's state in four numbers (computed over ALL alerts,
+         not the current filter, so it stays a stable compass) */
+      const allByIP = {};
+      devAlerts.forEach(a => { (allByIP[a.ip] = allByIP[a.ip] || []).push(a); });
+      const allIPs = Object.keys(allByIP).length;
+      const multiIPs = Object.values(allByIP).filter(v => v.length > 1).length;
+      const critAlerts = devAlerts.filter(a => (a.severity || 'low') === 'critical').length;
+      const kSp = devSpan(devAlerts);
+      document.getElementById('dev-kpis').innerHTML = `
+        <div class="dev-kpi"><div class="dk-n">${allIPs}</div><div class="dk-l">IPs off their baseline</div></div>
+        <div class="dev-kpi ${multiIPs ? 'hot' : ''}"><div class="dk-n">${multiIPs}</div><div class="dk-l">doing more than one thing</div></div>
+        <div class="dev-kpi ${critAlerts ? 'crit' : ''}"><div class="dk-n">${critAlerts}</div><div class="dk-l">critical deviations</div></div>
+        <div class="dev-kpi"><div class="dk-n">${Object.keys(typesAll).length}</div><div class="dk-l">patterns tripped</div></div>
+        ${kSp ? `<div class="dev-kpi wide"><div class="dk-n" style="font-size:15px;padding-top:4px">${toIST(kSp.last).split(',')[0]}</div><div class="dk-l">last deviation seen</div></div>` : ''}`;
+
+      const shown = rows.slice(0, devLimit);
+      const moreCount = rows.length - shown.length;
+      document.getElementById('dev-patterns').innerHTML = rows.length ? `
+        <div class="dvt">
+          <div class="dvt-r dvt-head">
+            <span>Source IP</span><span>Risk</span><span>What it is doing</span><span>Last seen</span><span></span>
+          </div>
+          ${shown.map(r => {
+            const acts = r.als
+              .sort((a, b) => (DEV_RANK[b.severity] || 0) - (DEV_RANK[a.severity] || 0))
+              .map(a => { const d = devDoing(a); return `<span class="dvt-act ${d.cls}" title="${escapeHTML(alertWhy(a.type, a.severity).action || '')}">${escapeHTML(d.txt)}</span>`; }).join('');
+            const risk = r.risk
+              ? `<b class="dvt-score ${String(r.risk.band || 'low').toLowerCase()}">${r.risk.score}<i>/100</i></b>
+                 <span class="dvt-bar"><span class="dvt-barfill ${String(r.risk.band || 'low').toLowerCase()}" style="width:${Math.max(3, r.risk.score)}%"></span></span>
+                 <span class="dvt-ev">${r.risk.events} event${r.risk.events === 1 ? '' : 's'} · ${r.risk.uniq_dsts} target${r.risk.uniq_dsts === 1 ? '' : 's'}</span>`
+              : '<span class="dvt-ev">no risk score yet</span>';
+            return `<div class="dvt-r sev-${r.worst}${r.als.length > 1 ? ' multi' : ''}" onclick="goTrail('${escapeHTML(r.ip)}')" tabindex="0" role="link"
+                         title="Open ${escapeHTML(r.ip)} in IP Trail">
+              <span class="dvt-ip">${escapeHTML(r.ip)}${r.als.length > 1 ? `<i class="dvt-n" title="tripped ${r.als.length} different patterns">${r.als.length}×</i>` : ''}
+                <i class="dvt-sev ${r.worst}">${r.worst}</i></span>
+              <span class="dvt-risk">${risk}</span>
+              <span class="dvt-do">${acts}</span>
+              <span class="dvt-when">${r.last ? toIST(r.last) : '—'}</span>
+              <span class="dvt-go">Trace →</span>
+            </div>`;
+          }).join('')}
+        </div>
+        ${moreCount > 0 ? `<div class="dvt-more">
+          Showing top <b>${shown.length}</b> of <b>${rows.length}</b> source IPs (ranked by multi-pattern &amp; risk).
+          <button class="btn" onclick="devShowMore()">Show 100 more</button></div>` : ''}`
+        : '<div class="empty" style="padding:24px;text-align:center;color:var(--muted)">No deviations match this filter</div>';
     }
-    function renderDevCard(a) {
-      const sc = a.severity || 'low';
-      const exp = alertWhy(a.type, sc);
-      const when = a.ts ? toIST(a.ts) : '';
-      const typeLabel = (a.type || 'deviation').replace(/_/g, ' ');
-      const det = a.details ? Object.entries(a.details).slice(0, 4).map(([k, v]) =>
-        `<span class="dev-detchip"><b>${k.replace(/_/g, ' ')}</b> <span class="dev-detval">${Array.isArray(v) ? v.slice(0, 3).join(', ') : v}</span></span>`).join('') : '';
-      return `<div class="dev-card ${sc}">
-        <div class="dev-card-head">
-          <span class="dev-sev-ico ${sc}" title="${sc}"></span>
-          <span class="dev-card-type">${typeLabel}</span>
-          <span class="badge ${sc}">${sc}</span>
-          <span class="dev-card-ip" onclick="goTrail('${a.ip}')" title="Open IP trail">${a.ip}</span>
-          <span class="dev-card-time" title="Indian Standard Time">${when}</span>
-        </div>
-        <p class="dev-lead">${a.message || ''}</p>
-        <div class="dev-grid2">
-          <div class="dev-sec why"><span class="dev-sec-tag">Why it matters</span><p>${exp.why}</p></div>
-          <div class="dev-sec act"><span class="dev-sec-tag">Recommended action</span><p>${exp.action}</p></div>
-        </div>
-        ${det ? `<div class="dev-detgrid">${det}</div>` : ''}
-        <div class="dev-card-foot">
-          <button class="btn ai" onclick="aiExplainAlert('${a.ip}','${a.type}',this)">&#10022; AI summary</button>
-          <button class="btn" onclick="goTrail('${a.ip}')">View IP trail &rarr;</button>
-        </div>
-        <div id="ai-alert-${a.ip}-${a.type}" class="dev-ai-box" style="display:none"></div>
-      </div>`;
-    }
+
     async function buildAllBaselines() {
       document.getElementById('dev-status').textContent = 'Building baselines…';
       document.getElementById('qa-status').textContent = 'Building baselines…';
@@ -4512,7 +5381,7 @@ tr:hover td{background:#161b22}</style></head>
         </div>
 
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:15px;">
-          <div class="card" style="margin:0"><div class="ch"><span class="ct" style="color:var(--accent)">IP DETAILS</span></div>
+          <div class="card" style="margin:0"><div class="ch"><span class="ct" style="color:var(--accent)">IP details</span></div>
           <div class="cb" style="line-height:2.0;font-size:13px">
             <b>IP:</b> ${d.ip}<br>
             <b>Type:</b> ${d.ip.startsWith('10.')||d.ip.startsWith('192.') ? 'Internal' : 'External'}<br>
@@ -4520,10 +5389,10 @@ tr:hover td{background:#161b22}</style></head>
             <b>Known bad subnet:</b> ${d.is_known_bad ? 'Yes' : 'No'}
           </div></div>
 
-          <div class="card" style="margin:0"><div class="ch"><span class="ct" style="color:var(--accent)">THREAT INTELLIGENCE</span></div>
+          <div class="card" style="margin:0"><div class="ch"><span class="ct" style="color:var(--accent)">Threat intelligence</span></div>
           <div class="cb" style="line-height:2.0;font-size:13px">
             ${d.abuseipdb ? `
-            <b>AbuseIPDB: <span style="color:${d.abuseipdb.score > 50 ? 'var(--danger)' : 'var(--warn)'}">${d.abuseipdb.score}/100</span></b><br>
+            <b>ReputationNet: <span style="color:${d.abuseipdb.score > 50 ? 'var(--danger)' : 'var(--warn)'}">${d.abuseipdb.score}/100</span></b><br>
             <b>Country:</b> ${d.abuseipdb.country}<br>
             <b>ISP:</b> ${d.abuseipdb.isp}<br>
             <b>Reports:</b> ${d.abuseipdb.total_reports} | <b>Tor:</b> ${d.abuseipdb.is_tor ? 'Yes' : 'No'}
@@ -4539,12 +5408,12 @@ tr:hover td{background:#161b22}</style></head>
         </div></div>
 
         <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:15px;">
-          <div class="card" style="margin:0;border-left:2px solid var(--accent)"><div class="ch" style="border:none;padding-bottom:5px"><span class="ct" style="color:var(--muted)">ML ANALYSIS</span></div>
+          <div class="card" style="margin:0;border-left:2px solid var(--accent)"><div class="ch" style="border:none;padding-bottom:5px"><span class="ct" style="color:var(--muted)">ML analysis</span></div>
           <div class="cb" style="font-size:12px;line-height:1.8">
             ${mlRes ? `Risk: <b>${ml.risk_score}/100</b><br>Anomaly score: ${(ml.anomaly_score||0).toFixed(3)}<br>Anomaly: ${ml.is_anomaly ? '<span style="color:var(--danger)">YES</span>' : 'No'}` : 'No ML score. Train the model first.'}
           </div></div>
 
-          <div class="card" style="margin:0;border-left:2px solid var(--ok)"><div class="ch" style="border:none;padding-bottom:5px"><span class="ct" style="color:var(--muted)">EVENT TRAIL</span></div>
+          <div class="card" style="margin:0;border-left:2px solid var(--ok)"><div class="ch" style="border:none;padding-bottom:5px"><span class="ct" style="color:var(--muted)">Event trail</span></div>
           <div class="cb" style="font-size:12px;line-height:1.8">
             <b>Total Events:</b> ${t.total}<br>
             <b>First Seen:</b> ${(t.first_seen||'').substring(0,19).replace('T',' ')}<br>
@@ -4552,7 +5421,7 @@ tr:hover td{background:#161b22}</style></head>
             <b>Top Threat:</b> ${threatStr}
           </div></div>
 
-          <div class="card" style="margin:0;border-left:2px solid var(--warn)"><div class="ch" style="border:none;padding-bottom:5px"><span class="ct" style="color:var(--muted)">BASELINE PROFILE</span></div>
+          <div class="card" style="margin:0;border-left:2px solid var(--warn)"><div class="ch" style="border:none;padding-bottom:5px"><span class="ct" style="color:var(--muted)">Baseline profile</span></div>
           <div class="cb" style="font-size:12px;line-height:1.8">
             ${b ? `
             <b>Events:</b> ${b.event_count} | <b>Avg daily:</b> ${b.avg_daily_events.toFixed(2)}/day<br>
@@ -4874,12 +5743,106 @@ tr:hover td{background:#161b22}</style></head>
             ${i.narrative ? `<div style="font-size:12px;color:var(--muted);margin-bottom:12px;line-height:1.6">${i.narrative}</div>` : ''}
             <div style="display:flex;gap:8px;flex-wrap:wrap">
               ${lead ? `<button class="btn ai" style="font-size:11px" onclick="incidentNarrative('${lead}', this)">AI incident report</button>` : ''}
+              ${lead ? `<button class="btn" style="font-size:11px" onclick="intelHub('${lead}', this)">External intel</button>` : ''}
+              ${lead ? `<button class="btn" style="font-size:11px" onclick="openCaseFor('${i.id}','${lead}','${(i.type === 'campaign' ? 'Campaign ' + (i.subnet || lead) : 'Host ' + lead).replace(/'/g, '')}')">Open case</button>` : ''}
               ${lead ? `<button class="btn" style="font-size:11px" onclick="nav('ueba')">UEBA</button>` : ''}
             </div>
           </div>
         </div>`;
       }).join('');
     }
+    // ── Part 5: case workbench + intel hub ─────────────────────────────────
+    const CASE_FLOW = ['new', 'investigating', 'contained', 'closed'];
+    async function loadCases() {
+      const [r, n] = await Promise.all([get(`${API}/cases`), get(`${API}/feedback/noise-stats`)]);
+      const ns = document.getElementById('noise-stat');
+      if (ns && n) ns.textContent = n.suppressed_entities ? `◈ ${n.sentence}` : '';
+      const el = document.getElementById('cases-body');
+      if (!el) return;
+      const cases = (r && r.cases) || [];
+      if (!cases.length) { el.innerHTML = '<div class="empty">No cases yet — open one from an incident above.</div>'; return; }
+      el.innerHTML = cases.map(c => {
+        const closed = c.status === 'closed';
+        return `<div class="case-row" data-id="${escapeHTML(c.case_id)}">
+          <div class="case-top">
+            <span class="case-id">${escapeHTML(c.case_id)}</span>
+            <span class="case-title">${escapeHTML(c.title || '(untitled)')}</span>
+            ${c.entity ? `<span class="lg-ip" onclick="goTrail('${escapeHTML(c.entity)}')">${escapeHTML(c.entity)}</span>` : ''}
+            <span class="badge ${c.severity || 'medium'}">${escapeHTML(c.severity || 'medium')}</span>
+            ${closed ? `<span class="badge low">closed · ${escapeHTML((c.disposition || '').replace('_', ' '))}</span>` : ''}
+            <span style="margin-left:auto;font-size:10px;color:var(--faint);font-family:var(--mono)">${escapeHTML(String(c.updated_at).substring(0, 16))}</span>
+          </div>
+          ${closed ? '' : `<div class="case-ctl">
+            <div class="seg" role="radiogroup" aria-label="Case status">
+              ${CASE_FLOW.map(s => `<button type="button" class="seg-btn${c.status === s ? ' active' : ''}" role="radio"
+                aria-checked="${c.status === s}" onclick="caseSet('${escapeHTML(c.case_id)}','status','${s}')">${s}</button>`).join('')}
+            </div>
+            <input class="case-in" placeholder="assignee" value="${escapeHTML(c.assignee || '')}"
+              onchange="caseSet('${escapeHTML(c.case_id)}','assignee',this.value)">
+            <input class="case-in case-notes" placeholder="notes" value="${escapeHTML(c.notes || '')}"
+              onchange="caseSet('${escapeHTML(c.case_id)}','notes',this.value)">
+            <button class="btn" style="font-size:10px" onclick="caseAudit('${escapeHTML(c.case_id)}',this)">Audit log</button>
+          </div>`}
+          <div class="case-audit" id="ca-${escapeHTML(c.case_id)}" style="display:none"></div>
+        </div>`;
+      }).join('');
+    }
+    const _caseCache = {};
+    async function caseSet(id, field, value) {
+      const payload = { case_id: id, actor: 'analyst', ..._caseCache[id], [field]: value };
+      if (field === 'status' && value === 'closed') {
+        const d = prompt('Closing requires a disposition — type one of:\ntrue_positive / false_positive / benign');
+        if (!d || !['true_positive', 'false_positive', 'benign'].includes(d.trim())) {
+          toast('Close cancelled — a disposition is required (it trains the feedback loop)', 'warn', '⚠');
+          return;
+        }
+        payload.disposition = d.trim();
+      }
+      _caseCache[id] = { ..._caseCache[id], [field]: value };
+      const ok = await fetch(`${API}/cases/upsert`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+      }).then(x => x.ok).catch(() => false);
+      toast(ok ? `${id} updated — ${field} → ${String(value).substring(0, 40)}` : `Could not update ${id}`, ok ? '' : 'warn', ok ? '✓' : '⚠');
+      if (field === 'status') loadCases();
+    }
+    async function caseAudit(id, btn) {
+      const el = document.getElementById('ca-' + id);
+      if (el.style.display !== 'none') { el.style.display = 'none'; return; }
+      const r = await get(`${API}/cases/${id}/audit`);
+      el.innerHTML = ((r && r.audit) || []).map(a =>
+        `<div class="ca-line"><span class="ca-ts">${escapeHTML(String(a.ts).substring(0, 19))}</span>
+         <b>${escapeHTML(a.actor)}</b> ${escapeHTML(a.action)}${a.detail ? ` — ${escapeHTML(a.detail)}` : ''}</div>`).join('')
+        || '<div class="ca-line">No audit entries</div>';
+      el.style.display = '';
+    }
+    async function openCaseFor(incidentId, entity, title) {
+      const r = await fetch(`${API}/cases/upsert`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title, incident_id: incidentId, entity, status: 'new', actor: 'analyst', severity: 'high' }),
+      }).then(x => x.ok ? x.json() : null).catch(() => null);
+      toast(r ? `Case ${r.case_id} opened for ${entity}` : 'Could not open case', r ? '' : 'warn', r ? '✓' : '⚠');
+      loadCases();
+    }
+    async function intelHub(ip, btn) {
+      btn.textContent = 'Querying intel…'; btn.disabled = true;
+      const r = await get(`${API}/intel/hub/${ip}`);
+      btn.disabled = false; btn.textContent = 'External intel';
+      if (!r) return;
+      const panel = btn.closest('.cb');
+      let box = panel.querySelector('.intel-hub');
+      if (!box) { box = document.createElement('div'); box.className = 'intel-hub'; panel.appendChild(box); }
+      box.innerHTML = `<div class="ih-head">External intel for <b>${escapeHTML(ip)}</b>
+          ${r.fused_score != null ? ` · fused score <b>${r.fused_score}</b>` : ''}
+          ${r.benign_scanner ? ' · <span class="badge low">known benign scanner — suppressed</span>' : ''}</div>` +
+        Object.values(r.sources).map(s => `<div class="ih-row">
+          <span class="ih-src">${escapeHTML(s.label)}</span>
+          <span class="ih-verdict iv-${escapeHTML(s.verdict).replace(/[^a-z-]/g, '')}">${escapeHTML(s.verdict)}</span>
+          <span class="ih-ev">${escapeHTML(s.evidence)}</span>
+          ${s.link ? `<a class="ih-link" href="${escapeHTML(s.link)}" target="_blank" rel="noopener">source ↗</a>` : ''}
+          ${s.cached ? '<span class="ih-cached">cached</span>' : ''}
+        </div>`).join('') + (r.note ? `<div class="ih-note">${escapeHTML(r.note)}</div>` : '');
+    }
+
     async function incidentNarrative(ip, btn) {
       btn.textContent = 'Generating…'; btn.disabled = true;
       const r = await get(`${API}/incidents/${ip}/narrative`);
@@ -4902,12 +5865,70 @@ tr:hover td{background:#161b22}</style></head>
           </div>
           <div class="ai-body">${formatReportText(r.ai_narrative || r.explanation || '')}</div>
         </div>
-        ${mits ? `<div style="margin-top:12px"><div style="font-size:11px;font-weight:600;color:var(--muted);margin-bottom:8px;letter-spacing:.05em">RECOMMENDED MITIGATIONS</div>${mits}</div>` : ''}`;
+        ${mits ? `<div style="margin-top:12px"><div style="font-size:11px;font-weight:600;color:var(--muted);margin-bottom:8px;letter-spacing:.05em">Recommended mitigations</div>${mits}</div>` : ''}`;
     }
 
     // ── Response playbooks (SOAR) ───────────────────────────────────────────
     async function loadPlaybooksPage() {
+      loadActivePlaybooks();
       loadRecommender();
+    }
+
+    // ── Active playbooks: the live catalogue (built-in + analyst-adopted) ──────
+    // This is what "adopting" in the overview actually lands in — an adopted draft
+    // shows up here as an active playbook, with the current 30-day log volume for
+    // the pattern it covers.
+    function pbStepChip(s) {
+      const risky = s.mutates || s.requires_approval;
+      return `<span class="pb-astep${risky ? ' mut' : ''}">${escapeHTML(s.label || s.action)}${
+        s.requires_approval ? '<span class="pb-appr">approval</span>' : ''}</span>`;
+    }
+    function activePlaybookCard(p, adopted) {
+      const sev = (p.severity || 'medium').toLowerCase();
+      const col = sevCol(sev);
+      const steps = (p.steps || []).map(pbStepChip).join('');
+      const tag = adopted
+        ? `<span class="pbx-tag adopt">◈ Adopted</span>`
+        : `<span class="pbx-tag built">Built-in</span>`;
+      let body = `<div class="pbx-desc">${escapeHTML(p.description || p.why || '')}</div>`;
+      if (adopted) {
+        const lv = p.live || {};
+        body += `<div class="pbx-stats">
+          <span>Covers <span class="pbx-cov">${escapeHTML((p.threat_type || '').replace(/_/g,' '))}</span></span>
+          <span><b>${(lv.events||0).toLocaleString()}</b> events</span>
+          <span><b>${lv.ips||0}</b> source IPs</span>
+          <span><b>${lv.critical||0}</b> critical</span>
+          <span class="muted">last 30d</span></div>`;
+      }
+      return `<div class="pbx-card${adopted ? ' adopted' : ''}">
+        <div class="pbx-top">
+          <span class="pbx-name">${escapeHTML(p.name || p.title)}</span>
+          <span class="pbx-sev" style="background:${col}1f;color:${col}">${sev}</span>
+          ${p.technique ? `<span class="mitre-tag">${escapeHTML(p.technique)}</span>` : ''}
+          ${tag}
+        </div>
+        ${body}
+        <div class="pbx-steps">${steps}</div>
+      </div>`;
+    }
+    async function loadActivePlaybooks() {
+      const box = document.getElementById('active-playbooks');
+      if (!box) return;
+      box.innerHTML = `<div class="card ds-card"><div class="cb"><div class="empty" style="padding:22px">Loading active playbooks…</div></div></div>`;
+      const [builtinR, adoptedR] = await Promise.all([
+        get(`${API}/playbooks`),
+        get(`${API}/playbooks/adopted`),
+      ]);
+      const built = (builtinR && builtinR.playbooks) || [];
+      const adopted = (adoptedR && adoptedR.adopted) || [];
+      const cards = adopted.map(p => activePlaybookCard(p, true))
+        .concat(built.map(p => activePlaybookCard(p, false))).join('');
+      box.innerHTML = `
+        <div class="card ds-card"><div class="ch">
+          <span class="ct">🛡 Active playbooks</span>
+          <span class="muted" style="font-size:11px">live catalogue · <b>${adopted.length}</b> adopted + <b>${built.length}</b> built-in · mutating steps always need approval</span>
+        </div>
+        <div class="cb"><div class="pbx-list">${cards || '<div class="pbx-empty">No playbooks yet.</div>'}</div></div></div>`;
     }
 
     // ── Playbook Recommender (feedback-trained) ───────────────────────────────
@@ -5035,7 +6056,7 @@ tr:hover td{background:#161b22}</style></head>
         <polyline points="${pts}" fill="none" stroke="${color}" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"/>
         <circle cx="${w}" cy="${h - 2 - (vals[vals.length - 1] / max) * (h - 6)}" r="2" fill="${color}"/></svg>`;
     }
-    const RISK_COLORS = { critical: '#fb7185', high: '#fb923c', medium: '#fbbf24', low: '#34d399' };
+    const RISK_COLORS = { critical: '#eb5757', high: '#f2994a', medium: '#f2c94c', low: '#4cb782' };
     function renderUEBARisk(d) {
       const el = document.getElementById('ueba-risk-body');
       if (!d || !d.users) { el.innerHTML = '<div class="empty">Risk engine unavailable.</div>'; return; }
@@ -5243,10 +6264,45 @@ tr:hover td{background:#161b22}</style></head>
       }
     }
 
+    async function loadKCTopIPs() {
+      const el = document.getElementById('kc-topips');
+      const r = await get(`${API}/entity-risk?dim=ip&limit=12`);
+      const ents = (r && r.entities) || [];
+      if (!ents.length) { el.innerHTML = '<span style="color:var(--muted);font-size:12px">No ranked IPs yet.</span>'; return; }
+      el.innerHTML = '<div style="display:flex;flex-wrap:wrap;gap:8px">' + ents.map(e => {
+        const b = String(e.band || 'low').toLowerCase();
+        return `<button class="kc-topip" onclick="goKillChain('${escapeHTML(e.entity)}')" title="${e.events} events · ${e.uniq_dsts} targets">
+          <span class="badge ${b}">${e.score}</span>
+          <span class="kc-topip-ip">${escapeHTML(e.entity)}</span></button>`;
+      }).join('') + '</div>';
+    }
+
+    async function loadKCIdentity(ip) {
+      const card = document.getElementById('kc-identity-card');
+      const r = await get(`${API}/identity/${ip}`);
+      if (!r || (!r.agents.length && !r.users.length)) { card.style.display = 'none'; return; }
+      const fmt = row => `<span class="kc-idchip" title="${row.hits} events · first ${String(row.first_ts).substring(0,16)} · last ${String(row.last_ts).substring(0,16)}">
+        ${escapeHTML(row.name)}<i>${row.hits}</i></span>`;
+      card.style.display = 'block';
+      card.innerHTML = `
+        <div class="ch"><span class="ct">Who is behind ${escapeHTML(ip)}?</span>
+          ${r.dhcp ? '<span class="badge high">DHCP-reassigned</span>' : ''}</div>
+        <div class="cb">
+          <div class="kc-idnote">${escapeHTML(r.note)}</div>
+          <div class="kc-idgrid">
+            <div><div class="kc-idlabel">Host / agent</div>
+              <div class="kc-idrow">${r.agents.length ? r.agents.map(fmt).join('') : '<span style="color:var(--muted);font-size:12px">none captured</span>'}</div></div>
+            <div><div class="kc-idlabel">User account</div>
+              <div class="kc-idrow">${r.users.length ? r.users.map(fmt).join('') : '<span style="color:var(--muted);font-size:12px">none captured</span>'}</div></div>
+          </div>
+        </div>`;
+    }
+
     async function loadKillChain() {
       const ip = document.getElementById('kc-ip').value.trim(); if (!ip) { toast('Enter an IP address first'); return; }
       const r = await get(`${API}/killchain/${ip}`); if (!r) return;
       try { _renderKillChain(ip, r); } catch(e) { console.error('KillChain render error:', e); toast('Kill chain render error: ' + e.message); }
+      loadKCIdentity(ip);
     }
 
     function _renderKillChain(ip, r) {
@@ -5316,7 +6372,7 @@ tr:hover td{background:#161b22}</style></head>
             </div>
           </div>
         </div>`;
-      const tacticColors = { Reconnaissance:'#64b5f6', 'Resource Development':'#64b5f6', 'Initial Access':'#4ade80', Execution:'#facc15', Persistence:'#fb923c', 'Privilege Escalation':'#f87171', 'Defense Evasion':'#a78bfa', 'Credential Access':'#f87171', Discovery:'#c084fc', 'Lateral Movement':'#ef4444', Collection:'#f59e0b', 'Command and Control':'#ef4444', Exfiltration:'#ef4444', Impact:'#dc2626' };
+      const tacticColors = { Reconnaissance:'#64b5f6', 'Resource Development':'#64b5f6', 'Initial Access':'#4ade80', Execution:'#facc15', Persistence:'#f2994a', 'Privilege Escalation':'#f87171', 'Defense Evasion':'#a78bfa', 'Credential Access':'#f87171', Discovery:'#a78bfa', 'Lateral Movement':'#ef4444', Collection:'#f59e0b', 'Command and Control':'#ef4444', Exfiltration:'#ef4444', Impact:'#dc2626' };
       const netStatusColor = { established:'#00bcd4', allowed:'#4ade80', blocked:'#ef4444', partial:'#facc15', observed:'#94a3b8', routed:'#00bcd4', reached:'#4ade80' };
       const netStatusLabel = { established:'CONNECTED', allowed:'ALLOWED', blocked:'BLOCKED', partial:'PARTIAL BLOCK', observed:'OBSERVED', routed:'ROUTED', reached:'REACHED' };
       const netNodeIcon = n => { const s = n.stage||''; return s.startsWith('Firewall') ? '🛡' : s.startsWith('Router') ? '🔀' : s === 'Endpoint' ? '💻' : s === 'TCP Connection' ? '🌐' : '📡'; };
@@ -5765,6 +6821,195 @@ tr:hover td{background:#161b22}</style></head>
     setTimeout(prefetchAll, 1500);
     setInterval(prefetchAll, 120000);
 
+    // ══ Size the embedded Neural Command deck to fill whatever vertical space is
+    // left under the sticky topbar, so the deck scrolls internally and the outer
+    // pane never grows a second scrollbar. ══
+    function fitNeuralDeck() {
+      const f = document.getElementById('neural-overview-frame');
+      if (!f || !f.offsetParent) return;               // not rendered / overview not active
+      const top = f.getBoundingClientRect().top;
+      f.style.height = Math.max(420, window.innerHeight - top - 20) + 'px';
+    }
+    addEventListener('resize', fitNeuralDeck);
+    addEventListener('load', fitNeuralDeck);
+    fitNeuralDeck();
+
+    // ══ Orbital core — decorative canvas layered inside the real threat-dial ring.
+    // Reads the same --risk value the CSS conic-gradient already uses, so it never
+    // drifts from the real number. Skips entirely under prefers-reduced-motion. ══
+    (function () {
+      const REDUCED = matchMedia('(prefers-reduced-motion: reduce)').matches;
+      const canvas = document.getElementById('core-orbit');
+      const ring = document.getElementById('threat-dial');
+      if (!canvas || !ring || REDUCED) return;
+      const ctx = canvas.getContext('2d');
+      let t = 0;
+      function draw() {
+        const risk = parseFloat(ring.style.getPropertyValue('--risk')) || 0;
+        const W = canvas.width, c = W / 2;
+        ctx.clearRect(0, 0, W, W);
+        t += 0.008;
+        const arcs = [
+          [128, t * 1.0, 1.7, 'rgba(94,106,210,.42)'], [128, t * 1.0 + 3.3, 0.7, 'rgba(94,106,210,.18)'],
+          [112, -t * 1.4, 1.1, 'rgba(167,139,250,.38)'], [112, -t * 1.4 + 2.5, 2.0, 'rgba(167,139,250,.14)'],
+        ];
+        arcs.forEach(([r, off, len, col]) => {
+          ctx.beginPath(); ctx.arc(c, c, r, off, off + len);
+          ctx.strokeStyle = col; ctx.lineWidth = 1.4; ctx.stroke();
+        });
+        for (let i = 0; i < 3; i++) {
+          const oa = t * (1.1 + i * 0.45) + i * 2.1, orr = 100 + i * 13;
+          ctx.beginPath(); ctx.arc(c + Math.cos(oa) * orr, c + Math.sin(oa) * orr, 1.9, 0, 7);
+          ctx.fillStyle = ['#5e6ad2', '#a78bfa', '#4cb782'][i]; ctx.fill();
+        }
+        if (risk >= 60) {
+          const br = 30 + Math.sin(t * 2.4) * 4;
+          const rg = ctx.createRadialGradient(c, c, 4, c, c, br * 2.2);
+          rg.addColorStop(0, 'rgba(235,87,87,.18)'); rg.addColorStop(1, 'transparent');
+          ctx.fillStyle = rg; ctx.beginPath(); ctx.arc(c, c, br * 2.2, 0, 7); ctx.fill();
+        }
+        requestAnimationFrame(draw);
+      }
+      draw();
+    })();
+
+    // ══ Command palette — Ctrl+K. Commands are built live from the real sidebar
+    // nav (so it never drifts out of sync with the app), plus a free-text
+    // "Trace <entity>" action that calls the existing goTrail(). ══
+    (function () {
+      const overlay = document.getElementById('cmdk-overlay');
+      const input = document.getElementById('cmdk-input');
+      const list = document.getElementById('cmdk-list');
+      if (!overlay || !input || !list) return;
+
+      function baseCommands() {
+        return [...document.querySelectorAll('.nav .ni')].map(el => {
+          const m = (el.getAttribute('onclick') || '').match(/nav\('([^']+)'\)/);
+          if (!m) return null;
+          // data-label, not textContent — the rail nodes also carry an index and a
+          // live count, and neither belongs in the palette's search text.
+          const label = el.dataset.label || el.textContent.trim();
+          return { cat: 'GO', label, run: () => nav(m[1]) };
+        }).filter(Boolean);
+      }
+
+      function render(query) {
+        const q = query.trim();
+        let cmds = baseCommands();
+        if (q) {
+          cmds = cmds.filter(c => c.label.toLowerCase().includes(q.toLowerCase()));
+          cmds.unshift({ cat: 'TRACE', label: `Trace "${q}" in IP Trail`, run: () => { nav('trail'); goTrail(q); } });
+        }
+        list.innerHTML = cmds.length
+          ? cmds.map((c, i) => `<div class="cmdk-item${i === 0 ? ' sel' : ''}" data-i="${i}">
+              <span class="ci">${c.cat}</span>${c.label}<span class="ck">&#8629;</span></div>`).join('')
+          : '<div class="cmdk-item">No match</div>';
+        list._cmds = cmds;
+      }
+      window.openCmdk = function () {
+        overlay.classList.add('open'); input.value = ''; render(''); input.focus();
+      };
+      window.closeCmdk = function () { overlay.classList.remove('open'); };
+      input.addEventListener('input', () => render(input.value));
+      list.addEventListener('click', e => {
+        const it = e.target.closest('.cmdk-item');
+        const i = it && +it.dataset.i;
+        if (it && list._cmds && list._cmds[i]) { closeCmdk(); list._cmds[i].run(); }
+      });
+      overlay.addEventListener('click', e => { if (e.target === overlay) closeCmdk(); });
+      document.addEventListener('keydown', e => {
+        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+          e.preventDefault();
+          overlay.classList.contains('open') ? closeCmdk() : openCmdk();
+        } else if (e.key === 'Escape' && overlay.classList.contains('open')) {
+          closeCmdk();
+        } else if (e.key === 'Enter' && overlay.classList.contains('open')) {
+          const sel = list.querySelector('.cmdk-item');
+          const i = sel && +sel.dataset.i;
+          if (list._cmds && list._cmds[i] != null) { closeCmdk(); list._cmds[i].run(); }
+        }
+      });
+    })();
+
+    // ══ Calm Authority: rail badges + pipeline health + density ══════════════
+    function toggleDensity() {
+      const on = document.body.classList.toggle('compact');
+      localStorage.setItem('cs-density', on ? 'compact' : 'comfortable');
+      const b = document.getElementById('density-btn');
+      if (b) b.textContent = on ? 'Comfortable' : 'Compact';
+    }
+    if (localStorage.getItem('cs-density') === 'compact') {
+      document.body.classList.add('compact');
+      const b = document.getElementById('density-btn');
+      if (b) b.textContent = 'Comfortable';
+    }
+
+    async function _railPulse() {
+      // Live badges — counts an analyst cares about, not vanity numbers.
+      try {
+        const inc = await fetch(API + '/incidents').then(r => r.ok ? r.json() : null);
+        const open = (inc?.incidents || inc || []).length;
+        const el = document.getElementById('rb-inc');
+        if (el) { el.textContent = open || ''; el.classList.toggle('hot', open > 0); }
+      } catch (e) { /* fail-soft: a badge is never worth an error */ }
+      try {
+        const al = await fetch(API + '/alerts').then(r => r.ok ? r.json() : null);
+        const ips = new Set((al?.alerts || []).map(a => a.ip || a.src_ip)).size;
+        const el = document.getElementById('rb-dev');
+        if (el) el.textContent = ips || '';
+      } catch (e) { }
+      // Pipeline health dot — "is the platform itself healthy?"
+      try {
+        const h = await fetch(API + '/health').then(r => r.ok ? r.json() : null);
+        const dot = document.getElementById('rh-dot'), txt = document.getElementById('rh-txt');
+        if (!dot) return;
+        if (!h) { dot.className = 'rh-dot down'; txt.textContent = 'backend down'; return; }
+        const chOk = (h.store || h.clickhouse) === 'connected';
+        dot.className = 'rh-dot ' + (chOk ? 'ok' : 'warn');
+        txt.textContent = chOk ? 'pipeline healthy' : 'store degraded';
+        txt.title = `backend ${h.status} · store ${h.store || h.clickhouse} · ai ${h.ai}`;
+      } catch (e) {
+        const dot = document.getElementById('rh-dot'), txt = document.getElementById('rh-txt');
+        if (dot) { dot.className = 'rh-dot down'; txt.textContent = 'backend down'; }
+      }
+    }
+    _railPulse();
+    setInterval(_railPulse, 60000);
+
+    // ── Collapsible cards: a "button on everything" for a spacious UI ─────────
+    // Every card with a header gets a chevron that folds it to just the title bar.
+    // Cards render dynamically as pages load, so a MutationObserver keeps enhancing
+    // new ones. Default: open (nothing hidden on load) — click to collapse.
+    (function initCollapsibleCards() {
+      function enhance(scope) {
+        (scope || document).querySelectorAll('.main .card > .ch').forEach(ch => {
+          const card = ch.parentElement;
+          if (card.classList.contains('cardx')) return;   // already enhanced
+          if (!ch.nextElementSibling) return;              // header-only card: nothing to fold
+          card.classList.add('cardx');
+          const chev = document.createElement('span');
+          chev.className = 'cardx-chev'; chev.textContent = '▾';
+          chev.setAttribute('role', 'button'); chev.setAttribute('aria-label', 'Collapse card');
+          ch.appendChild(chev);
+          ch.addEventListener('click', e => {
+            // don't toggle when the click was on a real control inside the header
+            if (e.target !== chev &&
+                e.target.closest('button,a,input,select,textarea,label,.btn,.chip,[onclick]')) return;
+            card.classList.toggle('cardx-collapsed');
+          });
+        });
+      }
+      const main = document.querySelector('.main') || document.body;
+      let pending = false;
+      const obs = new MutationObserver(() => {
+        if (pending) return;
+        pending = true;
+        requestAnimationFrame(() => { pending = false; enhance(main); });
+      });
+      obs.observe(main, { childList: true, subtree: true });
+      enhance(main);
+    })();
+
     // ── IST timestamp formatter (UTC → Asia/Kolkata) ─────────────────────
     // Render any timestamp in IST (Asia/Kolkata), labelled. Handles both:
     //  • ISO strings WITH an offset (e.g. "...+00:00" from the API, or the
@@ -5784,31 +7029,6 @@ tr:hover td{background:#161b22}</style></head>
         hour: '2-digit', minute: '2-digit', second: '2-digit',
         hour12: false
       }).replace(/\//g, '-') + ' IST';
-    }
-
-    // ── Grafana quick-access banner ───────────────────────────────────────
-    function _grafanaBanner() {
-      const url = '/grafana/d/cs-ingestion/cybersentinel-logs-explorer';
-      return `<div style="display:flex;align-items:center;gap:16px;background:linear-gradient(135deg,rgba(240,136,62,.12),rgba(88,166,255,.08));border:1px solid rgba(240,136,62,.3);border-radius:8px;padding:14px 18px">
-        <div style="width:38px;height:38px;border-radius:8px;background:rgba(240,136,62,.15);display:flex;align-items:center;justify-content:center;flex-shrink:0">
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#f0883e" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-            <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
-          </svg>
-        </div>
-        <div style="flex:1">
-          <div style="font-weight:600;font-size:13px">Visual Log Explorer</div>
-          <div style="font-size:11px;color:var(--muted);margin-top:2px">Visualise live logs — timelines, histograms, raw log browser</div>
-        </div>
-        <a href="${url}" target="_blank" rel="noopener"
-           style="display:inline-flex;align-items:center;gap:6px;background:#f0883e;color:#fff;font-size:12px;font-weight:600;padding:7px 14px;border-radius:6px;text-decoration:none;white-space:nowrap">
-          Open Explorer
-          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
-        </a>
-        <div style="font-size:10px;color:var(--muted);text-align:right;min-width:90px">
-          <div>Login: <b style="color:var(--text)">admin</b></div>
-          <div style="font-family:var(--mono)">${host}:${GRAFANA_PORT}</div>
-        </div>
-      </div>`;
     }
 
     // ── User Management ────────────────────────────────────────────────────
@@ -5861,6 +7081,216 @@ tr:hover td{background:#161b22}</style></head>
       await loadTopologyStatus();
     }
 
+  </script>
+  <script>
+    /* ══ NEURAL SPINE — rail behaviour ═══════════════════════════════════
+       Collapse (Ctrl+B) and the live node badges. Every badge is a real count
+       pulled from the same endpoints the deck uses — an empty badge means the
+       engine returned nothing, never a placeholder. */
+
+    function toggleRail() {
+      const min = document.body.classList.toggle('rail-min');
+      try { localStorage.setItem('cs_rail_min', min ? '1' : '0'); } catch (e) { }
+      const b = document.getElementById('rail-btn');
+      if (b) {
+        b.innerHTML = min ? '&#10217;' : '&#10216;';
+        b.title = (min ? 'Expand' : 'Collapse') + ' rail — Ctrl+B';
+      }
+      requestAnimationFrame(() => { if (typeof fitNeuralDeck === 'function') fitNeuralDeck(); });
+    }
+
+    (function restoreRail() {
+      try {
+        if (localStorage.getItem('cs_rail_min') === '1') {
+          document.body.classList.add('rail-min');
+          const b = document.getElementById('rail-btn');
+          if (b) { b.innerHTML = '&#10217;'; b.title = 'Expand rail — Ctrl+B'; }
+        }
+      } catch (e) { }
+    })();
+
+    addEventListener('keydown', e => {
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && (e.key === 'b' || e.key === 'B')) {
+        e.preventDefault();
+        toggleRail();
+      }
+    });
+
+    /* Live counts on the nodes — real data only. */
+    /* ══ SERVICE DECKS ═══════════════════════════════════════════════════
+       Each page is a microservice with its own identity — codename, accent,
+       signature motif, live vitals. The header is INJECTED above the existing
+       markup and nothing below it is touched, so every control on every page
+       keeps the exact handler it always had.
+       The names are the product's, never the vendor's. */
+    const SERVICES = {
+      trail: {
+        code: 'StreamCore', unit: 'Forensic Trail', glyph: '⌁', acc: '#f2c94c', motif: 'radar',
+        tag: 'Reconstruct one entity’s entire life in the vault — every event in order, with intel and behavioural baseline fused into the same timeline.',
+        stats: [['hot sources', 'hot'], ['critical', 'critIps', 'hot'], ['in vault', 'vault']],
+      },
+      logs: {
+        code: 'HyperVault', unit: 'Event Lake', glyph: '≡', acc: '#4cb782', motif: 'scan',
+        tag: 'Every event ever ingested, queryable to the millisecond. Nothing is sampled, nothing is rolled up, nothing is thrown away.',
+        stats: [['events held', 'vault'], ['sources', 'sources'], ['critical', 'sevCrit', 'hot']],
+      },
+      intelligence: {
+        code: 'IntelMesh', unit: 'Silent Telemetry', glyph: '◈', acc: '#4cb782', motif: 'wave',
+        tag: 'The five things a SIEM never tells you: who went quiet, what is beaconing, what is brand new, and where you are blind.',
+        stats: [['silent', 'silent', 'hot'], ['beacons', 'beacons', 'hot'], ['novel 7d', 'novel'], ['blind', 'blind', 'hot']],
+      },
+      ml: {
+        code: 'NeuronCore', unit: 'Risk Engine v3.1', glyph: '◉', acc: '#a78bfa', motif: 'mesh',
+        tag: 'Isolation-forest outliers fused with baseline deviation and threat intel — one score from three engines, and not a hand-written rule in sight.',
+        stats: [['entities scored', 'scored'], ['flagged', 'anomalies', 'hot'], ['model', 'model', '', 'txt']],
+      },
+      ueba: {
+        code: 'Cortex UEBA', unit: 'Identity Behaviour', glyph: '⬡', acc: '#a78bfa', motif: 'radar',
+        tag: 'People, not packets. Every identity carries its own baseline — impossible travel, takeover patterns and off-hours drift all score against it.',
+        stats: [['at risk', 'users', 'hot'], ['identities profiled', 'uebaPop'], ['in vault', 'vault']],
+      },
+      killchain: {
+        code: 'SigmaGrid', unit: 'ATT&CK Kill Chain', glyph: '⛓', acc: '#7b86e6', motif: 'chain',
+        tag: 'Where the attacker stands on the chain, not just what fired. Techniques map to stages, so a lone alert becomes a trajectory.',
+        stats: [['critical sources', 'critIps', 'hot'], ['events mapped', 'vault']],
+      },
+      incidents: {
+        code: 'Correlator', unit: 'Incident Fusion', glyph: '◎', acc: '#eb5757', motif: 'pulse',
+        tag: 'Related alerts collapse into one incident with one story — so an analyst reads a case, not a thousand rows.',
+        stats: [['correlated', 'incidents', 'hot'], ['critical sources', 'critIps', 'hot']],
+      },
+      deviations: {
+        code: 'Baseline', unit: 'Deviation Watch', glyph: '↯', acc: '#f2994a', motif: 'pulse',
+        tag: 'What is normal for THIS entity — and exactly how far it has drifted from itself tonight.',
+        stats: [['deviations', 'alerts', 'hot'], ['profiled', 'sources']],
+      },
+      bslexplorer: {
+        code: 'Baseline', unit: 'Profile Explorer', glyph: '▤', acc: '#f2c94c', motif: 'grid',
+        tag: 'Open any behavioural baseline and read it — hours, ports, geography, volume. The model’s memory, in plain sight.',
+        stats: [['baselines', 'sources'], ['deviations', 'alerts']],
+      },
+      aiinvestigate: {
+        code: 'AI Investigator', unit: 'Autonomous Analyst', glyph: '✦', acc: '#a78bfa', motif: 'mesh',
+        tag: 'Hand it an entity and get back the analyst’s first pass: what happened, whether it matters, and what to do next.',
+        stats: [['engine', 'model', '', 'txt'], ['entities scored', 'scored']],
+      },
+      nlquery: {
+        code: 'VaultQL', unit: 'Natural-Language SOC', glyph: '❯', acc: '#5e6ad2', motif: 'scan',
+        tag: 'Ask in plain English. It writes the query, runs it against the live vault, and shows you the answer AND the query it wrote.',
+        stats: [['queryable', 'vault'], ['engine', 'model', '', 'txt']],
+      },
+      playbooks: {
+        code: 'Responder', unit: 'Response Foundry', glyph: '▶', acc: '#7b86e6', motif: 'grid',
+        tag: 'Recommends the play, then runs it. Trained on nothing but your analysts’ own verdicts — and it refuses to guess before it has enough of them.',
+        stats: [['recommendations', 'recs'], ['open incidents', 'incidents', 'hot']],
+      },
+      reports: {
+        code: 'Dossier', unit: 'Executive Output', glyph: '◱', acc: '#8a8f98', motif: 'grid',
+        tag: 'The version you send upstairs — the same evidence, written for someone who was not in the SOC tonight.',
+        stats: [['events covered', 'vault'], ['incidents', 'incidents']],
+      },
+    };
+
+    const PAGE_TITLES = {
+      trail: 'IP Trail', logs: 'Logs Explorer', intelligence: 'Telemetry Intelligence',
+      ml: 'ML Anomaly', ueba: 'Users & Entities', killchain: 'Kill Chain',
+      incidents: 'Incident Triage', deviations: 'Baseline Deviations', bslexplorer: 'Baseline Explorer',
+      aiinvestigate: 'AI Investigator', nlquery: 'SOC Query', playbooks: 'Response Playbooks',
+      reports: 'Reports',
+    };
+
+    function buildServiceDecks() {
+      for (const [page, s] of Object.entries(SERVICES)) {
+        const el = document.getElementById('page-' + page);
+        if (!el || el.querySelector('.svc-hd')) continue;
+        el.style.setProperty('--acc', s.acc);
+
+        const chips = (s.stats || []).map(([label, key, hot, kind]) => `
+          <span class="sv-chip${hot ? ' hot' : ''}${kind === 'txt' ? ' txt' : ''}">
+            <span class="k">${label}</span>
+            <span class="v" id="sv-${page}-${key}">—</span>
+          </span>`).join('');
+
+        const hd = document.createElement('header');
+        hd.className = 'svc-hd';
+        hd.innerHTML =
+          `<div class="svc-fx" data-motif="${s.motif}"></div>
+           <div class="svc-id">
+             <div class="svc-glyph">${s.glyph}</div>
+             <div>
+               <div class="svc-eyebrow"><i></i>${s.code} &middot; ${s.unit}</div>
+               <h2 class="svc-title">${PAGE_TITLES[page] || s.unit}</h2>
+               <p class="svc-tag">${s.tag}</p>
+             </div>
+           </div>
+           <div class="svc-stats">${chips}</div>`;
+        el.prepend(hd);
+      }
+    }
+    buildServiceDecks();
+
+    /* One pull feeds every readout — the rail nodes AND the service-deck vitals.
+       Real values only: anything the API doesn't return stays a dash. */
+    async function syncLive() {
+      const g = async u => { try { const r = await fetch(u); return r.ok ? await r.json() : null; } catch (e) { return null; } };
+      const fmt = n => n >= 10000 ? Math.round(n / 1000) + 'k' : n >= 1000 ? (n / 1000).toFixed(1) + 'k' : String(n);
+
+      const [ov, anom, ueba, inc, recs, tele] = await Promise.all([
+        g('/api/overview'), g('/api/ml/anomalies'), g('/api/ueba/risk'),
+        g('/api/incidents?limit=1'), g('/api/playbooks/recommendations'), g('/api/telemetry/summary'),
+      ]);
+
+      const stats = (ov && ov.stats) || {};
+      const mlh = (ov && ov.ml_health) || {};
+      const sev = stats.severity_counts || {};
+      const V = {
+        vault: +stats.total_logs || 0,
+        sources: +stats.unique_ips || 0,
+        alerts: +stats.total_alerts || 0,
+        sevCrit: +sev.critical || 0,
+        hot: (stats.hot_ips || []).length,
+        critIps: (stats.critical_ips || []).length,
+        anomalies: ((anom && anom.anomalies) || []).length,
+        scored: +mlh.scored_ips || 0,
+        users: ((ueba && ueba.users) || []).length,
+        uebaPop: +((ueba && ueba.population) || 0),   // identities profiled, not IPs seen
+        incidents: (inc && (inc.total ?? (inc.incidents || []).length)) || 0,
+        recs: ((recs && recs.recommendations) || []).length,
+        silent: +((tele && tele.silent_agents) || 0),
+        beacons: +((tele && tele.beacons) || 0),
+        novel: +((tele && tele.novelties_7d) || 0),
+        blind: +((tele && tele.blind_agents) || 0),
+        model: mlh.model_ready ? 'TRAINED' : 'NOT TRAINED',
+      };
+
+      /* rail nodes */
+      const put = (id, n, hot) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.textContent = n ? fmt(n) : '';
+        el.classList.toggle('hot', !!hot && !!n);
+      };
+      put('rb-overview', V.critIps, true);
+      put('rb-trail', V.hot, V.critIps > 0);
+      put('rb-logs', V.vault);
+      put('rb-ml', V.anomalies, V.anomalies > 0);
+      put('rb-ueba', V.users);
+      put('rb-inc', V.incidents, V.incidents > 0);
+      put('rb-pb', V.recs);
+
+      /* service-deck vitals */
+      for (const [page, s] of Object.entries(SERVICES)) {
+        for (const [, key] of (s.stats || [])) {
+          const el = document.getElementById(`sv-${page}-${key}`);
+          if (!el) continue;
+          const v = V[key];
+          el.textContent = typeof v === 'number' ? v.toLocaleString() : (v || '—');
+        }
+      }
+    }
+
+    syncLive();
+    setInterval(syncLive, 60000);
   </script>
   <script>
     // Register the kill-switch SW once so any browser still running the old

@@ -11,7 +11,6 @@ services:
       - clickhouse_data:/var/lib/clickhouse
       - ./clickhouse/init:/docker-entrypoint-initdb.d:ro
       - ./clickhouse/users.d/default-password.xml:/etc/clickhouse-server/users.d/default-password.xml:ro
-      - ./clickhouse/users.d/grafana-readonly.xml:/etc/clickhouse-server/users.d/grafana-readonly.xml:ro
     ulimits:
       nofile:
         soft: 262144
@@ -34,33 +33,6 @@ services:
       retries: 10
       start_period: 20s
 
-  # ── Grafana: visual log explorer for ClickHouse (timeline + raw logs) ────
-  # This is the OpenSearch-Dashboards equivalent. ClickHouse's own /play UI is
-  # SQL-only; Grafana gives the histogram + click-to-browse raw logs.
-  grafana:
-    image: grafana/grafana:11.1.0
-    container_name: aiml_grafana
-    environment:
-      - GF_INSTALL_PLUGINS=grafana-clickhouse-datasource
-      # Login required — set your username/password here
-      - GF_SECURITY_ADMIN_USER=${GRAFANA_USER:-admin}
-      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASS:-tejas@123}
-      - GF_AUTH_ANONYMOUS_ENABLED=false
-      - GF_USERS_ALLOW_SIGN_UP=false
-      - GF_USERS_DEFAULT_THEME=dark
-      - GF_SERVER_ROOT_URL=%(protocol)s://%(domain)s/grafana
-      - GF_SERVER_SERVE_FROM_SUB_PATH=true
-    ports:
-      - "${GRAFANA_PORT:-13000}:3000"
-    volumes:
-      - grafana_data:/var/lib/grafana
-      - ./grafana/provisioning:/etc/grafana/provisioning:ro
-      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
-    depends_on:
-      clickhouse:
-        condition: service_healthy
-    restart: unless-stopped
-
   backend:
     build: ./backend
     container_name: aiml_backend
@@ -68,6 +40,9 @@ services:
       - "${BACKEND_HOST_PORT:-18110}:8000"
     environment:
       - ABUSEIPDB_KEY=${ABUSEIPDB_KEY:-demo}
+      # Demo attack replay writes synthetic rows into the store — OFF by default.
+      # Never set true on the .23 production box (it would pollute the 26M dataset).
+      - DEMO_MODE=${DEMO_MODE:-false}
       - AI_API_KEY=${GROQ_API_KEY:-${AI_API_KEY}}
       - AI_MODEL=${GROQ_MODEL:-${AI_MODEL:-llama-3.3-70b-versatile}}
       - AI_BASE_URL=${AI_BASE_URL:-https://api.groq.com/openai/v1/chat/completions}
@@ -84,6 +59,8 @@ services:
       - ./sample-data:/app/sample-data
       - ./scripts:/app/scripts
       - backend_data:/app/data
+      # customer-editable response playbooks — edit YAML, restart backend, done
+      - ./backend/playbooks.d:/app/playbooks.d:ro
     depends_on:
       clickhouse:
         condition: service_healthy
@@ -208,7 +185,6 @@ services:
 
 volumes:
   clickhouse_data:
-  grafana_data:
   ml_models:
   watcher_data:
   backend_data:

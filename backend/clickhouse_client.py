@@ -75,19 +75,70 @@ def get_client():
         return None
 
 
+# ── Read-query safety budget ────────────────────────────────────────────────
+# Every SELECT runs under a hard time budget and a row-read backstop, so no
+# single query — a runaway full scan, a bad join — can take the 26M-row store
+# down. Both are env-tunable without a redeploy (runbook §3). The row cap sits
+# well above 26M so legitimate whole-table aggregates pass; it only catches a
+# cartesian explosion. Time is the primary guard.
+READ_MAX_SECONDS = int(os.getenv("READ_MAX_SECONDS", "30"))
+READ_MAX_ROWS = int(os.getenv("READ_MAX_ROWS", "300000000"))   # 300M backstop
+_READ_SETTINGS = {
+    "max_execution_time": READ_MAX_SECONDS,
+    "max_rows_to_read": READ_MAX_ROWS,
+    "timeout_overflow_mode": "throw",
+    "read_overflow_mode": "throw",
+}
+
+
 def _q(sql: str, params: Optional[dict] = None):
-    """Run a query, return list-of-dicts (column_name -> value). [] on failure."""
+    """Run a query, return list-of-dicts (column_name -> value). [] on failure.
+
+    Runs under READ_MAX_SECONDS / READ_MAX_ROWS budgets — a query that exceeds
+    either is killed by ClickHouse rather than allowed to starve the store."""
     client = get_client()
     if not client:
         return []
     try:
-        res = client.query(sql, parameters=params or {})
+        res = client.query(sql, parameters=params or {}, settings=_READ_SETTINGS)
         cols = res.column_names
         return [dict(zip(cols, row)) for row in res.result_rows]
     except Exception as e:
         logger.error(f"ClickHouse query failed: {e} :: {sql[:160]}")
         _thread_local.client = None   # force reconnect on next call from this thread
         return []
+
+
+def _exec(sql: str, params: Optional[dict] = None) -> bool:
+    """Run a statement for its side effect (DDL etc.). NOTE: do not use for
+    parameterized INSERT VALUES — with async_insert=1 those die silently in
+    the async path. Row inserts go through _insert_row instead."""
+    client = get_client()
+    if not client:
+        return False
+    try:
+        client.command(sql, parameters=params or {})
+        return True
+    except Exception as e:
+        logger.error(f"ClickHouse exec failed: {e} :: {sql[:160]}")
+        _thread_local.client = None
+        return False
+
+
+def _insert_row(table: str, row: dict) -> bool:
+    """Insert one row via the column-oriented insert API — the only channel
+    that is reliable under async_insert. table is 'db.name' or bare name."""
+    client = get_client()
+    if not client:
+        return False
+    try:
+        cols = list(row.keys())
+        client.insert(table, [[row[c] for c in cols]], column_names=cols)
+        return True
+    except Exception as e:
+        logger.error(f"ClickHouse insert failed: {e} :: {table}")
+        _thread_local.client = None
+        return False
 
 
 def _iso(dt) -> str:
@@ -1201,6 +1252,7 @@ PLAYBOOK_RUNS_TABLE = f"{CLICKHOUSE_DB}.playbook_runs"
 CASES_TABLE         = f"{CLICKHOUSE_DB}.cases"
 ENTITY_TAGS_TABLE   = f"{CLICKHOUSE_DB}.entity_tags"
 FEEDBACK_TABLE      = f"{CLICKHOUSE_DB}.alert_feedback"
+ADOPTED_PB_TABLE    = f"{CLICKHOUSE_DB}.adopted_playbooks"
 
 _RUNTIME_DDL = [
     f"""CREATE TABLE IF NOT EXISTS {PLAYBOOK_RUNS_TABLE} (
@@ -1244,6 +1296,24 @@ _RUNTIME_DDL = [
         analyst     String DEFAULT '',
         ts          DateTime64(3) DEFAULT now64(3)
     ) ENGINE = ReplacingMergeTree(ts) ORDER BY (entity, signature)""",
+    # Adopted playbooks — an AI-drafted recommendation the analyst promoted into a
+    # live playbook. Once adopted its threat_type is "covered", so it stops being
+    # recommended and starts showing on the Responder page as active.
+    f"""CREATE TABLE IF NOT EXISTS {ADOPTED_PB_TABLE} (
+        playbook_id  String,
+        threat_type  String,
+        title        String,
+        severity     LowCardinality(String) DEFAULT 'high',
+        why          String DEFAULT '',
+        steps        String,                        -- JSON draft_steps
+        technique    String DEFAULT '',
+        tactic       String DEFAULT '',
+        mitigations  String DEFAULT '',             -- JSON
+        adopted_by   String DEFAULT 'analyst',
+        status       LowCardinality(String) DEFAULT 'active',   -- active|retired
+        created_at   DateTime64(3) DEFAULT now64(3),
+        updated_at   DateTime64(3) DEFAULT now64(3)
+    ) ENGINE = ReplacingMergeTree(updated_at) ORDER BY playbook_id""",
     # Destination NAME (blocked/contacted URL / domain / DNS query) so the trail
     # can name the target, not just its IP. Cheap metadata-only ALTER; the serve
     # layer back-fills old rows from `raw` on the fly (see _URL_FALLBACK).
@@ -1335,6 +1405,56 @@ def get_playbook_runs(incident_id: str = "", limit: int = 50) -> list[dict]:
               f"ORDER BY updated_at DESC LIMIT {int(limit)}",
               {"iid": incident_id} if incident_id else None)
     return [_shape_run(r) for r in rows]
+
+
+def insert_adopted_playbook(pb: dict) -> bool:
+    """Persist (or re-adopt) a drafted recommendation as a live playbook. Keyed by
+    playbook_id (ReplacingMergeTree), so re-adopting the same threat just refreshes it."""
+    client = get_client()
+    if not client:
+        return False
+    try:
+        client.insert(
+            ADOPTED_PB_TABLE,
+            [[pb["playbook_id"], pb.get("threat_type", ""), pb.get("title", ""),
+              pb.get("severity", "high"), pb.get("why", ""),
+              json.dumps(pb.get("steps", [])), pb.get("technique", ""),
+              pb.get("tactic", ""), json.dumps(pb.get("mitigations", [])),
+              pb.get("adopted_by", "analyst"), pb.get("status", "active"),
+              _now(), _now()]],
+            column_names=["playbook_id", "threat_type", "title", "severity", "why",
+                          "steps", "technique", "tactic", "mitigations", "adopted_by",
+                          "status", "created_at", "updated_at"],
+        )
+        return True
+    except Exception as e:
+        logger.error(f"insert_adopted_playbook failed: {e}")
+        return False
+
+
+def get_adopted_playbooks(limit: int = 100) -> list[dict]:
+    """Live (non-retired) adopted playbooks, newest first."""
+    rows = _q(f"SELECT * FROM {ADOPTED_PB_TABLE} FINAL WHERE status = 'active' "
+              f"ORDER BY updated_at DESC LIMIT {int(limit)}")
+    out = []
+    for r in rows:
+        try:
+            steps = json.loads(r.get("steps") or "[]")
+        except Exception:
+            steps = []
+        try:
+            mits = json.loads(r.get("mitigations") or "[]")
+        except Exception:
+            mits = []
+        out.append({
+            "playbook_id": r["playbook_id"], "threat_type": r.get("threat_type", ""),
+            "title": r.get("title", ""), "severity": r.get("severity", "high"),
+            "why": r.get("why", ""), "steps": steps, "technique": r.get("technique", ""),
+            "tactic": r.get("tactic", ""), "mitigations": mits,
+            "adopted_by": r.get("adopted_by", "analyst"), "status": r.get("status", "active"),
+            "created_at": _iso(r.get("created_at")), "updated_at": _iso(r.get("updated_at")),
+        })
+    return out
 
 
 def insert_case(case: dict) -> bool:

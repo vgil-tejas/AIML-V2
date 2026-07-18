@@ -66,3 +66,7 @@ Thumbs.db
 
 # Accidentally created shell brace-expansion directory
 {frontend,backend,ml-engine,redis-config,nginx,scripts,sample-data}/
+
+# Editor / backup files
+*.bak
+*.orig
