@@ -1857,95 +1857,213 @@ Print this page to PDF for board distribution. CyberSentinel · AI-assisted SIEM
 # that flag). Turn it on only on a dev/demo box.
 DEMO_MODE = os.getenv("DEMO_MODE", "false").lower() in ("true", "1", "yes")
 
-_demo_state = {"running": False, "inserted": 0, "started_at": None}
+_demo_state = {"running": False, "inserted": 0, "started_at": None, "scenario": None}
 
 _DEMO_ATTACKER = "198.51.100.66"        # TEST-NET-2 — never a real host
 _DEMO_TARGETS = ["10.0.10.5", "10.0.10.21", "10.0.10.33", "10.0.20.7", "10.0.20.11"]
 
 
-def _demo_events():
-    """Recon → brute force → lateral movement → exfil, backdated across the
-    last 55 minutes so every trend widget lights up act by act."""
-    import random
-    rnd = random.Random(42)   # deterministic: same demo every run
-    now = datetime.now(timezone.utc)
-    ev = []
-
+def _rnd_at(rnd, now):
+    """Return an `at(mins_ago, **kw)` factory bound to a deterministic clock."""
     def at(mins_ago, **kw):
         base = {
             "@timestamp": (now - timedelta(minutes=mins_ago,
                                            seconds=rnd.randint(0, 50))).isoformat(),
-            "data.srcip": _DEMO_ATTACKER, "data.srccountry": "Netherlands",
-            "agent.name": "BANK-FW-01", "data.action": "denied",
         }
         base.update(kw)
         return base
+    return at
 
-    # Act 1 — recon: port sweep across targets (55-45 min ago)
-    for i in range(30):
-        ev.append(at(55 - i // 3, **{
+
+# ── Scenario 1: external breach — recon → brute force → lateral → exfil ───────
+def _events_breach():
+    import random
+    rnd = random.Random(42)
+    at = _rnd_at(rnd, datetime.now(timezone.utc))
+    ev = []
+    fw = {"data.srcip": _DEMO_ATTACKER, "data.srccountry": "Netherlands",
+          "agent.name": "BANK-FW-01", "data.action": "denied"}
+
+    for i in range(30):     # Act 1 — recon port sweep
+        ev.append(at(55 - i // 3, **{**fw,
             "data.dstip": _DEMO_TARGETS[i % len(_DEMO_TARGETS)],
             "data.dstport": str([22, 80, 443, 3389, 445, 1433][i % 6]),
             "rule.description": "Firewall: connection attempt to closed port",
-            "rule.id": "4101", "rule.level": 3, "rule.mitre.id": "T1595",
-        }))
-    # Act 2 — brute force: hammering SSH on one host (40-30 min ago)
-    for i in range(40):
+            "rule.id": "4101", "rule.level": 3, "rule.mitre.id": "T1595"}))
+    for i in range(40):     # Act 2 — brute force SSH
         ev.append(at(40 - i // 4, **{
+            "data.srcip": _DEMO_ATTACKER, "data.srccountry": "Netherlands",
             "data.dstip": _DEMO_TARGETS[0], "data.dstport": "22",
             "rule.description": "sshd: authentication failed",
             "rule.id": "5710", "rule.level": 10, "rule.mitre.id": "T1110",
-            "data.user": "svc_backup", "agent.name": "BANK-DB-01",
-            "data.action": "",
-        }))
-    # the breach: one success
-    ev.append(at(29, **{
-        "data.dstip": _DEMO_TARGETS[0], "data.dstport": "22",
+            "data.user": "svc_backup", "agent.name": "BANK-DB-01"}))
+    ev.append(at(29, **{    # the breach
+        "data.srcip": _DEMO_ATTACKER, "data.dstip": _DEMO_TARGETS[0], "data.dstport": "22",
         "rule.description": "sshd: authentication success after multiple failures",
         "rule.id": "5715", "rule.level": 12, "rule.mitre.id": "T1078",
-        "data.user": "svc_backup", "agent.name": "BANK-DB-01", "data.action": "",
-    }))
-    # Act 3 — lateral movement: compromised host fans out (25-12 min ago)
-    for i in range(35):
+        "data.user": "svc_backup", "agent.name": "BANK-DB-01"}))
+    for i in range(35):     # Act 3 — lateral movement
         ev.append(at(25 - i // 3, **{
             "data.srcip": _DEMO_TARGETS[0], "data.srccountry": "",
             "data.dstip": _DEMO_TARGETS[1 + i % (len(_DEMO_TARGETS) - 1)],
             "data.dstport": str([445, 3389, 5985][i % 3]),
             "rule.description": "SMB/RDP session from unusual internal source",
             "rule.id": "18152", "rule.level": 9, "rule.mitre.id": "T1021",
-            "agent.name": f"BANK-SRV-{i % 4 + 1:02d}", "data.action": "allowed",
-        }))
-    # Act 4 — exfil attempt: large outbound transfer, blocked (10-2 min ago)
-    for i in range(12):
+            "agent.name": f"BANK-SRV-{i % 4 + 1:02d}", "data.action": "allowed"}))
+    for i in range(12):     # Act 4 — exfil blocked
         ev.append(at(10 - i // 2, **{
             "data.srcip": _DEMO_TARGETS[0], "data.srccountry": "",
             "data.dstip": _DEMO_ATTACKER, "data.dstport": "443",
             "rule.description": "DLP: large outbound transfer to unclassified external host",
             "rule.id": "31151", "rule.level": 13, "rule.mitre.id": "T1048",
-            "agent.name": "BANK-FW-01", "data.action": "blocked",
-        }))
+            "agent.name": "BANK-FW-01", "data.action": "blocked"}))
     return ev
 
 
+# ── Scenario 2: credential stuffing against the customer banking portal ───────
+_CRED_BOTNET = ["203.0.113.14", "203.0.113.55", "198.51.100.23",
+                "45.155.205.0", "185.220.101.7", "141.98.10.60"]
+_CRED_TARGET = "10.0.30.9"      # BANK-WEB-01 — internet banking front-end
+
+
+def _events_cred_stuffing():
+    """A botnet replays leaked username/password pairs against the retail
+    banking login. Thousands of failures, a handful of account takeovers,
+    then a fraudulent beneficiary add — the exact shape a bank fears."""
+    import random
+    rnd = random.Random(7)
+    at = _rnd_at(rnd, datetime.now(timezone.utc))
+    ev = []
+    countries = ["Russia", "Vietnam", "Brazil", "Nigeria", "Romania", "India"]
+    users = [f"cust{100000 + rnd.randint(0, 89999)}" for _ in range(40)]
+
+    # Act 1 — the flood: distributed login failures (50-20 min ago)
+    for i in range(120):
+        bot = i % len(_CRED_BOTNET)
+        ev.append(at(50 - i // 4, **{
+            "data.srcip": _CRED_BOTNET[bot], "data.srccountry": countries[bot],
+            "data.dstip": _CRED_TARGET, "data.dstport": "443",
+            "data.url": "/retail/login", "data.user": rnd.choice(users),
+            "rule.description": "Web auth: invalid credentials (customer portal)",
+            "rule.id": "60122", "rule.level": 5, "rule.mitre.id": "T1110.004",
+            "agent.name": "BANK-WEB-01", "data.action": "denied"}))
+    # Act 2 — account takeovers: a few valid hits (18-10 min ago)
+    taken = users[:4]
+    for i, u in enumerate(taken):
+        ev.append(at(18 - i * 2, **{
+            "data.srcip": _CRED_BOTNET[i % len(_CRED_BOTNET)],
+            "data.srccountry": countries[i % len(countries)],
+            "data.dstip": _CRED_TARGET, "data.dstport": "443",
+            "data.url": "/retail/login", "data.user": u,
+            "rule.description": "Web auth: login success from new device & geo (impossible travel)",
+            "rule.id": "60130", "rule.level": 11, "rule.mitre.id": "T1078.004",
+            "agent.name": "BANK-WEB-01", "data.action": "allowed"}))
+    # Act 3 — fraud: beneficiary add + transfer attempt, blocked (8-2 min ago)
+    for i, u in enumerate(taken[:2]):
+        ev.append(at(8 - i * 2, **{
+            "data.srcip": _CRED_BOTNET[i], "data.srccountry": countries[i],
+            "data.dstip": _CRED_TARGET, "data.dstport": "443",
+            "data.url": "/retail/beneficiary/add", "data.user": u,
+            "rule.description": "Fraud engine: new payee + high-value transfer on freshly-accessed account",
+            "rule.id": "60155", "rule.level": 13, "rule.mitre.id": "T1565.001",
+            "agent.name": "BANK-WEB-01", "data.action": "blocked"}))
+    return ev
+
+
+# ── Scenario 3: insider data theft — privileged user exfiltrates PII ──────────
+_INSIDER_HOST = "10.0.40.12"    # BANK-DBA-07 — a DBA workstation
+_INSIDER_USER = "r.malhotra"    # privileged DB admin, off-hours
+_INSIDER_DB = "10.0.10.5"       # core banking DB
+
+
+def _events_insider_theft():
+    """A trusted DBA, at 02:00, runs bulk SELECTs against customer tables,
+    dumps to a USB, and uploads to personal cloud storage. No malware, no
+    external attacker — the behaviour is the only signal. UEBA territory."""
+    import random
+    rnd = random.Random(11)
+    at = _rnd_at(rnd, datetime.now(timezone.utc))
+    ev = []
+    host = {"data.srcip": _INSIDER_HOST, "data.srccountry": "",
+            "data.user": _INSIDER_USER, "agent.name": "BANK-DBA-07"}
+
+    # Act 1 — off-hours access: privileged login at an unusual time (55-45 min)
+    ev.append(at(54, **{**host, "data.dstip": _INSIDER_DB, "data.dstport": "1433",
+        "rule.description": "Privileged DB login outside business hours",
+        "rule.id": "70021", "rule.level": 6, "rule.mitre.id": "T1078.002",
+        "data.action": "allowed"}))
+    # Act 2 — bulk reads: abnormal SELECT volume on customer PII (44-25 min)
+    for i in range(30):
+        ev.append(at(44 - i // 2, **{**host,
+            "data.dstip": _INSIDER_DB, "data.dstport": "1433",
+            "data.query": "SELECT * FROM customers WHERE 1=1",
+            "rule.description": "Anomalous bulk read of customer PII table (10x baseline rows)",
+            "rule.id": "70044", "rule.level": 9, "rule.mitre.id": "T1005",
+            "data.action": "allowed"}))
+    # Act 3 — staging: mass copy to removable media (22-14 min)
+    for i in range(8):
+        ev.append(at(22 - i, **{**host, "data.dstip": "",
+            "data.file": f"E:/dump/customers_{i:02d}.csv",
+            "rule.description": "DLP: sensitive dataset written to USB removable media",
+            "rule.id": "70061", "rule.level": 11, "rule.mitre.id": "T1052.001",
+            "data.action": "logged"}))
+    # Act 4 — exfil: upload to personal cloud, blocked (10-2 min)
+    for i in range(6):
+        ev.append(at(10 - i, **{**host,
+            "data.dstip": "104.18.32.7", "data.dstport": "443",
+            "data.url": "upload.personal-drive.example",
+            "rule.description": "DLP: large upload to unsanctioned personal cloud storage",
+            "rule.id": "70075", "rule.level": 13, "rule.mitre.id": "T1567.002",
+            "agent.name": "BANK-PROXY-01", "data.action": "blocked"}))
+    return ev
+
+
+# scenario registry: key → (label, generator, story, focus-entity for baseline)
+_DEMO_SCENARIOS = {
+    "breach": {
+        "label": "Lateral-Movement Breach",
+        "gen": _events_breach, "focus": [_DEMO_ATTACKER, _DEMO_TARGETS[0]],
+        "attacker": _DEMO_ATTACKER, "entity": _DEMO_TARGETS[0],
+        "story": "recon → brute force → lateral movement → exfil attempt",
+    },
+    "cred_stuffing": {
+        "label": "Credential Stuffing — Customer Portal",
+        "gen": _events_cred_stuffing, "focus": [_CRED_TARGET, _CRED_BOTNET[0]],
+        "attacker": "botnet (6 IPs)", "entity": _CRED_TARGET,
+        "story": "credential flood → account takeover → fraudulent payee (blocked)",
+    },
+    "insider_theft": {
+        "label": "Insider Data Theft — Privileged DBA",
+        "gen": _events_insider_theft, "focus": [_INSIDER_HOST, _INSIDER_DB],
+        "attacker": _INSIDER_USER, "entity": _INSIDER_HOST,
+        "story": "off-hours access → bulk PII read → USB staging → cloud exfil (blocked)",
+    },
+}
+
+
 @app.post("/api/demo/run")
-async def demo_run(background_tasks: BackgroundTasks):
-    """Replay a scripted 4-act attack (recon → brute force → lateral → exfil)
-    through the REAL ingestion pipeline. Sales-demo center of attraction."""
+async def demo_run(background_tasks: BackgroundTasks, scenario: str = "breach"):
+    """Replay a scripted bank attack through the REAL ingestion pipeline.
+    `scenario` ∈ breach | cred_stuffing | insider_theft. Sales-demo centerpiece."""
     if not DEMO_MODE:
         raise HTTPException(403, "Demo mode is disabled on this deployment "
                                  "(set DEMO_MODE=true to enable — never on production).")
+    sc = _DEMO_SCENARIOS.get(scenario)
+    if not sc:
+        raise HTTPException(400, f"Unknown scenario '{scenario}'. "
+                                 f"Choose one of: {', '.join(_DEMO_SCENARIOS)}")
     if _demo_state["running"]:
         return {"status": "already-running", **_demo_state}
 
     async def replay():
-        _demo_state.update(running=True, inserted=0,
+        _demo_state.update(running=True, inserted=0, scenario=scenario,
                            started_at=datetime.now(timezone.utc).isoformat())
         try:
-            for e in _demo_events():
+            for e in sc["gen"]():
                 if await ingest_log_row(e):
                     _demo_state["inserted"] += 1
-            await build_baseline(_DEMO_ATTACKER)
-            await build_baseline(_DEMO_TARGETS[0])
+            for ent in sc["focus"]:
+                await build_baseline(ent)
             global _stats_cache_ts, _hot_ips_cache_ts
             _stats_cache_ts = 0    # bust caches so the dashboard lights up NOW
             _hot_ips_cache_ts = 0
@@ -1953,14 +2071,15 @@ async def demo_run(background_tasks: BackgroundTasks):
             _demo_state["running"] = False
 
     background_tasks.add_task(replay)
-    return {"status": "started",
-            "story": "recon → brute force → lateral movement → exfil attempt",
-            "attacker": _DEMO_ATTACKER, "patient_zero": _DEMO_TARGETS[0]}
+    return {"status": "started", "scenario": scenario, "label": sc["label"],
+            "story": sc["story"], "attacker": sc["attacker"], "entity": sc["entity"]}
 
 
 @app.get("/api/demo/status")
 async def demo_status():
-    return {**_demo_state, "enabled": DEMO_MODE}
+    return {**_demo_state, "enabled": DEMO_MODE,
+            "scenarios": [{"key": k, "label": v["label"], "story": v["story"]}
+                          for k, v in _DEMO_SCENARIOS.items()]}
 
 
 _COVERAGE_COLS = [

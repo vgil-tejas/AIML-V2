@@ -2118,7 +2118,7 @@
   <!-- BUMP this version on every theme.css change — it is what invalidates
        browsers that cached the old URL. Forgetting it while nginx cached CSS
        for 1h caused the unstyled-page bug on 17 Jul 2026. -->
-  <link rel="stylesheet" href="theme.css?v=37-hardening">
+  <link rel="stylesheet" href="theme.css?v=40-demofilm3">
 
   <style>
     /* ══════════════════════════════════════════════════════════════════════
@@ -3215,12 +3215,13 @@
         <div class="card" id="demo-card" style="margin-bottom:16px;display:none">
           <div class="ch"><h3>Demo mode — scripted attack replay</h3></div>
           <p style="color:var(--muted);font-size:12px;margin:6px 0 12px">
-            Replays a 4-act attack — <b>recon → brute force → lateral movement → exfil attempt</b> —
-            through the <b>real</b> ingestion pipeline (classification, baselines, ML, incidents all fire).
-            The attacker is <span style="font-family:var(--mono)">198.51.100.66</span> (TEST-NET, never a real host).
+            Pick a bank scenario — <b>external breach</b>, <b>credential stuffing</b>, or <b>insider data theft</b> —
+            and CyberSentinel replays it through the <b>real</b> ingestion pipeline (classification, baselines, ML,
+            incidents all fire). All actors use TEST-NET / synthetic identities, never real hosts.
             Watch the Overview light up act by act. <b>Disabled on production</b> so it can never write into the live dataset.</p>
           <div style="display:flex;gap:10px;align-items:center">
-            <button class="btn pri" id="demo-btn" onclick="runDemo()">▶ Run demo attack</button>
+            <button class="btn pri" id="demo-film-btn" onclick="playDemoFilm()">🎬 Play demo film</button>
+            <button class="btn" id="demo-btn" onclick="runDemo()">Run silently (no film)</button>
             <span id="demo-status" style="font-size:12px;color:var(--muted)"></span>
           </div>
         </div>
@@ -4753,6 +4754,230 @@ tr:hover td{background:#161b22}</style></head>
     document.addEventListener('DOMContentLoaded', () => jargonize());
 
     // ── Settings: demo mode + connectors ─────────────────────────────────
+    // ══════════════════════════════════════════════════════════════════════
+    //  CyberSentinel Live Demo Film — a cinematic, auto-playing product film
+    //  that runs on the REAL pipeline. Looks like a demo video; every number is
+    //  live. Guided (play/pause/skip) or unattended (auto-advance).
+    // ══════════════════════════════════════════════════════════════════════
+    const DEMO_FILMS = {
+      breach: {
+        key: 'breach', badge: 'External Breach',
+        title: 'Lateral-Movement Breach',
+        sub: 'An outside attacker breaks into a crown-jewel host and tries to spread.',
+        acts: [
+          { k: 'ACT 1 · 22:04', t: 'Reconnaissance', n: 30,
+            cap: 'An external host begins probing the bank\'s internal network — a port sweep across five hosts. A legacy tool logs 30 low-priority "connection denied" lines and moves on.',
+            metric: 'ports swept across internal hosts', icon: '🛰️', tone: 'watch', dur: 6500 },
+          { k: 'ACT 2 · 22:11', t: 'Brute Force', n: 40,
+            cap: 'The attacker locks onto BANK-DB-01 and hammers the SSH service — dozens of failed logins as service account svc_backup. CyberSentinel\'s baseline for this IP has already broken.',
+            metric: 'failed authentications', icon: '🔨', tone: 'elevated', dur: 6500 },
+          { k: 'ACT 3 · 22:29', t: 'The Breach', n: 100, suffix: '/100',
+            cap: 'One login succeeds. A legacy SIEM sees "authentication success" — a green event. CyberSentinel sees a success after 40 failures on a crown-jewel host and raises the risk to critical.',
+            metric: 'risk score — patient zero 10.0.10.5', icon: '🚨', tone: 'critical', dur: 7000 },
+          { k: 'ACT 4 · 22:40', t: 'Lateral Movement', n: 5,
+            cap: 'The compromised host fans out — SMB and RDP to hosts it has never touched in 15 days of baseline. This is the shape of a breach spreading. The engines agree; an incident is born.',
+            metric: 'internal hosts newly reached', icon: '🕸️', tone: 'critical', dur: 7000 },
+          { k: 'ACT 5 · 22:52', t: 'Exfiltration — Blocked', n: 1,
+            cap: 'A large outbound transfer to the attacker is attempted. DLP fires, the firewall blocks it, and CyberSentinel has already written the verdict and staged the response playbook.',
+            metric: 'exfil attempt — blocked at the edge', icon: '🛡️', tone: 'ok', dur: 7000 },
+        ],
+        finale: { legacy: 118,
+          legacyList: ['30 "connection denied"', '40 "auth failed"', '1 "auth success" (looks fine)', '35 internal connections', '12 DLP hits'],
+          usList: ['✓ One correlated breach', '✓ Plain-English verdict, auto-written', '✓ Kill chain mapped to ATT&CK', '✓ Response playbook staged', '✓ Analyst told where to start'] },
+      },
+      cred_stuffing: {
+        key: 'cred_stuffing', badge: 'Customer Fraud',
+        title: 'Credential Stuffing — Customer Portal',
+        sub: 'A botnet replays leaked passwords against internet banking to take over accounts.',
+        acts: [
+          { k: 'ACT 1 · 01:12', t: 'Credential Flood', n: 120,
+            cap: 'Six IPs across six countries hammer the retail login with leaked username/password pairs. Each miss is a harmless "invalid credentials" line — but the volume and spread is the tell. CyberSentinel groups them into one campaign.',
+            metric: 'failed logins on /retail/login', icon: '🌊', tone: 'watch', dur: 6500 },
+          { k: 'ACT 2 · 01:34', t: 'Account Takeover', n: 4,
+            cap: 'Four pairs actually work. A legacy view shows four normal "login success" events. CyberSentinel flags impossible travel — the same customers logging in from a new device and a new country minutes apart — and escalates.',
+            metric: 'customer accounts taken over', icon: '🔓', tone: 'elevated', dur: 7000 },
+          { k: 'ACT 3 · 01:41', t: 'Fraudulent Payee — Blocked', n: 2,
+            cap: 'From two hijacked accounts, a new beneficiary is added and a high-value transfer is attempted. The fraud engine fires on "new payee on a freshly-accessed account", the transfers are blocked, and a verdict is written for the fraud team.',
+            metric: 'fraudulent transfers stopped', icon: '🛡️', tone: 'ok', dur: 7000 },
+        ],
+        finale: { legacy: 126,
+          legacyList: ['120 "invalid credentials"', '4 "login success" (look fine)', '2 "beneficiary added"', 'no link between them', 'analyst drowns in login noise'],
+          usList: ['✓ One credential-stuffing campaign', '✓ Impossible-travel takeovers flagged', '✓ Fraudulent payee blocked', '✓ Affected customers identified', '✓ Fraud team handed the verdict'] },
+      },
+      insider_theft: {
+        key: 'insider_theft', badge: 'Insider Threat',
+        title: 'Insider Data Theft — Privileged DBA',
+        sub: 'A trusted database admin quietly exfiltrates customer PII after hours. No malware — only behaviour.',
+        acts: [
+          { k: 'ACT 1 · 02:06', t: 'Off-Hours Access', n: 1,
+            cap: 'DBA r.malhotra logs into the core banking database at 2 a.m. — a valid login with valid credentials. Nothing a rule would catch. CyberSentinel notes it: this user has never worked these hours in 30 days of baseline.',
+            metric: 'privileged login outside baseline hours', icon: '🌙', tone: 'watch', dur: 6500 },
+          { k: 'ACT 2 · 02:14', t: 'Bulk PII Read', n: 30,
+            cap: 'Then the queries: bulk SELECTs pulling the entire customers table — ten times this user\'s normal row volume. Every query is "authorised". The behaviour, not the permission, is the signal, and UEBA raises the risk.',
+            metric: 'abnormal bulk reads of customer PII', icon: '🗄️', tone: 'elevated', dur: 7000 },
+          { k: 'ACT 3 · 02:29', t: 'USB Staging', n: 8,
+            cap: 'The pulled data is written to a USB drive — customers_00.csv through 07. DLP logs each write. A legacy SIEM has these events in three different silos; CyberSentinel ties login, reads and USB to one identity.',
+            metric: 'sensitive files copied to removable media', icon: '💾', tone: 'critical', dur: 7000 },
+          { k: 'ACT 4 · 02:41', t: 'Cloud Exfil — Blocked', n: 6,
+            cap: 'Finally, an upload to personal cloud storage. DLP blocks the transfer at the proxy, and CyberSentinel has already assembled the full insider case — one identity, one timeline, one verdict for HR and legal.',
+            metric: 'exfil uploads blocked at the proxy', icon: '🛡️', tone: 'ok', dur: 7000 },
+        ],
+        finale: { legacy: 45,
+          legacyList: ['1 "privileged login"', '30 "query executed"', '8 "file written to USB"', '6 "upload" (blocked)', 'all authorised, all separate'],
+          usList: ['✓ One insider case, one identity', '✓ Off-hours + bulk-read anomaly (UEBA)', '✓ Full timeline: login → read → USB → cloud', '✓ Behaviour flagged despite valid access', '✓ Verdict staged for HR & legal'] },
+      },
+    };
+    let _filmKey = 'breach';
+    function _activeFilm() { return DEMO_FILMS[_filmKey]; }
+    let _film = { i: 0, paused: false, timer: null, running: false };
+
+    async function playDemoFilm() {
+      _buildFilmOverlay();
+      const ov = document.getElementById('demo-film');
+      ov.classList.add('open');
+      _film = { i: -1, paused: false, timer: null, running: false };
+      _filmRenderPicker();
+      _filmSetPhase('pick');
+    }
+    function _filmRenderPicker() {
+      const stage = document.getElementById('film-stage');
+      stage.className = 'film-stage tone-watch';
+      stage.innerHTML = `
+        <div class="film-kicker">CHOOSE A SCENARIO</div>
+        <div class="film-act" style="margin-bottom:18px">Watch CyberSentinel work a real bank attack</div>
+        <div class="film-pick">
+          ${Object.values(DEMO_FILMS).map(f => `
+            <button class="film-pick-card" onclick="_filmStart('${f.key}')">
+              <span class="fp-badge">${f.badge}</span>
+              <span class="fp-title">${f.title}</span>
+              <span class="fp-sub">${f.sub}</span>
+              <span class="fp-go">Play this film →</span>
+            </button>`).join('')}
+        </div>`;
+      document.getElementById('film-controls').style.display = 'none';
+      document.getElementById('film-dots').innerHTML = '';
+    }
+    function _filmStart(key) {
+      _filmKey = key;
+      _film = { i: -1, paused: false, timer: null, running: true };
+      document.getElementById('film-controls').style.display = '';
+      document.getElementById('film-pause').textContent = '⏸ Pause';
+      _filmSetPhase('intro');
+      // Kick the real attack (this scenario) through the pipeline in the background.
+      fetch(`${API}/demo/run?scenario=${encodeURIComponent(key)}`, { method: 'POST' }).catch(() => {});
+      // Give ingestion a moment, then roll.
+      _filmCountdown(3, () => _filmNext());
+    }
+    function _filmSetPhase(p) {
+      const ov = document.getElementById('demo-film');
+      ov.dataset.phase = p;
+    }
+    function _filmCountdown(n, done) {
+      const el = document.getElementById('film-countdown');
+      el.style.display = 'flex';
+      let c = n;
+      const tick = () => {
+        el.textContent = c;
+        if (c-- <= 0) { el.style.display = 'none'; done(); return; }
+        _film.timer = setTimeout(tick, 900);
+      };
+      tick();
+    }
+    function _filmNext() {
+      if (!_film.running) return;
+      _film.i++;
+      const acts = _activeFilm().acts;
+      if (_film.i >= acts.length) return _filmFinale();
+      _renderAct(acts[_film.i]);
+      _filmProgress();
+      if (!_film.paused) _film.timer = setTimeout(_filmNext, acts[_film.i].dur);
+    }
+    function _renderAct(a) {
+      _filmSetPhase('act');
+      const stage = document.getElementById('film-stage');
+      stage.className = 'film-stage tone-' + a.tone;
+      stage.innerHTML = `
+        <div class="film-kicker">${a.k}</div>
+        <div class="film-act">${a.icon} ${a.t}</div>
+        <div class="film-metric"><span class="film-num" id="film-num">0</span>${a.suffix ? `<span class="film-suffix">${a.suffix}</span>` : ''}<span class="film-metriclabel">${a.metric}</span></div>
+        <div class="film-cap">${a.cap}</div>`;
+      _countUp(document.getElementById('film-num'), a.n);
+    }
+    function _countUp(el, to) {
+      if (!el) return;
+      const dur = 1100, t0 = performance.now();
+      const step = now => {
+        const p = Math.min(1, (now - t0) / dur);
+        el.textContent = Math.round(to * (1 - Math.pow(1 - p, 3))).toLocaleString();
+        if (p < 1) requestAnimationFrame(step);
+      };
+      requestAnimationFrame(step);
+    }
+    function _filmProgress() {
+      const wrap = document.getElementById('film-dots');
+      wrap.innerHTML = _activeFilm().acts.map((a, i) =>
+        `<span class="film-dot ${i === _film.i ? 'on' : i < _film.i ? 'done' : ''}"></span>`).join('');
+    }
+    function _filmFinale() {
+      _filmSetPhase('finale');
+      clearTimeout(_film.timer);
+      const f = _activeFilm(), fin = f.finale;
+      const stage = document.getElementById('film-stage');
+      stage.className = 'film-stage tone-ok';
+      stage.innerHTML = `
+        <div class="film-kicker">THE DIFFERENCE</div>
+        <div class="film-split">
+          <div class="fs-col legacy">
+            <div class="fs-h">A legacy SIEM</div>
+            <div class="fs-big">${fin.legacy}</div><div class="fs-l">raw alerts to triage by hand</div>
+            <ul class="fs-list">${fin.legacyList.map(x => `<li>${x}</li>`).join('')}</ul>
+          </div>
+          <div class="fs-arrow">→</div>
+          <div class="fs-col us">
+            <div class="fs-h">CyberSentinel</div>
+            <div class="fs-big ok">1</div><div class="fs-l">incident, verdict &amp; playbook</div>
+            <ul class="fs-list">${fin.usList.map(x => `<li>${x}</li>`).join('')}</ul>
+          </div>
+        </div>
+        <div class="film-cta">
+          <button class="btn pri" onclick="closeDemoFilm();nav('overview')">See it live on the dashboard →</button>
+          <button class="btn" onclick="_filmRenderPicker();_filmSetPhase('pick')">◇ Another scenario</button>
+          <button class="btn" onclick="_film.running=true;_film.i=-1;document.getElementById('film-controls').style.display='';_filmNext()">Replay film</button>
+        </div>`;
+      document.getElementById('film-controls').style.display = 'none';
+    }
+    function _filmTogglePause() {
+      _film.paused = !_film.paused;
+      const b = document.getElementById('film-pause');
+      b.textContent = _film.paused ? '▶ Resume' : '⏸ Pause';
+      if (_film.paused) clearTimeout(_film.timer);
+      else _film.timer = setTimeout(_filmNext, 2500);
+    }
+    function _filmSkip() { clearTimeout(_film.timer); _filmNext(); }
+    function closeDemoFilm() {
+      _film.running = false; clearTimeout(_film.timer);
+      const ov = document.getElementById('demo-film');
+      if (ov) ov.classList.remove('open');
+    }
+    function _buildFilmOverlay() {
+      if (document.getElementById('demo-film')) return;
+      const d = document.createElement('div');
+      d.id = 'demo-film'; d.dataset.phase = 'intro';
+      d.innerHTML = `
+        <div class="film-topbar">
+          <div class="film-brand">CYBER<b>SENTINEL</b> · Live Demo Film</div>
+          <button class="film-x" onclick="closeDemoFilm()" title="Exit film">✕</button>
+        </div>
+        <div class="film-countdown" id="film-countdown"></div>
+        <div class="film-stage" id="film-stage"></div>
+        <div class="film-dots" id="film-dots"></div>
+        <div class="film-controls" id="film-controls">
+          <button class="btn" id="film-pause" onclick="_filmTogglePause()">⏸ Pause</button>
+          <button class="btn" onclick="_filmSkip()">Skip ⏭</button>
+        </div>`;
+      document.body.appendChild(d);
+    }
+
     async function runDemo() {
       const btn = document.getElementById('demo-btn'), st = document.getElementById('demo-status');
       btn.disabled = true; st.textContent = 'Replaying attack through the pipeline…';
