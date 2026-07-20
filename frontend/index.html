@@ -7541,16 +7541,14 @@ tr:hover td{background:#161b22}</style></head>
     setInterval(syncLive, 60000);
   </script>
   <script>
-    // Register the kill-switch SW once so any browser still running the old
-    // caching worker gets it replaced and unregistered (it broke /api/logs &
-    // /api/overview with "Failed to fetch"). After it unregisters itself this
-    // is a no-op. Caching is handled server-side, not in the browser.
+    // App-shell service worker: caches the static UI so it paints instantly even
+    // when the server/network is slow. It NEVER caches /api (all live data goes
+    // straight to the network), so it can't repeat the old "Failed to fetch" bug.
+    // Registered after load so it never competes with the first paint.
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.getRegistrations()
-        .then(regs => regs.length
-          ? navigator.serviceWorker.register('/sw.js').catch(() => {})
-          : null)
-        .catch(() => {});
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/sw.js').catch(() => {});
+      });
     }
   </script>
 </body>
