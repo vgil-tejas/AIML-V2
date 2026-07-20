@@ -1,0 +1,164 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# CyberSentinel — ISOLATED DEMO STACK  (sales / buyer demos)
+#
+# A completely separate deployment that lives alongside production on the same
+# host. It has its OWN empty ClickHouse volume, its OWN containers and ports, and
+# its OWN Docker network — so DEMO_MODE=true here can NEVER write into, read
+# from, or otherwise touch the production 27M-row store next door.
+#
+#   Project name : aimldemo   (prod is "aiml" — no volume/network/name clash)
+#   Demo URL     : http://<server>:29888
+#   Prod URL     : http://<server>:19888   (untouched)
+#
+# Usage (from the repo root):
+#   Start :  docker compose -f docker-compose.demo.yml up -d --build
+#   Status:  docker compose -f docker-compose.demo.yml ps
+#   Logs  :  docker compose -f docker-compose.demo.yml logs -f backend
+#   Stop  :  docker compose -f docker-compose.demo.yml down
+#   Reset :  docker compose -f docker-compose.demo.yml down -v   (wipes ONLY the
+#            demo's own volumes — the prod 27M volume is a different name, safe)
+#
+# It deliberately does NOT run the wazuh-watcher, so the demo store stays empty
+# until you play a scenario from Settings → Demo mode. Every demo run writes its
+# synthetic rows here and here only.
+# ─────────────────────────────────────────────────────────────────────────────
+name: aimldemo
+
+services:
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.3
+    container_name: aiml_demo_clickhouse
+    environment:
+      # Set the password via the image's own env (not a users.d mount) so the
+      # entrypoint authenticates correctly during first-boot init and actually
+      # runs clickhouse/init/01-schema.sql — creating the cybersentinel DB +
+      # tables on the fresh demo volume. (Prod uses the XML mount because its
+      # volume was initialised before the password existed.)
+      - CLICKHOUSE_DB=cybersentinel
+      - CLICKHOUSE_USER=default
+      - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASS:-tejas@123}
+    ports:
+      - "28123:8123"
+      - "29001:9000"
+    volumes:
+      - clickhouse_demo:/var/lib/clickhouse          # OWN empty volume
+      - ./clickhouse/init:/docker-entrypoint-initdb.d:ro
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    deploy:
+      resources:
+        limits:
+          # The demo store is tiny — keep it lean so it never competes with the
+          # production ClickHouse for RAM.
+          memory: ${DEMO_CLICKHOUSE_MEM_LIMIT:-2G}
+        reservations:
+          memory: 512M
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "clickhouse-client --password \"$${CLICKHOUSE_PASS:-tejas@123}\" --query 'SELECT 1' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  backend:
+    build: ./backend
+    container_name: aiml_demo_backend
+    ports:
+      - "28110:8000"
+    environment:
+      - ABUSEIPDB_KEY=${ABUSEIPDB_KEY:-demo}
+      # SAFE HERE: this backend only ever talks to the demo ClickHouse above.
+      - DEMO_MODE=true
+      - AI_API_KEY=${GROQ_API_KEY:-${AI_API_KEY}}
+      - AI_MODEL=${GROQ_MODEL:-${AI_MODEL:-llama-3.3-70b-versatile}}
+      - AI_BASE_URL=${AI_BASE_URL:-https://api.groq.com/openai/v1/chat/completions}
+      - LOG_LEVEL=INFO
+      - CLICKHOUSE_ENABLED=true
+      - CLICKHOUSE_HOST=clickhouse
+      - CLICKHOUSE_PORT=8123
+      - CLICKHOUSE_DB=cybersentinel
+      - CLICKHOUSE_USER=default
+      - CLICKHOUSE_PASS=${CLICKHOUSE_PASS:-tejas@123}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./sample-data:/app/sample-data
+      - ./scripts:/app/scripts
+      - backend_demo_data:/app/data
+      - ./backend/playbooks.d:/app/playbooks.d:ro
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 256M
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 25s
+
+  ml-engine:
+    build: ./ml-engine
+    container_name: aiml_demo_ml
+    ports:
+      - "28111:8001"
+    environment:
+      - MODEL_RETRAIN_HOURS=24
+      - ML_NEW_LOG_THRESHOLD=${ML_NEW_LOG_THRESHOLD:-10000}
+      - CLICKHOUSE_ENABLED=true
+      - CLICKHOUSE_HOST=clickhouse
+      - CLICKHOUSE_PORT=8123
+      - CLICKHOUSE_DB=cybersentinel
+      - CLICKHOUSE_USER=default
+      - CLICKHOUSE_PASS=${CLICKHOUSE_PASS:-tejas@123}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ml_demo_models:/app/models
+      - ./sample-data:/app/sample-data
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 256M
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    container_name: aiml_demo_frontend
+    ports:
+      - "28180:80"
+    depends_on:
+      - backend
+      - ml-engine
+    restart: unless-stopped
+
+  nginx:
+    build: ./nginx
+    container_name: aiml_demo_nginx
+    ports:
+      - "29888:80"                                    # ← the demo URL
+    depends_on:
+      frontend:
+        condition: service_started
+      backend:
+        condition: service_started
+    restart: unless-stopped
+
+volumes:
+  clickhouse_demo:      # separate from prod's clickhouse_data — never collides
+  ml_demo_models:
+  backend_demo_data:
