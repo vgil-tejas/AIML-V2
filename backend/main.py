@@ -4164,8 +4164,19 @@ _NL_PRESETS = {
 }
 
 
-async def _nl_sql_from_ai(question: str) -> str:
-    """Fallback for free-form (non-preset) questions: ask Groq to write the SQL."""
+async def _nl_sql_from_ai(question: str, prior_sql: str = "", error: str = "") -> str:
+    """Fallback for free-form (non-preset) questions: ask Groq to write the SQL.
+    Pass prior_sql+error to request a corrected query after a failed execution."""
+    fix_note = ""
+    if prior_sql and error:
+        fix_note = f"""
+IMPORTANT — your previous query FAILED. Return a corrected query only.
+Previous SQL: {prior_sql}
+Database error: {error}
+The most common cause is an aggregate (count(), sum(), max()) used in SELECT or
+ORDER BY without a matching GROUP BY, or selecting a column that is neither
+aggregated nor in GROUP BY. Add the correct GROUP BY, or remove the aggregate.
+"""
     prompt = f"""You are the query engine for CyberSentinel, a bank's cybersecurity SIEM.
 Write ClickHouse-dialect SQL, but NEVER mention ClickHouse, Wazuh or any vendor/tool
 name in prose you produce - the product is called CyberSentinel.
@@ -4178,16 +4189,32 @@ Schema:
 Rules:
 - Return ONLY the raw SQL query. No markdown, no backticks, no explanation, no comments.
 - Only SELECT statements. Absolutely no INSERT/UPDATE/DELETE/DROP/CREATE/ALTER.
-- NEVER add a time filter unless the analyst explicitly mentions a time period (e.g. "today", "last hour", "this week"). If no time is mentioned, query ALL available data.
-- If the analyst says "today" use ts >= today(); "last hour" use ts >= now() - INTERVAL 1 HOUR; "last 24 hours" use ts >= now() - INTERVAL 24 HOUR; "last week" use ts >= now() - INTERVAL 7 DAY.
-- NEVER default to 5 minutes or any short window. The logs table has months of data.
-- For row-level results always add LIMIT 200 at the end; omit LIMIT for COUNT/GROUP BY aggregates.
-- External IPs: country NOT IN ('India', '') AND src_ip NOT LIKE '10.%' AND src_ip NOT LIKE '192.168.%'
+- DECIDE row-level vs aggregate FIRST, then never mix them:
+  * ROW-LEVEL — "show", "list", "which", "find", "give me", "attempts", "events",
+    "logs from/for": select individual columns, NO count()/GROUP BY, ORDER BY ts DESC,
+    LIMIT 200. Example — "show brute force attempts today":
+      SELECT formatDateTime(ts,'%Y-%m-%d %H:%i:%S') AS time, src_ip, dst_ip, rule, threat_type
+      FROM logs WHERE threat_type ILIKE '%brute%' AND ts >= today() ORDER BY ts DESC LIMIT 200
+  * AGGREGATE — "top", "most", "busiest", "how many", "count", "per <field>":
+    GROUP BY the field and SELECT it with the aggregate. Example — "top IPs today":
+      SELECT src_ip, count() AS events FROM logs WHERE ts >= today()
+      GROUP BY src_ip ORDER BY events DESC LIMIT 20
+  * NEVER select or ORDER BY an aggregate (count(), sum(), max()) alongside a
+    per-row column (ts, formatDateTime(ts), rule, ...) unless that column is in
+    GROUP BY. This NOT_AN_AGGREGATE mistake is the #1 thing to avoid.
+- Time: NEVER add a time filter unless the analyst explicitly mentions a period.
+  "today" -> ts >= today(); "last hour" -> ts >= now() - INTERVAL 1 HOUR;
+  "last 24 hours" -> ts >= now() - INTERVAL 24 HOUR; "last week" -> ts >= now() - INTERVAL 7 DAY.
+  Never default to a short window; the table has months of data.
+- ONLY apply the external-IP filter when the analyst explicitly asks for external /
+  foreign / outside / attacker IPs — do NOT add it to a plain "top IPs" question:
+    country NOT IN ('India', '') AND src_ip NOT LIKE '10.%' AND src_ip NOT LIKE '192.168.%'
+- ONLY add a threat filter when the analyst names the threat. Do NOT invent one.
+  Brute force -> threat_type ILIKE '%brute%'.
+- Row-level results: add LIMIT 200. Ranked aggregates: add a sensible LIMIT (e.g. 20).
 - Readable timestamps: formatDateTime(ts, '%Y-%m-%d %H:%i:%S') AS time
-- Tables needing FINAL: ml_scores, baselines, deviations, blocklist
-- Brute force filter: threat_type ILIKE '%brute%'
-- For deviations/baselines/ml_scores, do NOT add time filters - use FINAL keyword only.
-
+- Tables needing FINAL (no time filter on these): ml_scores, baselines, deviations, blocklist
+{fix_note}
 Analyst question: {question}
 
 SQL:"""
@@ -4221,6 +4248,7 @@ async def nl_query(payload: dict):
 
     # Preset demo questions run instantly from hardcoded SQL; anything else -> AI.
     sql = _NL_PRESETS.get(_normalize_q(question))
+    ai_generated = not sql
     if not sql:
         sql = await _nl_sql_from_ai(question)
 
@@ -4229,13 +4257,13 @@ async def nl_query(payload: dict):
 
     import time as _time
 
-    def _run_query():
+    def _run_query(q):
         # Runs in a worker thread - gets its OWN thread-local ClickHouse client
         c = osc.get_client()
         if not c:
             raise RuntimeError("ClickHouse not available")
         t0 = _time.time()
-        res = c.query(sql)
+        res = c.query(q)
         elapsed = round((_time.time() - t0) * 1000)
         cols = list(res.column_names)
         rows = []
@@ -4245,12 +4273,21 @@ async def nl_query(payload: dict):
                 str(v) if not isinstance(v, (int, float, bool, type(None))) else v
                 for v in row
             ])
-        return {"sql": sql, "columns": cols, "rows": rows[:200],
+        return {"sql": q, "columns": cols, "rows": rows[:200],
                 "row_count": len(res.result_rows), "elapsed_ms": elapsed}
 
     try:
-        return await _to_thread(_run_query)
+        return await _to_thread(lambda: _run_query(sql))
     except Exception as e:
+        # One self-repair pass for AI-written SQL: feed the DB error back to the
+        # model (bad GROUP BY, unknown column, etc.) and retry the corrected query.
+        if ai_generated:
+            try:
+                fixed = await _nl_sql_from_ai(question, prior_sql=sql, error=str(e))
+                if fixed and fixed.strip() != sql.strip():
+                    return await _to_thread(lambda: _run_query(fixed))
+            except Exception as e2:
+                e = e2
         raise HTTPException(500, f"Query execution failed: {str(e)}")
 
 
