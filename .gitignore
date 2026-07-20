@@ -74,3 +74,6 @@ Thumbs.db
 # Deploy rollback pointer written by scripts/deploy.sh (per-server, not shared).
 # Left in the tree it would trip deploy.sh's own "working tree must be clean" guard.
 .deploy_previous_commit
+
+# Packaged customer bundles (built by scripts/package.sh) — large image tarballs.
+dist/

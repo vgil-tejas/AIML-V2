@@ -20,7 +20,8 @@ ENV_FILE=".env"
 say()  { printf '\n\033[1;36m%s\033[0m\n' "$*"; }
 note() { printf '\033[2m%s\033[0m\n' "$*"; }
 
-[ -f docker-compose.yml ] || { echo "Run this from the repo root (docker-compose.yml not found)."; exit 1; }
+[ -f docker-compose.yml ] || [ -f docker-compose.prod.yml ] || {
+  echo "Run this from the install root (no docker-compose*.yml found here)."; exit 1; }
 
 # Seed .env from the template on a fresh install; back up an existing one.
 if [ ! -f "$ENV_FILE" ]; then

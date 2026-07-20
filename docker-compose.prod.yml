@@ -1,0 +1,178 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# CyberSentinel — PRODUCTION (image-only) stack for customer / bank installs.
+#
+# This compose runs PRE-BUILT images — there is NO `build:` and NO application
+# source tree on the customer's server. The bank receives only:
+#   • the image tarball (loaded with `docker load`)  — code lives inside images
+#   • this file, the DB schema SQL, .env, and setup.sh
+# The proprietary backend / ML / watcher / frontend code is never checked out.
+#
+#   Configure : ./scripts/setup.sh            (writes .env: AI key, store password)
+#   Run       : docker compose -f docker-compose.prod.yml --profile wazuh up -d
+#   Images come from `scripts/package.sh` (vendor side) — tag via CS_VERSION.
+#
+# NOTE: the frontend is a browser app, so its JS is always visible to a logged-in
+# user; and a host-root admin can extract code from any image. Shipping images
+# (vs source) removes the source tree and git history — strong access control,
+# not DRM. For hard IP protection, compile the Python (see docs).
+# ─────────────────────────────────────────────────────────────────────────────
+name: cybersentinel
+
+services:
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.3
+    container_name: cs_store
+    environment:
+      - CLICKHOUSE_DB=cybersentinel
+      - CLICKHOUSE_USER=default
+      - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASS:-tejas@123}
+    ports:
+      - "${CLICKHOUSE_HTTP_PORT:-18123}:8123"
+    volumes:
+      - store_data:/var/lib/clickhouse
+      - ./clickhouse/init:/docker-entrypoint-initdb.d:ro   # schema DDL only (no app code)
+    ulimits:
+      nofile: { soft: 262144, hard: 262144 }
+    deploy:
+      resources:
+        limits: { memory: "${CLICKHOUSE_MEM_LIMIT:-8G}" }
+        reservations: { memory: 2G }
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "clickhouse-client --password \"$${CLICKHOUSE_PASS:-tejas@123}\" --query 'SELECT 1' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  backend:
+    image: cybersentinel-backend:${CS_VERSION:-2.0.0}
+    container_name: cs_backend
+    ports:
+      - "${BACKEND_HOST_PORT:-18110}:8000"
+    environment:
+      - ABUSEIPDB_KEY=${ABUSEIPDB_KEY:-demo}
+      - DEMO_MODE=false                    # never demo on a real install
+      - AI_API_KEY=${GROQ_API_KEY:-${AI_API_KEY}}
+      - AI_MODEL=${GROQ_MODEL:-${AI_MODEL:-llama-3.3-70b-versatile}}
+      - AI_FAST_MODEL=${AI_FAST_MODEL:-llama-3.1-8b-instant}
+      - AI_BASE_URL=${AI_BASE_URL:-https://api.groq.com/openai/v1/chat/completions}
+      - LOG_LEVEL=INFO
+      - CH_POOL_MAXSIZE=${CH_POOL_MAXSIZE:-24}
+      - CLICKHOUSE_ENABLED=true
+      - CLICKHOUSE_HOST=clickhouse
+      - CLICKHOUSE_PORT=8123
+      - CLICKHOUSE_DB=cybersentinel
+      - CLICKHOUSE_USER=default
+      - CLICKHOUSE_PASS=${CLICKHOUSE_PASS:-tejas@123}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - backend_data:/app/data
+      # IOC seed (a data file, not code). Optional — remove to run with no seed.
+      - ./sample-data/ioc_store.json:/app/sample-data/ioc_store.json:ro
+    depends_on:
+      clickhouse: { condition: service_healthy }
+    deploy:
+      resources:
+        limits: { memory: 1536M }
+        reservations: { memory: 256M }
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "--max-time", "12", "http://localhost:8000/api/health"]
+      interval: 15s
+      timeout: 12s
+      retries: 6
+      start_period: 40s
+
+  ml-engine:
+    image: cybersentinel-ml:${CS_VERSION:-2.0.0}
+    container_name: cs_ml
+    ports:
+      - "${ML_ENGINE_HOST_PORT:-18111}:8001"
+    environment:
+      - MODEL_RETRAIN_HOURS=24
+      - ML_NEW_LOG_THRESHOLD=${ML_NEW_LOG_THRESHOLD:-10000}
+      - CLICKHOUSE_ENABLED=true
+      - CLICKHOUSE_HOST=clickhouse
+      - CLICKHOUSE_PORT=8123
+      - CLICKHOUSE_DB=cybersentinel
+      - CLICKHOUSE_USER=default
+      - CLICKHOUSE_PASS=${CLICKHOUSE_PASS:-tejas@123}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ml_models:/app/models
+    depends_on:
+      clickhouse: { condition: service_healthy }
+    deploy:
+      resources:
+        limits: { memory: 2G }
+        reservations: { memory: 512M }
+    restart: unless-stopped
+
+  frontend:
+    image: cybersentinel-frontend:${CS_VERSION:-2.0.0}
+    container_name: cs_frontend
+    ports:
+      - "${FRONTEND_HOST_PORT:-18180}:80"
+    depends_on:
+      - backend
+      - ml-engine
+    restart: unless-stopped
+
+  nginx:
+    image: cybersentinel-nginx:${CS_VERSION:-2.0.0}
+    container_name: cs_nginx
+    ports:
+      - "${NGINX_HOST_PORT:-18888}:80"
+    depends_on:
+      frontend: { condition: service_started }
+      backend: { condition: service_started }
+    restart: unless-stopped
+
+  # Ingestion watcher — reads the customer's alerts.json READ-ONLY and streams to
+  # the store. Start with:  --profile wazuh
+  wazuh-watcher:
+    image: cybersentinel-watcher:${CS_VERSION:-2.0.0}
+    container_name: cs_watcher
+    environment:
+      - PYTHONUNBUFFERED=1
+      - WAZUH_ALERTS_DIR=/wazuh/alerts
+      - WAZUH_ALERTS_FILENAME=alerts.json
+      - WATCHER_SINK=${WATCHER_SINK:-clickhouse}
+      - CLICKHOUSE_HOST=clickhouse
+      - CLICKHOUSE_PORT=8123
+      - CLICKHOUSE_DB=cybersentinel
+      - CLICKHOUSE_USER=default
+      - CLICKHOUSE_PASS=${CLICKHOUSE_PASS:-tejas@123}
+      - WAZUH_SPOOL_DIR=/app/data/spool
+      - WAZUH_API_URL=${WAZUH_API_URL:-http://backend:8000}
+      - WAZUH_ML_API_URL=${WAZUH_ML_API_URL:-http://ml-engine:8001}
+      - WAZUH_POLL_INTERVAL=${WAZUH_POLL_INTERVAL:-5}
+      - WAZUH_BATCH_SIZE=${WAZUH_BATCH_SIZE:-5000}
+      - WAZUH_OFFSET_FILE=/app/data/wazuh_offset.json
+      - WAZUH_TRAIN_THRESHOLD=${WAZUH_TRAIN_THRESHOLD:-5000}
+      - WAZUH_ARCHIVE_THRESHOLD=${WAZUH_ARCHIVE_THRESHOLD:-10000}
+      - WAZUH_MIN_LEVEL=${WAZUH_MIN_LEVEL:-1}
+      - WAZUH_SAMPLE_BELOW=${WAZUH_SAMPLE_BELOW:-1}
+      - WAZUH_SAMPLE_RATE=${WAZUH_SAMPLE_RATE:-1}
+      - WAZUH_MAX_PER_MINUTE=${WAZUH_MAX_PER_MINUTE:-0}
+      - WAZUH_STALE_SECONDS=${WAZUH_STALE_SECONDS:-600}
+    volumes:
+      - ${WAZUH_ALERTS_DIR:-/var/ossec/logs/alerts}:/wazuh/alerts:ro
+      - watcher_data:/app/data
+    depends_on:
+      clickhouse: { condition: service_healthy }
+      backend: { condition: service_started }
+    deploy:
+      resources:
+        limits: { memory: 512M }
+    restart: unless-stopped
+    profiles: [wazuh]
+
+volumes:
+  store_data:
+  ml_models:
+  watcher_data:
+  backend_data:
