@@ -7226,6 +7226,11 @@ tr:hover td{background:#161b22}</style></head>
         (scope || document).querySelectorAll('.main .card > .ch').forEach(ch => {
           const card = ch.parentElement;
           if (card.classList.contains('cardx')) return;   // already enhanced
+          // Telemetry Intelligence modules are already an accordion (their own
+          // pointerdown → toggleTI). Enhancing them here adds a SECOND collapse
+          // (.cardx-collapsed → display:none on the panel) that fires on the same
+          // click and hides the content right after it opens — "shows then vanishes".
+          if (card.classList.contains('ti-item') || ch.classList.contains('ti-ah')) return;
           if (!ch.nextElementSibling) return;              // header-only card: nothing to fold
           card.classList.add('cardx');
           const chev = document.createElement('span');
