@@ -72,11 +72,14 @@ services:
           memory: 256M
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://localhost:8000/api/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 25s
+      # Tolerant of transient load: under a dashboard burst on the 27M store the
+      # backend can briefly answer slowly. A 5s timeout would flap the container
+      # "unhealthy" (and stall a deploy's health gate) over nothing. Give it room.
+      test: ["CMD", "curl", "-fsS", "--max-time", "12", "http://localhost:8000/api/health"]
+      interval: 15s
+      timeout: 12s
+      retries: 6
+      start_period: 40s
 
   ml-engine:
     build: ./ml-engine

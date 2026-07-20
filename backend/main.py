@@ -183,6 +183,7 @@ VOLUME_SPIKE_MULTIPLIER = 3
 # -- Stats cache (avoids 7 ClickHouse queries every 10 s) ---------------------
 _stats_cache: dict = {}
 _stats_cache_ts: float = 0.0
+_stats_sf_lock = asyncio.Lock()   # single-flight: collapse concurrent recomputes
 _STATS_TTL = 60  # seconds - cache for 60s; hot-ips call refreshes independently
 _hot_ips_cache: list = []
 _hot_ips_cache_ts: float = 0.0
@@ -1539,40 +1540,49 @@ async def get_stats():
     if _stats_cache and time.time() - _stats_cache_ts < _STATS_TTL:
         return _stats_cache
 
-    if STORE_ENABLED and osc:
-        # Run all queries in parallel via thread pool
-        (total_logs, unique_ips, threat_counts, hot_ips,
-         total_alerts, critical_ips, alert_counts, severity_counts) = await asyncio.gather(
-            _to_thread(osc.get_total_doc_count),
-            _to_thread(osc.get_unique_ip_count),
-            _to_thread(osc.get_global_threat_counts),
-            _to_thread(lambda: osc.get_hot_ips_from_os(size=100)),
-            _to_thread(osc.get_deviation_total),
-            _to_thread(osc.get_critical_ips),
-            _to_thread(osc.get_alert_type_counts),
-            _to_thread(osc.get_global_severity_counts),
-        )
-    else:
-        total_logs = unique_ips = total_alerts = 0
-        threat_counts, alert_counts, severity_counts = {}, {}, {}
-        hot_ips, critical_ips = [], []
+    # Single-flight: /api/stats is polled every 10s by every open browser, so a
+    # bare cache expiry would let N concurrent requests all recompute at once and
+    # drain the store's connection pool (the tens-of-seconds latency spikes seen
+    # under load). Collapse concurrent misses into ONE recompute; the rest wait
+    # briefly and then read the fresh cache.
+    async with _stats_sf_lock:
+        if _stats_cache and time.time() - _stats_cache_ts < _STATS_TTL:
+            return _stats_cache
 
-    result = {
-        "total_logs":       total_logs,
-        "unique_ips":       unique_ips,
-        "hot_ips":          list(hot_ips or []),
-        "threat_counts":    threat_counts,
-        "total_alerts":     int(total_alerts or 0),
-        "critical_ips":     list(critical_ips or []),
-        "alert_type_counts":alert_counts,
-        "severity_counts":  severity_counts or {},
-        "ai_configured":    bool(AI_API_KEY),
-    }
-    # Only update cache if we got real data - never overwrite good cache with zeros
-    if total_logs or not _stats_cache:
-        _stats_cache = result
-        _stats_cache_ts = time.time()
-    return _stats_cache if _stats_cache else result
+        if STORE_ENABLED and osc:
+            # Run all queries in parallel via thread pool
+            (total_logs, unique_ips, threat_counts, hot_ips,
+             total_alerts, critical_ips, alert_counts, severity_counts) = await asyncio.gather(
+                _to_thread(osc.get_total_doc_count),
+                _to_thread(osc.get_unique_ip_count),
+                _to_thread(osc.get_global_threat_counts),
+                _to_thread(lambda: osc.get_hot_ips_from_os(size=100)),
+                _to_thread(osc.get_deviation_total),
+                _to_thread(osc.get_critical_ips),
+                _to_thread(osc.get_alert_type_counts),
+                _to_thread(osc.get_global_severity_counts),
+            )
+        else:
+            total_logs = unique_ips = total_alerts = 0
+            threat_counts, alert_counts, severity_counts = {}, {}, {}
+            hot_ips, critical_ips = [], []
+
+        result = {
+            "total_logs":       total_logs,
+            "unique_ips":       unique_ips,
+            "hot_ips":          list(hot_ips or []),
+            "threat_counts":    threat_counts,
+            "total_alerts":     int(total_alerts or 0),
+            "critical_ips":     list(critical_ips or []),
+            "alert_type_counts":alert_counts,
+            "severity_counts":  severity_counts or {},
+            "ai_configured":    bool(AI_API_KEY),
+        }
+        # Only update cache if we got real data - never overwrite good cache with zeros
+        if total_logs or not _stats_cache:
+            _stats_cache = result
+            _stats_cache_ts = time.time()
+        return _stats_cache if _stats_cache else result
 
 
 _HOT_IPS_TTL = 60  # seconds
@@ -3157,9 +3167,15 @@ async def ueba_risk(days: int = 30, limit: int = 300):
     hit = _TINT_CACHE.get("ueba_risk")
     if hit and now - hit[0] < 120:
         return hit[1]
-    data = await _compute()
-    _TINT_CACHE["ueba_risk"] = (time.time(), data)
-    return data
+    # Single-flight: this is a heavy full-scan; without the lock a cache expiry
+    # lets every open dashboard recompute it at once and saturate the store pool.
+    async with _TINT_LOCK:
+        hit = _TINT_CACHE.get("ueba_risk")           # refreshed while we waited?
+        if hit and time.time() - hit[0] < 120:
+            return hit[1]
+        data = await _compute()
+        _TINT_CACHE["ueba_risk"] = (time.time(), data)
+        return data
 
 
 @app.get("/api/ueba/peer-outliers")

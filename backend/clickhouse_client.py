@@ -47,6 +47,28 @@ AGG_TABLE  = f"{CLICKHOUSE_DB}.agg_ip_daily"
 # all 7 concurrent queries share one session → "concurrent queries in same session" error.
 _thread_local = threading.local()
 
+# Shared HTTP connection pool. clickhouse-connect defaults to maxsize=8 per host;
+# under a dashboard burst (overview + ueba + incidents + telemetry + logs all at
+# once, ×N open browsers) that saturates and every extra query — even the trivial
+# /api/health — queues behind a busy connection, spiking latency to tens of
+# seconds and flapping the container "unhealthy". A bigger pool lets the panels
+# run concurrently instead of serialising on 8 slots. Env-tunable; no redeploy.
+CH_POOL_MAXSIZE = int(os.getenv("CH_POOL_MAXSIZE", "24"))
+_pool_mgr = None
+
+
+def _get_pool_mgr():
+    global _pool_mgr
+    if _pool_mgr is None:
+        try:
+            from clickhouse_connect.driver import httputil
+            _pool_mgr = httputil.get_pool_manager(maxsize=CH_POOL_MAXSIZE,
+                                                  num_pools=CH_POOL_MAXSIZE)
+        except Exception as e:                       # never let pooling break connect
+            logger.warning(f"custom CH pool unavailable ({e}); using client default")
+            _pool_mgr = False                        # sentinel: don't retry
+    return _pool_mgr or None
+
 
 def get_client():
     """Per-thread ClickHouse client. Each thread gets its own connection."""
@@ -57,7 +79,7 @@ def get_client():
         return client
     try:
         import clickhouse_connect
-        client = clickhouse_connect.get_client(
+        kwargs = dict(
             host=CLICKHOUSE_HOST,
             port=CLICKHOUSE_PORT,
             username=CLICKHOUSE_USER,
@@ -67,6 +89,10 @@ def get_client():
             send_receive_timeout=300,
             settings={"async_insert": 1, "wait_for_async_insert": 0},
         )
+        pm = _get_pool_mgr()
+        if pm is not None:
+            kwargs["pool_mgr"] = pm
+        client = clickhouse_connect.get_client(**kwargs)
         _thread_local.client = client
         return client
     except Exception as e:

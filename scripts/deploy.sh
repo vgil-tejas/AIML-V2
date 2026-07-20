@@ -26,9 +26,11 @@ err() { printf '\n\033[1;31m==> %s\033[0m\n' "$*"; }
 # 0. Preconditions -------------------------------------------------------------
 command -v docker >/dev/null || { err "docker not found"; exit 1; }
 git rev-parse --git-dir >/dev/null 2>&1 || { err "not a git repo"; exit 1; }
-if [ -n "$(git status --porcelain)" ]; then
+# Ignore our own rollback-pointer file (this script writes it; it's per-server).
+DIRTY="$(git status --porcelain | grep -v '^?? \.deploy_previous_commit$' || true)"
+if [ -n "$DIRTY" ]; then
   err "Working tree has local changes. Commit/stash them first (deploy must be clean)."
-  git status --short
+  printf '%s\n' "$DIRTY"
   exit 1
 fi
 
