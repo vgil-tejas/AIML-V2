@@ -3438,11 +3438,27 @@ tr:hover td{background:#161b22}</style></head>
         c.classList.toggle('open', open);
         c.querySelector('.ti-ah')?.setAttribute('aria-expanded', String(open));
       });
-      if (willOpen) card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      // Only scroll when the header is actually out of view, and scroll the
+      // HEADER (not the tall card) with NO smooth animation. A smooth scroll
+      // animates the whole list under the pointer, so the next mousedown/mouseup
+      // straddle a moving target and the browser cancels the click — that was
+      // the "sometimes it doesn't open" bug.
+      if (willOpen) {
+        const head = card.querySelector('.ti-ah');
+        const r = head.getBoundingClientRect();
+        if (r.top < 8 || r.bottom > window.innerHeight) head.scrollIntoView({ block: 'nearest' });
+      }
     }
     document.querySelectorAll('#page-intelligence .ti-ah').forEach(h => {
       const id = h.closest('.ti-item').id;
-      h.addEventListener('click', () => toggleTI(id));
+      // Activate on pointerdown, not click: opening a module collapses another
+      // and shifts the header list, and a click whose down/up land on different
+      // elements (because the layout moved) is silently dropped by the browser.
+      // pointerdown fires on press — before any layout move — so it never misses.
+      h.addEventListener('pointerdown', e => {
+        if (e.button !== 0) return;                 // primary/left button only
+        toggleTI(id);
+      });
       h.addEventListener('keydown', e => {
         if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleTI(id); }
       });
