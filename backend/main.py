@@ -4214,12 +4214,28 @@ Rules:
 - Row-level results: add LIMIT 200. Ranked aggregates: add a sensible LIMIT (e.g. 20).
 - Readable timestamps: formatDateTime(ts, '%Y-%m-%d %H:%i:%S') AS time
 - Tables needing FINAL (no time filter on these): ml_scores, baselines, deviations, blocklist
+
+More worked examples (copy the shape, adapt columns/filters to the question):
+- "events per country today": SELECT country, count() AS events FROM logs WHERE ts >= today() AND country != '' GROUP BY country ORDER BY events DESC LIMIT 20
+- "hourly attack trend today": SELECT toStartOfHour(ts) AS hour, count() AS events FROM logs WHERE ts >= today() GROUP BY hour ORDER BY hour
+- "timeline for 203.0.113.5": SELECT formatDateTime(ts,'%Y-%m-%d %H:%i:%S') AS time, threat_type, rule, dst_ip, severity FROM logs WHERE src_ip = '203.0.113.5' ORDER BY ts DESC LIMIT 200
+- "severity breakdown this week": SELECT severity, count() AS events FROM logs WHERE ts >= now() - INTERVAL 7 DAY GROUP BY severity ORDER BY events DESC
+- "which agents saw the most criticals today": SELECT agent, count() AS events FROM logs WHERE ts >= today() AND severity = 'critical' AND agent != '' GROUP BY agent ORDER BY events DESC LIMIT 20
+- "how many events today" (single number): SELECT count() AS events FROM logs WHERE ts >= today()
+- "top attacked ports today": SELECT dst_port, count() AS events FROM logs WHERE ts >= today() AND dst_port != '' GROUP BY dst_port ORDER BY events DESC LIMIT 20
 {fix_note}
 Analyst question: {question}
 
 SQL:"""
 
     raw = await ask_groq(prompt, max_tokens=500, model=AI_FAST_MODEL)
+    # ask_groq returns a sentinel STRING (not an exception) when the AI provider is
+    # rate-limited / restricted / down. Catch those so we don't try to parse a
+    # canned paragraph as SQL and mislabel it "unexpected response".
+    low = raw.lower()
+    if (raw.startswith("AI provider error") or raw.startswith("AI provider unavailable")
+            or "simulated ai analysis" in low or "ai api key is not configured" in low):
+        raise HTTPException(503, "The AI query service is busy — please try again in a moment.")
     # Extract the SQL - the model sometimes wraps it in markdown or adds preamble
     sql = raw.strip()
     for tag in ["```sql", "```SQL", "```"]:
@@ -4229,13 +4245,17 @@ SQL:"""
                 sql = sql[:sql.index("```")]
             break
     sql = sql.strip()
-    # If there's still no SELECT at the start, find the first line starting with SELECT
+    # If there's preamble, take everything from the first SELECT to the end so a
+    # multi-line query survives (the old "first SELECT line only" truncated FROM/WHERE).
     if not sql.upper().lstrip().startswith("SELECT"):
-        for line in sql.splitlines():
-            if line.strip().upper().startswith("SELECT"):
-                sql = line.strip()
-                break
-    if not sql.upper().lstrip().startswith("SELECT"):
+        idx = sql.upper().find("SELECT")
+        if idx != -1:
+            sql = sql[idx:].strip()
+    # Trim a trailing code fence / prose and a stray terminating semicolon.
+    if "```" in sql:
+        sql = sql.split("```")[0].strip()
+    sql = sql.rstrip(";").strip()
+    if not sql.upper().startswith("SELECT"):
         raise HTTPException(400, "AI returned an unexpected response. Try rephrasing your question.")
     return sql
 
@@ -4250,7 +4270,19 @@ async def nl_query(payload: dict):
     sql = _NL_PRESETS.get(_normalize_q(question))
     ai_generated = not sql
     if not sql:
-        sql = await _nl_sql_from_ai(question)
+        # The fast model is nondeterministic and occasionally returns prose with no
+        # SELECT — regenerate once before giving up (kept low to stay under the
+        # model provider's rate limit).
+        gen_err = None
+        for _ in range(2):
+            try:
+                sql = await _nl_sql_from_ai(question)
+                break
+            except HTTPException as ge:
+                gen_err = ge
+                sql = None
+        if not sql:
+            raise gen_err or HTTPException(400, "Could not turn that into a query. Try rephrasing.")
 
     if not osc:
         raise HTTPException(503, "ClickHouse not available")
@@ -4276,19 +4308,34 @@ async def nl_query(payload: dict):
         return {"sql": q, "columns": cols, "rows": rows[:200],
                 "row_count": len(res.result_rows), "elapsed_ms": elapsed}
 
-    try:
-        return await _to_thread(lambda: _run_query(sql))
-    except Exception as e:
-        # One self-repair pass for AI-written SQL: feed the DB error back to the
-        # model (bad GROUP BY, unknown column, etc.) and retry the corrected query.
-        if ai_generated:
+    # Self-repair loop: run the SQL; if it fails, feed the DB error back to the
+    # model (bad GROUP BY, unknown column, type mismatch, ...) and retry the
+    # corrected query. Up to 2 repair passes for AI-written SQL — enough to recover
+    # nearly any answerable question without hammering the model.
+    cur_sql, last_err = sql, None
+    max_attempts = 2 if ai_generated else 1   # initial + one repair (gentle on the model API)
+    for i in range(max_attempts):
+        try:
+            return await _to_thread(lambda q=cur_sql: _run_query(q))
+        except Exception as e:
+            last_err = e
+            if not ai_generated or i == max_attempts - 1:
+                break
             try:
-                fixed = await _nl_sql_from_ai(question, prior_sql=sql, error=str(e))
-                if fixed and fixed.strip() != sql.strip():
-                    return await _to_thread(lambda: _run_query(fixed))
-            except Exception as e2:
-                e = e2
-        raise HTTPException(500, f"Query execution failed: {str(e)}")
+                nxt = await _nl_sql_from_ai(question, prior_sql=cur_sql, error=str(e))
+            except Exception as ge:
+                last_err = ge
+                break
+            if not nxt or nxt.strip() == cur_sql.strip():
+                break                    # model isn't changing it — stop retrying
+            cur_sql = nxt
+
+    detail = str(last_err)
+    # Surface the DB reason compactly; keep it analyst-friendly, no engine name.
+    if "DB::Exception:" in detail:
+        detail = detail.split("DB::Exception:", 1)[1].split("(version")[0].strip()
+    raise HTTPException(400, f"Couldn't answer that from the logs — try rephrasing "
+                             f"(e.g. name a time window or an IP/user). Detail: {detail[:280]}")
 
 
 _resilience_cache: dict = {}
