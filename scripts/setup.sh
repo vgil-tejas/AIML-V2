@@ -98,5 +98,12 @@ chmod 600 "$ENV_FILE" 2>/dev/null || true
 
 say "Done."
 echo "  Wrote $ENV_FILE (permissions 600, gitignored — never commit it)."
-echo "  Apply it:  ./scripts/deploy.sh v2.0.0     (or: docker compose up -d --build)"
-echo "  Verify:    curl -s localhost:19888/api/health   → \"ai\":\"configured\" or \"missing\""
+if [ -f docker-compose.prod.yml ]; then
+  # Customer (image-only) bundle — no build, just recreate the backend to load the key.
+  echo "  Apply it:  docker compose -f docker-compose.prod.yml up -d backend"
+  PORT="$(grep -E '^NGINX_HOST_PORT=' "$ENV_FILE" | cut -d= -f2- || true)"
+  echo "  Verify:    curl -s localhost:${PORT:-18888}/api/health   → \"ai\":\"configured\" or \"missing\""
+else
+  echo "  Apply it:  ./scripts/deploy.sh v2.0.0     (or: docker compose up -d --build)"
+  echo "  Verify:    curl -s localhost:19888/api/health   → \"ai\":\"configured\" or \"missing\""
+fi
