@@ -55,7 +55,18 @@ set -a; . ./.env; set +a
 CH_PASS="${CLICKHOUSE_PASS:-tejas@123}"
 UI_PORT="${NGINX_HOST_PORT:-19888}"
 
-# ── 3. Start the stack (auto-recovering from the veth leak) ──────────────────
+# ── 3. Start the stack (auto-recovering from known startup traps) ────────────
+# Trap: older releases bind-mounted clickhouse/users.d/default-password.xml. That
+# file is gone now, but a container CREATED before the upgrade still references
+# it, and Docker silently makes an empty DIRECTORY at the missing path. The mount
+# then fails with "not a directory" and the store exits 127 before it ever
+# starts — while the backend stays up, so the UI just shows an empty dashboard.
+if [ -d clickhouse/users.d/default-password.xml ]; then
+  rmdir clickhouse/users.d/default-password.xml 2>/dev/null \
+    && warn "Removed a stale mount placeholder left by an older release." \
+    || warn "clickhouse/users.d/default-password.xml is a non-empty directory — remove it by hand."
+fi
+
 say "Building and starting containers (first run pulls images — a few minutes)"
 UP_LOG="$(mktemp)"
 if ! $COMPOSE up -d --build >"$UP_LOG" 2>&1; then
