@@ -15,7 +15,7 @@
 // server responds quickly you always get the latest build; only when it is slow
 // do we fall back to the cached shell.
 
-const VERSION = 'cs-shell-v4';                 // bump on each frontend release
+const VERSION = 'cs-shell-v5';                 // bump on each frontend release
 const CORE = [
   '/index.html', '/overview-neural.html',
   '/theme.css', '/enhance.css', '/logo-brand.jpg',
@@ -58,10 +58,20 @@ function fromNetwork(request, key) {
   });
 }
 
+// Serve a navigation from cache only if the network is slow.
+//
+// CRITICAL: key off the page that was actually requested. An earlier version
+// hardcoded '/index.html' here, which broke the app badly — an <iframe> load is
+// also `mode === 'navigate'`, so the embedded overview frame was served
+// index.html, which embeds the same iframe, which was served index.html… the UI
+// rendered itself inside itself over and over. Never assume a navigation is the
+// top-level document.
 async function handleNavigation(req) {
+  const path = new URL(req.url).pathname;
+  const key = (path === '/' || path === '') ? '/index.html' : path;
   const cache = await caches.open(VERSION);              // may throw -> caught by caller
-  const cached = await cache.match('/index.html');
-  const net = fromNetwork(new Request('/index.html', { cache: 'no-store' }), '/index.html');
+  const cached = await cache.match(key);
+  const net = fromNetwork(new Request(req.url, { cache: 'no-store' }), key);
   if (!cached) return net;                               // first visit: network is the only option
   try {
     return await Promise.race([net, timeout(NAV_TIMEOUT_MS)]);  // fast server -> fresh
@@ -85,7 +95,11 @@ self.addEventListener('fetch', event => {
   try { url = new URL(req.url); } catch (_) { return; }
   if (url.origin !== self.location.origin) return;        // same-origin only
 
-  const isNav = req.mode === 'navigate';
+  // Only these two documents are ever served from cache. Anything else — a new
+  // page, a redirect, an embedded frame we don't know about — goes straight to
+  // the network, so the worst a mistake here can do is nothing at all.
+  const SHELL = ['/', '', '/index.html', '/overview-neural.html'];
+  const isNav = req.mode === 'navigate' && SHELL.includes(url.pathname);
   const isStatic = STATIC_RE.test(url.pathname);
   if (!isNav && !isStatic) return;                        // /api, /api/ml, POSTs... -> untouched
 
