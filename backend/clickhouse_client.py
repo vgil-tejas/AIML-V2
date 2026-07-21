@@ -1585,17 +1585,32 @@ def get_entity_risk_ranking(dimension: str = "ip", half_life_hours: int = 72,
     col = {"ip": "src_ip", "user": "username", "host": "agent"}.get(dimension, "src_ip")
     where_ident = f"AND {col} != ''" if dimension in ("user", "host") else ""
     hl = max(1, int(half_life_hours))
+    # Every event is worth `weight` points, decayed by how long ago it happened
+    # (half-life `hl` hours). We aggregate the SAME expression per severity as
+    # well as in total, so the API can show an analyst exactly which severity
+    # bucket built the score instead of just handing them a number.
+    weight = ("multiIf(severity='critical',10, severity='high',6.5, "
+              "severity='medium',3.5, severity='low',1, 0.5)")
+    decay = f"exp(-0.6931471805 * dateDiff('hour', ts, now()) / {hl})"
+    # Written inline rather than as a SELECT alias: a bare alias over `ts` in a
+    # GROUP BY query is not an aggregate and ClickHouse rejects it.
+    pts_expr = f"({weight} * {decay})"
     rows = _q(
         f"SELECT {col} AS entity, "
         f"  count() AS events, "
-        f"  round(sum( "
-        f"    multiIf(severity='critical',10, severity='high',6.5, "
-        f"            severity='medium',3.5, severity='low',1, 0.5) "
-        f"    * exp(-0.6931471805 * dateDiff('hour', ts, now()) / {hl}) "
-        f"  ), 2) AS risk_points, "
+        f"  round(sum({pts_expr}), 2) AS risk_points, "
+        f"  round(sumIf({pts_expr}, severity='critical'), 2) AS p_critical, "
+        f"  round(sumIf({pts_expr}, severity='high'),     2) AS p_high, "
+        f"  round(sumIf({pts_expr}, severity='medium'),   2) AS p_medium, "
+        f"  round(sumIf({pts_expr}, severity='low'),      2) AS p_low, "
+        f"  countIf(severity='critical') AS n_critical, "
+        f"  countIf(severity='high')     AS n_high, "
+        f"  countIf(severity='medium')   AS n_medium, "
+        f"  countIf(severity='low')      AS n_low, "
         f"  max(rule_level) AS max_level, "
-        f"  countIf(severity = 'critical') AS crit, "
         f"  uniqExact(dst_ip) AS uniq_dsts, "
+        f"  arrayElement(topK(1)(toString(threat_type)), 1) AS top_threat, "
+        f"  countIf(ts >= now() - INTERVAL 24 HOUR) AS events_24h, "
         f"  max(ts) AS last_seen "
         f"FROM {LOGS_TABLE} "
         f"WHERE ts >= now() - INTERVAL {int(window_days)} DAY {where_ident} "
@@ -1605,12 +1620,44 @@ def get_entity_risk_ranking(dimension: str = "ip", half_life_hours: int = 72,
     if not rows:
         return []
     top = max((float(r.get("risk_points") or 0) for r in rows), default=0) or 1.0
+    top_entity = rows[0].get("entity", "")
+    # Point value of one event of each severity, if it happened right now. Lets
+    # the UI say "one critical alert is worth 10 medium ones" in concrete terms.
+    weights = {"critical": 10.0, "high": 6.5, "medium": 3.5, "low": 1.0}
     out = []
     for r in rows:
         pts = float(r.get("risk_points") or 0)
         score = int(max(0, min(100, round(pts / top * 100))))   # relative to hottest entity
         band = ("critical" if score >= 80 else "high" if score >= 55
                 else "medium" if score >= 30 else "low")
+
+        # Which severity buckets actually built this score, biggest first.
+        drivers = []
+        for sev in ("critical", "high", "medium", "low"):
+            sev_pts = float(r.get(f"p_{sev}") or 0)
+            n = int(r.get(f"n_{sev}") or 0)
+            if n == 0 and sev_pts <= 0:
+                continue
+            drivers.append({
+                "severity": sev,
+                "events": n,
+                "points": round(sev_pts, 1),
+                "pct": int(round(sev_pts / pts * 100)) if pts > 0 else 0,
+                "weight": weights[sev],
+            })
+        drivers.sort(key=lambda d: d["points"], reverse=True)
+
+        # How much of the score is recent activity? A high score built entirely
+        # from week-old events means something very different to a live one.
+        last = r.get("last_seen")
+        age_h = None
+        try:
+            if last:
+                delta = datetime.now(timezone.utc) - last.replace(tzinfo=timezone.utc)
+                age_h = max(0.0, round(delta.total_seconds() / 3600, 1))
+        except Exception:
+            pass
+
         out.append({
             "entity":      r["entity"],
             "dimension":   dimension,
@@ -1619,9 +1666,15 @@ def get_entity_risk_ranking(dimension: str = "ip", half_life_hours: int = 72,
             "score":       score,            # 0-100 relative ranking, for bars/triage
             "band":        band,
             "max_level":   int(r.get("max_level") or 0),
-            "critical":    int(r.get("crit") or 0),
+            "critical":    int(r.get("n_critical") or 0),
             "uniq_dsts":   int(r.get("uniq_dsts") or 0),
             "last_seen":   _iso(r.get("last_seen")),
+            # ── why this score (analyst-facing explanation) ──────────────────
+            "drivers":     drivers,
+            "top_threat":  (r.get("top_threat") or "").strip(),
+            "events_24h":  int(r.get("events_24h") or 0),
+            "age_hours":   age_h,
+            "is_top":      r.get("entity") == top_entity,
         })
     return out
 

@@ -3772,6 +3772,25 @@ async def entity_risk(dim: str = "ip", half_life_hours: int = 72,
         "dimension": dim, "half_life_hours": half_life_hours,
         "window_days": window_days, "entities": ents, "total": len(ents),
         "generated_at": datetime.now(timezone.utc).isoformat(),
+        # The scoring model, published so the UI can show an analyst WHY an
+        # entity scored what it did. A score nobody can defend gets ignored.
+        "scoring": {
+            "method": "time-decayed severity sum, ranked relative to the busiest entity",
+            "weights": {"critical": 10, "high": 6.5, "medium": 3.5, "low": 1, "other": 0.5},
+            "half_life_hours": half_life_hours,
+            "window_days": window_days,
+            "steps": [
+                f"Every alert for the {dim} in the last {window_days} days scores points by severity "
+                f"(critical 10, high 6.5, medium 3.5, low 1).",
+                f"Each alert's points decay with age — half-life {half_life_hours}h, so an alert "
+                f"{half_life_hours}h old counts half as much as one right now.",
+                "Those decayed points are summed into the entity's raw risk points.",
+                "The 0-100 score is the entity's raw points as a percentage of the highest-scoring "
+                "entity in this window — so 100 always means 'the busiest thing on the network right "
+                "now', not an absolute danger level.",
+            ],
+            "bands": {"critical": ">= 80", "high": "55-79", "medium": "30-54", "low": "< 30"},
+        },
     }
 
 

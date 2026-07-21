@@ -2118,7 +2118,7 @@
   <!-- BUMP this version on every theme.css change — it is what invalidates
        browsers that cached the old URL. Forgetting it while nginx cached CSS
        for 1h caused the unstyled-page bug on 17 Jul 2026. -->
-  <link rel="stylesheet" href="theme.css?v=40-demofilm3">
+  <link rel="stylesheet" href="theme.css?v=41-riskwhy">
 
   <style>
     /* ══════════════════════════════════════════════════════════════════════
@@ -5915,21 +5915,108 @@ tr:hover td{background:#161b22}</style></head>
       const body = document.getElementById('rba-body');
       if (!r || !r.entities || !r.entities.length) { body.innerHTML = '<span style="color:var(--muted)">No risk signal in window</span>'; return; }
       const label = { ip: 'IP', user: 'User', host: 'Host' }[dim] || 'Entity';
-      const rows = r.entities.map(e => {
+      RBA_SCORING = r.scoring || null;
+      RBA_ENTITIES = {};
+      const rows = r.entities.map((e, i) => {
         const c = e.band === 'critical' ? 'var(--danger)' : e.band === 'high' ? 'var(--warn)' : e.band === 'medium' ? '#facc15' : 'var(--ok)';
         const clickable = dim === 'ip';
-        return `<div style="display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid var(--border)">
-          <span style="font-weight:700;color:${c};min-width:34px;text-align:right">${e.score}</span>
-          <div style="flex:1;min-width:0">
-            <div style="display:flex;justify-content:space-between;gap:8px">
-              <span style="font-family:var(--mono);font-size:12px;${clickable ? 'color:var(--accent);cursor:pointer' : ''}" ${clickable ? `onclick="goTrail('${e.entity}')"` : ''}>${e.entity || '(none)'}${e.disposition ? ` <span class="badge" style="font-size:9px;background:var(--muted)22;color:var(--muted)">${e.disposition.replace(/_/g,' ')}</span>` : ''}</span>
-              <span style="font-size:11px;color:var(--muted);white-space:nowrap">${e.events} ev · ${e.critical} crit · ${e.uniq_dsts} dst</span>
+        const key = 'rba' + i;
+        RBA_ENTITIES[key] = e;
+        return `<div style="padding:6px 0;border-bottom:1px solid var(--border)">
+          <div style="display:flex;align-items:center;gap:10px">
+            <span style="font-weight:700;color:${c};min-width:34px;text-align:right">${e.score}</span>
+            <div style="flex:1;min-width:0">
+              <div style="display:flex;justify-content:space-between;gap:8px">
+                <span style="font-family:var(--mono);font-size:12px;${clickable ? 'color:var(--accent);cursor:pointer' : ''}" ${clickable ? `onclick="goTrail('${e.entity}')"` : ''}>${e.entity || '(none)'}${e.disposition ? ` <span class="badge" style="font-size:9px;background:var(--muted)22;color:var(--muted)">${e.disposition.replace(/_/g,' ')}</span>` : ''}</span>
+                <span style="font-size:11px;color:var(--muted);white-space:nowrap">${e.events} ev · ${e.critical} crit · ${e.uniq_dsts} dst
+                  <button class="btn" style="font-size:9.5px;padding:2px 7px;margin-left:6px" onclick="event.stopPropagation();toggleRiskWhy('${key}')">Why ${e.score}?</button></span>
+              </div>
+              <div style="height:5px;background:var(--bg3);border-radius:3px;margin-top:3px;overflow:hidden"><div style="height:100%;width:${e.score}%;background:${c}"></div></div>
             </div>
-            <div style="height:5px;background:var(--bg3);border-radius:3px;margin-top:3px;overflow:hidden"><div style="height:100%;width:${e.score}%;background:${c}"></div></div>
           </div>
+          <div id="why-${key}" style="display:none"></div>
         </div>`;
       }).join('');
-      body.innerHTML = `<div style="font-size:11px;color:var(--muted);margin-bottom:6px">Top ${r.entities.length} by decaying risk (half-life ${r.half_life_hours}h, ${r.window_days}d window) · score is relative to the hottest ${label.toLowerCase()}</div>${rows}`;
+      body.innerHTML = `<div style="font-size:11px;color:var(--muted);margin-bottom:6px">Top ${r.entities.length} by decaying risk (half-life ${r.half_life_hours}h, ${r.window_days}d window) · score is relative to the hottest ${label.toLowerCase()} — click <b>Why?</b> on any row for the breakdown</div>${rows}`;
+    }
+
+    /* ── "Why is this scored 87?" ──────────────────────────────────────────
+       A risk score an analyst can't defend is a score they learn to ignore.
+       This shows the actual arithmetic: which severity buckets contributed how
+       many decayed points, how fresh the activity is, and what the 0-100 number
+       is measured against. No AI call — it is the real model, not a narrative. */
+    let RBA_SCORING = null, RBA_ENTITIES = {};
+    function toggleRiskWhy(key) {
+      const el = document.getElementById('why-' + key);
+      const e = RBA_ENTITIES[key];
+      if (!el || !e) return;
+      if (el.style.display === 'block') { el.style.display = 'none'; el.innerHTML = ''; return; }
+
+      const sevCol = { critical: 'var(--danger)', high: 'var(--warn)', medium: '#facc15', low: 'var(--ok)' };
+      const drivers = e.drivers || [];
+      const bars = drivers.length ? drivers.map(d => `
+        <div style="display:flex;align-items:center;gap:8px;margin:4px 0">
+          <span style="min-width:62px;font-size:10.5px;color:${sevCol[d.severity] || 'var(--muted)'};text-transform:uppercase;letter-spacing:.04em">${d.severity}</span>
+          <div style="flex:1;height:6px;background:var(--bg3);border-radius:3px;overflow:hidden">
+            <div style="height:100%;width:${d.pct}%;background:${sevCol[d.severity] || 'var(--muted)'}"></div></div>
+          <span style="min-width:150px;text-align:right;font-size:10.5px;color:var(--muted)">
+            ${d.events.toLocaleString()} × ${d.weight} pts → <b style="color:var(--text)">${d.points}</b> (${d.pct}%)</span>
+        </div>`).join('')
+        : '<div style="font-size:11px;color:var(--muted)">No severity-tagged events in this window.</div>';
+
+      const top = drivers[0];
+      const fresh = e.age_hours === null || e.age_hours === undefined ? null
+        : e.age_hours < 1 ? 'in the last hour'
+        : e.age_hours < 24 ? `${Math.round(e.age_hours)}h ago`
+        : `${Math.round(e.age_hours / 24)}d ago`;
+      // Half-lives elapsed since the newest event = how much decay has already bitten.
+      const hl = (RBA_SCORING && RBA_SCORING.half_life_hours) || 72;
+      const retained = e.age_hours != null ? Math.pow(0.5, e.age_hours / hl) : null;
+
+      const verdict = e.is_top
+        ? `This is the highest-scoring entity in the window, so it <b>defines the 100</b> — every other score is measured against it.`
+        : `It scored <b>${e.risk_points} raw points</b> against the top entity's ${Math.round(e.risk_points / (e.score || 1) * 100)}, giving <b>${e.score}/100</b>.`;
+
+      el.innerHTML = `
+        <div style="margin:8px 0 4px 44px;padding:11px 13px;background:var(--bg3);border:1px solid var(--border);border-left:3px solid var(--accent);border-radius:7px">
+          <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:7px">Why ${escapeHTML(e.entity)} scored ${e.score}</div>
+
+          <div style="font-size:11.5px;line-height:1.65;margin-bottom:9px">
+            ${top ? `Driven mainly by <b style="color:${sevCol[top.severity]}">${top.events.toLocaleString()} ${top.severity}</b> alert${top.events === 1 ? '' : 's'} (${top.pct}% of the score)` : 'Built from low-weight events'}${e.top_threat ? `, mostly <b>${escapeHTML(String(e.top_threat).replace(/_/g, ' '))}</b>` : ''}.
+            ${fresh ? ` Last seen <b>${fresh}</b>${retained != null ? ` — decay has it at <b>${Math.round(retained * 100)}%</b> of full weight.` : '.'}` : ''}
+            ${e.events_24h ? ` <b>${e.events_24h.toLocaleString()}</b> of its ${e.events.toLocaleString()} events landed in the last 24h.` : ' No activity in the last 24h — this score is history, not a live threat.'}
+          </div>
+
+          <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:2px">Points by severity (after time decay)</div>
+          ${bars}
+          <div style="display:flex;justify-content:space-between;gap:8px;margin-top:7px;padding-top:7px;border-top:1px solid var(--border);font-size:11px">
+            <span style="color:var(--muted)">Raw risk points</span><span><b>${e.risk_points}</b></span>
+          </div>
+          <div style="font-size:11px;color:var(--muted);margin-top:6px;line-height:1.6">${verdict}</div>
+
+          <details style="margin-top:8px">
+            <summary style="font-size:10.5px;color:var(--accent);cursor:pointer">How the model works</summary>
+            <ol style="margin:6px 0 0 16px;padding:0;font-size:10.5px;color:var(--muted);line-height:1.65">
+              ${(RBA_SCORING && RBA_SCORING.steps || []).map(s => `<li>${escapeHTML(s)}</li>`).join('')}
+            </ol>
+            <div style="font-size:10.5px;color:var(--muted);margin-top:6px">
+              Bands — critical ≥ 80 · high 55-79 · medium 30-54 · low &lt; 30.</div>
+          </details>
+
+          <div style="margin-top:9px;display:flex;gap:6px;flex-wrap:wrap">
+            ${dimOf(e) === 'ip' ? `<button class="btn" style="font-size:10px;padding:3px 9px" onclick="goTrail('${e.entity}')">Open full trail</button>
+            <button class="btn" style="font-size:10px;padding:3px 9px" onclick="goKillChain('${e.entity}')">Kill chain</button>
+            <button class="btn ai" style="font-size:10px;padding:3px 9px" onclick="riskAINarrative('${e.entity}')">AI narrative</button>` : ''}
+          </div>
+        </div>`;
+      el.style.display = 'block';
+    }
+    function dimOf(e) { return (e && e.dimension) || 'ip'; }
+    /* Jump to the kill chain for this entity and run the grounded AI brief there
+       (the AI is on-demand only — it never fires from the watchlist itself). */
+    async function riskAINarrative(ip) {
+      goKillChain(ip);
+      setTimeout(() => { try { groundedAI(); } catch (_) {} }, 300);
     }
     async function loadAttackCoverage() {
       const r = await get(`${API}/attack-coverage`);
