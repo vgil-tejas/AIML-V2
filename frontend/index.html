@@ -1552,6 +1552,21 @@
       gap: 8px
     }
 
+    /* Risk watchlist score — the number itself opens the "why this score"
+       breakdown, so it has to read as clickable, not as a static label. */
+    .rba-score {
+      cursor: pointer;
+      border-radius: 5px;
+      padding: 1px 5px;
+      border: 1px solid transparent;
+      transition: background .12s, border-color .12s
+    }
+
+    .rba-score:hover {
+      background: rgba(73, 182, 255, .1);
+      border-color: currentColor
+    }
+
     .watch-item {
       display: grid;
       grid-template-columns: minmax(112px, .8fr) minmax(0, 1fr) 54px;
@@ -2118,7 +2133,7 @@
   <!-- BUMP this version on every theme.css change — it is what invalidates
        browsers that cached the old URL. Forgetting it while nginx cached CSS
        for 1h caused the unstyled-page bug on 17 Jul 2026. -->
-  <link rel="stylesheet" href="theme.css?v=41-riskwhy">
+  <link rel="stylesheet" href="theme.css?v=42-riskwhy">
 
   <style>
     /* ══════════════════════════════════════════════════════════════════════
@@ -5924,12 +5939,12 @@ tr:hover td{background:#161b22}</style></head>
         RBA_ENTITIES[key] = e;
         return `<div style="padding:6px 0;border-bottom:1px solid var(--border)">
           <div style="display:flex;align-items:center;gap:10px">
-            <span style="font-weight:700;color:${c};min-width:34px;text-align:right">${e.score}</span>
+            <span class="rba-score" title="Click for the score breakdown" onclick="event.stopPropagation();toggleRiskWhy('${key}')"
+                  style="font-weight:700;color:${c};min-width:34px;text-align:right">${e.score}</span>
             <div style="flex:1;min-width:0">
               <div style="display:flex;justify-content:space-between;gap:8px">
                 <span style="font-family:var(--mono);font-size:12px;${clickable ? 'color:var(--accent);cursor:pointer' : ''}" ${clickable ? `onclick="goTrail('${e.entity}')"` : ''}>${e.entity || '(none)'}${e.disposition ? ` <span class="badge" style="font-size:9px;background:var(--muted)22;color:var(--muted)">${e.disposition.replace(/_/g,' ')}</span>` : ''}</span>
-                <span style="font-size:11px;color:var(--muted);white-space:nowrap">${e.events} ev · ${e.critical} crit · ${e.uniq_dsts} dst
-                  <button class="btn" style="font-size:9.5px;padding:2px 7px;margin-left:6px" onclick="event.stopPropagation();toggleRiskWhy('${key}')">Why ${e.score}?</button></span>
+                <span style="font-size:11px;color:var(--muted);white-space:nowrap">${e.events} ev · ${e.critical} crit · ${e.uniq_dsts} dst</span>
               </div>
               <div style="height:5px;background:var(--bg3);border-radius:3px;margin-top:3px;overflow:hidden"><div style="height:100%;width:${e.score}%;background:${c}"></div></div>
             </div>
@@ -5937,7 +5952,7 @@ tr:hover td{background:#161b22}</style></head>
           <div id="why-${key}" style="display:none"></div>
         </div>`;
       }).join('');
-      body.innerHTML = `<div style="font-size:11px;color:var(--muted);margin-bottom:6px">Top ${r.entities.length} by decaying risk (half-life ${r.half_life_hours}h, ${r.window_days}d window) · score is relative to the hottest ${label.toLowerCase()} — click <b>Why?</b> on any row for the breakdown</div>${rows}`;
+      body.innerHTML = `<div style="font-size:11px;color:var(--muted);margin-bottom:6px">Top ${r.entities.length} by decaying risk (half-life ${r.half_life_hours}h, ${r.window_days}d window) · score is relative to the hottest ${label.toLowerCase()} — <b>click any score</b> for the breakdown</div>${rows}`;
     }
 
     /* ── "Why is this scored 87?" ──────────────────────────────────────────

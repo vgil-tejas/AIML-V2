@@ -15,7 +15,7 @@
 // server responds quickly you always get the latest build; only when it is slow
 // do we fall back to the cached shell.
 
-const VERSION = 'cs-shell-v5';                 // bump on each frontend release
+const VERSION = 'cs-shell-v6';                 // bump on each frontend release
 const CORE = [
   '/index.html', '/overview-neural.html',
   '/theme.css', '/enhance.css', '/logo-brand.jpg',
