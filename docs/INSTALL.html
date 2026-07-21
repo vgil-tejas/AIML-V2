@@ -61,7 +61,7 @@
 <h1>Install &amp; run CyberSentinel on a server</h1>
 <p class="lead">Two ways to install: <b>A)</b> from the GitHub repository (builds on the server), or
 <b>B)</b> from the offline image bundle (no source, for banks). Both end with the dashboard on
-<code>http://&lt;server&gt;:18888</code>. Then configure the AI key, and rotate it any time.</p>
+<code>http://&lt;server&gt;:19888</code>. Then configure the AI key, and rotate it any time.</p>
 
 <h2 id="prereq">1. Prerequisites — install Docker (one time)</h2>
 <p>On a fresh Ubuntu/Debian server, install Docker Engine + the Compose plugin:</p>
@@ -74,30 +74,39 @@ sudo usermod -aG docker $USER
 <span class="cmt"># verify (need Docker 24+ and the compose v2 plugin)</span>
 docker --version
 docker compose version</code></pre>
-<div class="box note"><b>RHEL/CentOS:</b> the same convenience script works. Minimum server: 16&nbsp;GB RAM, 50&nbsp;GB disk, and port 18888 reachable by analysts.</div>
+<div class="box note"><b>RHEL/CentOS:</b> the same convenience script works. Minimum server: 16&nbsp;GB RAM, 50&nbsp;GB disk, and port 19888 reachable by analysts.</div>
 
 <h2 id="github">2. Option A — Install from GitHub (builds on the server)</h2>
 <p>Use this when you have access to the repository (self-managed / your own servers).</p>
-<ol class="steps">
-  <li><b>Get the code.</b>
-<pre><code>git clone https://github.com/Tejasvgipl/AIML-V3.git
-cd AIML-V3</code></pre>
-    <span style="font-size:13px;color:var(--muted)">Private repo &rarr; when Git asks for a password, paste a GitHub <b>Personal Access Token</b> (not your login password), or run <code>gh auth login</code> first.</span>
-  </li>
-  <li><b>Configure secrets</b> (AI key + event-store password), interactively:
-<pre><code>./scripts/setup.sh</code></pre>
-    Pick an AI mode (Groq cloud / on-prem LLM / disabled &mdash; see &sect;5). This writes <code>.env</code> (permissions 600, never committed).
-  </li>
-  <li><b>Build &amp; start</b> the full stack, including log ingestion:
-<pre><code>docker compose --profile wazuh up -d --build</code></pre>
-    The first build takes a few minutes; later starts are instant.
-  </li>
-  <li><b>Verify &amp; open.</b>
-<pre><code>curl -s localhost:18888/api/health
+<p>Copy-paste these four commands on a fresh server. Nothing else is needed.</p>
+<pre><code><span class="cmt"># 1 — make a working folder and enter it</span>
+mkdir tejas &amp;&amp; cd tejas
+
+<span class="cmt"># 2 — get the code</span>
+git clone https://github.com/Tejasvgipl/AIML-V3.git
+cd AIML-V3
+
+<span class="cmt"># 3 — install everything (builds, starts, applies the schema, verifies)</span>
+bash scripts/install.sh
+
+<span class="cmt"># 4 — set the AI key when you want one (optional, any time)</span>
+./scripts/setup.sh &amp;&amp; docker compose up -d backend</code></pre>
+<p>When step 3 finishes it prints the live URL. Open <code>http://&lt;server-ip&gt;:19888</code> in a browser.</p>
+
+<div class="box ok"><b>What <code>install.sh</code> does for you.</b> It checks Docker, creates <code>.env</code> from the
+template, builds and starts all six containers, waits for the event store, applies the database schema,
+and confirms <code>"store":"connected"</code> before it reports success. It also
+<b>auto-recovers from the two failures that used to break fresh installs</b> — a leaked-Docker-network
+"cannot allocate memory" error, and a schema that was skipped on first boot. It is safe to re-run at any
+time; it never deletes data.</div>
+
+<h3>If you prefer to run the steps yourself</h3>
+<pre><code>cp .env.example .env            <span class="cmt"># UI on port 19888, AI off by default</span>
+./scripts/setup.sh              <span class="cmt"># optional: AI key + store password</span>
+docker compose --profile wazuh up -d --build
+curl -s localhost:19888/api/health
 <span class="cmt"># {"status":"ok","store":"connected","ai":"configured"|"missing"}</span></code></pre>
-    Open <code>http://&lt;server-ip&gt;:18888</code> in a browser.
-  </li>
-</ol>
+<div class="box note" style="font-size:13px"><b>Private repo?</b> When Git asks for a password, paste a GitHub <b>Personal Access Token</b> (not your login password), or run <code>gh auth login</code> first.</div>
 <div class="box note"><b>Update later:</b> <code>git pull</code> then <code>docker compose --profile wazuh up -d --build</code>. The data volume is preserved.</div>
 
 <h2 id="bundle">3. Option B — Install from the offline image bundle (no source)</h2>
@@ -110,7 +119,7 @@ cd AIML-V3</code></pre>
 <pre><code>./run.sh</code></pre>
     It loads the images from <code>images.tar.gz</code>, runs <code>setup.sh</code> for the AI key + store password on first run, and starts the stack.
   </li>
-  <li>Verify &amp; open &mdash; same as above: <code>curl -s localhost:18888/api/health</code>, then <code>http://&lt;server&gt;:18888</code>.</li>
+  <li>Verify &amp; open &mdash; same as above: <code>curl -s localhost:19888/api/health</code>, then <code>http://&lt;server&gt;:19888</code>.</li>
 </ol>
 <div class="box note"><b>Build the bundle</b> (on your machine, one command): <code>./scripts/package.sh 2.0.0</code> &rarr; produces <code>dist/cybersentinel-2.0.0/</code> with no source inside.</div>
 
@@ -155,7 +164,7 @@ AI_FAST_MODEL=your-model
   <li>Recreate the backend so it reads the new value:
 <pre><code>docker compose up -d backend                              <span class="cmt"># GitHub install</span>
 docker compose -f docker-compose.prod.yml up -d backend   <span class="cmt"># bundle install</span></code></pre></li>
-  <li>Confirm: <code>curl -s localhost:18888/api/health</code> &rarr; <code>"ai":"configured"</code></li>
+  <li>Confirm: <code>curl -s localhost:19888/api/health</code> &rarr; <code>"ai":"configured"</code></li>
 </ol>
 <div class="box warn"><b>A plain <code>docker restart</code> is not enough</b> &mdash; env values are read when the container is <i>created</i>, so use <code>up -d backend</code> to recreate it.</div>
 
@@ -163,9 +172,9 @@ docker compose -f docker-compose.prod.yml up -d backend   <span class="cmt"># bu
 <p>All overridable in <code>.env</code>:</p>
 <table>
   <tr><th>Variable</th><th>Default</th><th>Purpose</th></tr>
-  <tr><td><code>NGINX_HOST_PORT</code></td><td>18888</td><td>Dashboard + API (the analyst URL)</td></tr>
-  <tr><td><code>BACKEND_HOST_PORT</code></td><td>18110</td><td>Backend (direct)</td></tr>
-  <tr><td><code>ML_ENGINE_HOST_PORT</code></td><td>18111</td><td>ML engine (direct)</td></tr>
+  <tr><td><code>NGINX_HOST_PORT</code></td><td>19888</td><td>Dashboard + API (the analyst URL)</td></tr>
+  <tr><td><code>BACKEND_HOST_PORT</code></td><td>19110</td><td>Backend (direct)</td></tr>
+  <tr><td><code>ML_ENGINE_HOST_PORT</code></td><td>19111</td><td>ML engine (direct)</td></tr>
   <tr><td><code>CLICKHOUSE_PASS</code></td><td>&mdash;</td><td>Event-store password (set via setup.sh)</td></tr>
 </table>
 <div class="box danger"><b>Never run <code>docker compose ... down -v</code></b> &mdash; the <code>-v</code> deletes the data volume (your entire log store). Plain <code>down</code> keeps the data.</div>
@@ -180,16 +189,54 @@ docker compose -f docker-compose.prod.yml up -d backend   <span class="cmt"># bu
 </table>
 
 <h2 id="trouble">9. Troubleshooting</h2>
+<div class="box ok"><b>Try this first:</b> <code>bash scripts/install.sh</code>. It is safe to re-run, and it
+repairs most of the problems below automatically (schema, startup, health).</div>
+
+<h3>The three install failures — and their exact fix</h3>
+<table>
+  <tr><th style="width:26%">What you see</th><th>Why</th><th>Exact fix</th></tr>
+  <tr>
+    <td>The UI says <b>“store degraded”</b>, or health returns <code>"store":"connection_failed"</code></td>
+    <td>The password in <code>.env</code> is not the password the store's data volume was created with, so
+        the services can't authenticate. (Fixed at the source in v2.0.1 — both now come from the same
+        <code>CLICKHOUSE_PASS</code> value.)</td>
+    <td><pre style="margin:0"><code>bash scripts/install.sh</code></pre>
+        It tests the credential and tells you which side is wrong. To change the password later, always use
+        <code>./scripts/setup.sh</code> — it updates the store <i>and</i> <code>.env</code> together.</td>
+  </tr>
+  <tr>
+    <td><code>Database cybersentinel does not exist</code></td>
+    <td>The schema was skipped during the store's first boot.</td>
+    <td>Re-apply it (safe on a store that already holds data — every statement is
+        <code>CREATE … IF NOT EXISTS</code>):
+<pre style="margin:0"><code>docker exec -i aiml_clickhouse clickhouse-client \
+  --password "$CLICKHOUSE_PASS" --multiquery \
+  &lt; clickhouse/init/01-schema.sql</code></pre></td>
+  </tr>
+  <tr>
+    <td><code>failed to create endpoint … cannot allocate memory</code></td>
+    <td><b>Not</b> a RAM shortage. Docker leaked virtual network interfaces from earlier failed attempts.</td>
+    <td><pre style="margin:0"><code>sudo systemctl restart docker
+docker compose --profile wazuh up -d</code></pre></td>
+  </tr>
+  <tr>
+    <td><code>container aiml_clickhouse is unhealthy</code> on the very first start</td>
+    <td>The store takes longer than the wait window to initialise on a cold server.</td>
+    <td>Simply run the start command again — it succeeds on the second attempt:
+        <pre style="margin:0"><code>docker compose --profile wazuh up -d</code></pre></td>
+  </tr>
+</table>
+
+<h3>Everything else</h3>
 <table>
   <tr><th>Symptom</th><th>What to check</th></tr>
-  <tr><td>Dashboard won't load</td><td><code>docker compose ps</code> &mdash; is the backend healthy? <code>curl localhost:18888/api/health</code></td></tr>
+  <tr><td>Dashboard won't load</td><td><code>docker compose ps</code> &mdash; is the backend healthy? <code>curl localhost:19888/api/health</code></td></tr>
   <tr><td>AI panels say "not configured"</td><td>No key set &mdash; run <code>./scripts/setup.sh</code>, then <code>up -d backend</code></td></tr>
   <tr><td>SOC Query says "service busy"</td><td>AI provider rate-limited &mdash; retry shortly, or use a paid tier / on-prem model</td></tr>
-  <tr><td>Store <code>connection_failed</code></td><td><code>docker compose logs clickhouse</code>; confirm <code>CLICKHOUSE_PASS</code> in <code>.env</code></td></tr>
   <tr><td>No events appear</td><td>Check <code>WAZUH_ALERTS_DIR</code> and <code>logs -f wazuh-watcher</code></td></tr>
   <tr><td>Private clone fails</td><td>Use a GitHub Personal Access Token as the password, or <code>gh auth login</code></td></tr>
 </table>
-<div class="box ok"><b>Health one-liner:</b> <code>curl -s localhost:18888/api/health</code> should return <code>"store":"connected"</code>.</div>
+<div class="box ok"><b>Health one-liner:</b> <code>curl -s localhost:19888/api/health</code> should return <code>"store":"connected"</code>.</div>
 
 <footer>CyberSentinel &middot; Installation &amp; Administration Guide &middot; v2.0.0 &middot; for on-prem / bank deployments.</footer>
 </body>

@@ -4,13 +4,23 @@ services:
     container_name: aiml_clickhouse
     environment:
       - CLICKHOUSE_DB=cybersentinel
+      # The password MUST come from the image's own env, not a users.d mount.
+      # A mounted users.d file the entrypoint doesn't know about caused two
+      # separate outages on fresh installs:
+      #   1. it hardcoded a password that drifted from .env -> backend/ml/watcher
+      #      got "Authentication failed" -> UI showed "store degraded";
+      #   2. the entrypoint couldn't authenticate to itself during first boot, so
+      #      docker-entrypoint-initdb.d/01-schema.sql never ran -> no schema.
+      # Sourcing both from CLICKHOUSE_PASS makes drift impossible.
+      - CLICKHOUSE_USER=default
+      - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASS:-tejas@123}
+      - CLICKHOUSE_PASS=${CLICKHOUSE_PASS:-tejas@123}   # for the healthcheck below
     ports:
       - "${CLICKHOUSE_HTTP_PORT:-18123}:8123"
       - "${CLICKHOUSE_NATIVE_PORT:-19000}:9000"
     volumes:
       - clickhouse_data:/var/lib/clickhouse
       - ./clickhouse/init:/docker-entrypoint-initdb.d:ro
-      - ./clickhouse/users.d/default-password.xml:/etc/clickhouse-server/users.d/default-password.xml:ro
     ulimits:
       nofile:
         soft: 262144

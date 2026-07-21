@@ -84,11 +84,37 @@ case "$AICHOICE" in
 esac
 
 # ── Store password ───────────────────────────────────────────────────────────
+# The store's password is baked in when its data volume is FIRST created. If you
+# change CLICKHOUSE_PASS afterwards, .env and the store disagree and every
+# service fails to authenticate — the UI then reports "store degraded". So: on an
+# already-running store we change the password inside the store too, atomically.
 say "Event-store password"
+CH_CTR=""
+for c in aiml_clickhouse cs_store aiml_demo_clickhouse; do
+  docker ps -a --format '{{.Names}}' 2>/dev/null | grep -qx "$c" && CH_CTR="$c" && break
+done
+
 CURRENT="$(grep -E '^CLICKHOUSE_PASS=' "$ENV_FILE" | head -1 | cut -d= -f2- || true)"
 if [ -n "$CURRENT" ]; then
+  [ -n "$CH_CTR" ] && note "Store '$CH_CTR' already exists — a change is applied to it as well."
   read -rsp "  New store password [Enter to keep the existing one]: " CHP; echo
-  [ -n "$CHP" ] && upsert CLICKHOUSE_PASS "$CHP" && note "Store password updated." || note "Kept existing store password."
+  if [ -n "$CHP" ] && [ "$CHP" != "$CURRENT" ]; then
+    if [ -n "$CH_CTR" ] && docker ps --format '{{.Names}}' | grep -qx "$CH_CTR"; then
+      # Rotate inside the store first; only record it in .env if that succeeded,
+      # so a failure can never leave the two out of sync.
+      if docker exec -i "$CH_CTR" clickhouse-client --password "$CURRENT" \
+           --query "ALTER USER default IDENTIFIED WITH plaintext_password BY '$CHP'" 2>/dev/null; then
+        upsert CLICKHOUSE_PASS "$CHP"; note "Store password rotated (store + .env)."
+      else
+        note "Could not reach the store with the current password — .env left unchanged."
+        note "Fix the running store first, or wipe its volume for a clean reinstall."
+      fi
+    else
+      upsert CLICKHOUSE_PASS "$CHP"; note "Store password updated."
+    fi
+  else
+    note "Kept existing store password."
+  fi
 else
   read -rsp "  Set store password (Enter to use default 'tejas@123'): " CHP; echo
   upsert CLICKHOUSE_PASS "${CHP:-tejas@123}"
