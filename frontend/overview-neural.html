@@ -857,9 +857,35 @@ const num = v => Number(v || 0).toLocaleString();
 const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const pretty = s => String(s || '').replace(/_/g, ' ');
 
+/* ═══ IST (Asia/Kolkata) ═══
+   The store keeps every timestamp in UTC; the SOC reading this dashboard sits
+   in India. Conversion happens here, at the last moment before display, so no
+   time on this page is ever shown in UTC.
+
+   This deck used to print raw UTC while index.html printed IST, so the SAME
+   event read as two times 5h30m apart depending on which page you were on.
+   Keep this in step with toIST() in index.html — if the two ever disagree,
+   analysts lose the ability to correlate what they see. */
+function istDate(ts) {
+  if (ts == null || ts === '') return null;
+  let s = String(ts).trim().replace(' ', 'T');
+  if (!/(Z|[+\-]\d{2}:?\d{2})$/.test(s)) s += 'Z';   // no zone -> the store means UTC
+  const d = new Date(s);
+  return isNaN(d) ? null : d;
+}
+const IST_FULL = { year: 'numeric', month: '2-digit', day: '2-digit',
+                   hour: '2-digit', minute: '2-digit', second: '2-digit' };
+function toIST(ts, opts) {
+  const d = istDate(ts);
+  if (!d) return String(ts == null ? '' : ts).slice(0, 19).replace('T', ' ');
+  return d.toLocaleString('en-IN',
+    Object.assign({ timeZone: 'Asia/Kolkata', hour12: false }, opts || IST_FULL))
+    .replace(/\//g, '-');
+}
+
 /* clock */
 const clockEl = document.getElementById('clock');
-const tickClock = () => clockEl.textContent = new Date().toISOString().replace('T', ' ').slice(0, 19) + ' UTC';
+const tickClock = () => clockEl.textContent = toIST(new Date().toISOString()) + ' IST';
 tickClock(); setInterval(tickClock, 1000);
 
 /* toasts */
@@ -1227,11 +1253,11 @@ async function runTrail(entity, reveal = true) {
   tl.innerHTML = shown.map(ev => {
     const sev = (ev.severity || 'low').toLowerCase();
     const cls = sev === 'critical' ? 'crit' : (sev === 'high' ? 'warn' : '');
-    const ts = String(ev['@timestamp'] || '').replace('T', ' ').slice(0, 19);
+    const ts = toIST(ev['@timestamp']);
     const tags = [ev.threat_type, ev.country, ev.dst_port ? 'port ' + ev.dst_port : '', ev.agent]
       .filter(Boolean).map(t => pretty(t).toUpperCase());
     return `<div class="tl-item ${cls}">
-      <div class="tl-time">${esc(ts)} UTC</div>
+      <div class="tl-time">${esc(ts)} IST</div>
       <div class="tl-tx">${esc(ev.rule || pretty(ev.threat_type) || 'event')}
         ${ev.dst_ip ? ' → <b>' + esc(ev.dst_ip) + '</b>' : ''}</div>
       <div class="tl-tags">${tags.map(t => `<span class="pill ${cls === 'crit' ? 'crit' : cls === 'warn' ? 'high' : 'tech'}">${esc(t)}</span>`).join('')}</div>
@@ -1296,7 +1322,7 @@ pc.parentElement.addEventListener('mousemove', e => {
   if (!PULSE.length) return;
   const r = pc.getBoundingClientRect(), L = 40, iw = r.width - L - 10;
   hoverI = Math.max(0, Math.min(PULSE.length - 1, Math.round((e.clientX - r.left - L) / iw * (PULSE.length - 1))));
-  ttT.textContent = PULSE[hoverI].label;
+  ttT.textContent = PULSE[hoverI].label + ' IST';
   ttV.textContent = num(PULSE[hoverI].v) + ' events';
   tt.style.display = 'block';
   const tw = tt.offsetWidth; let tx3 = e.clientX - r.left + 16;
@@ -1655,15 +1681,19 @@ addEventListener('resize', () => { initMesh(); if (REDUCED) drawMesh(); });
     /* Buckets are hourly, but a widened window can span weeks — labelling those
        "08:00" would render 17 Jun and 2 Jul as the same tick. Show the date once
        the span outgrows a single day. */
-    const span = new Date(trend[trend.length - 1].hour) - new Date(trend[0].hour);
+    const span = istDate(trend[trend.length - 1].hour) - istDate(trend[0].hour);
     const multiDay = span > 864e5;
+    /* Bucket keys arrive as UTC hours. Slicing the string straight onto the axis
+       labelled them in UTC, so a spike at 21:00 IST was drawn at 15:30 — off by
+       half a working day. Convert, then label. */
     PULSE = trend.map(p => ({
-      label: multiDay ? String(p.hour || '').slice(5, 10).replace('-', '/') : String(p.hour || '').slice(11, 16),
+      label: multiDay ? toIST(p.hour, { day: '2-digit', month: 'short' })
+                      : toIST(p.hour, { hour: '2-digit', minute: '2-digit' }),
       v: +p.total || 0,
     }));
     drawPulse();
     const peak = trend.reduce((a, b) => (+b.total || 0) > (+a.total || 0) ? b : a, trend[0]);
-    const newestTs = LOGS.length ? new Date(LOGS[0]['@timestamp']) : null;
+    const newestTs = LOGS.length ? istDate(LOGS[0]['@timestamp']) : null;
     const staleDays = newestTs ? Math.floor((Date.now() - newestTs) / 864e5) : null;
     document.getElementById('pulse-badge').textContent =
       `${winLabel} · ${num(trend.length)} active hour${trend.length === 1 ? '' : 's'}`;
@@ -1674,7 +1704,7 @@ addEventListener('resize', () => { initMesh(); if (REDUCED) drawMesh(); });
       const b = document.createElement('div');
       b.className = 'pulse-stale' + (staleDays >= 7 ? ' hot' : '');
       b.innerHTML = `<b>Ingest is ${num(staleDays)} day${staleDays === 1 ? '' : 's'} behind.</b>
-        Newest event ${esc(String(LOGS[0]['@timestamp']).slice(0, 16).replace('T', ' '))} —
+        Newest event ${esc(toIST(LOGS[0]['@timestamp'], { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }))} IST —
         this pulse is the ${esc(winLabel)}, not right now. Peak ${num(peak.total)} events/hour.`;
       w.parentElement.insertBefore(b, w);
     }
