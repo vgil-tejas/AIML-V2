@@ -2133,7 +2133,7 @@
   <!-- BUMP this version on every theme.css change — it is what invalidates
        browsers that cached the old URL. Forgetting it while nginx cached CSS
        for 1h caused the unstyled-page bug on 17 Jul 2026. -->
-  <link rel="stylesheet" href="theme.css?v=45-attackmap">
+  <link rel="stylesheet" href="theme.css?v=46-godmap">
 
   <style>
     /* ══════════════════════════════════════════════════════════════════════
@@ -4892,15 +4892,30 @@ tr:hover td{background:#161b22}</style></head>
       const LINKS = [['ext', 'fw'], ['fw', 'dba'], ['fw', 'db'], ['fw', 'web'],
                      ['fw', 's1'], ['fw', 's2'], ['fw', 's3'], ['db', 's1'], ['db', 's3']];
       const COL = { ok: '#5e6ad2', probe: '#22d3ee', target: '#f2c94c', hit: '#eb5757', safe: '#4cb782' };
-      let cv, ctx, gcv, gctx, W, H, dpr, raf = 0, last = 0, spawnT = null;
-      let beams = [], waves = [], N = {}, gauge = { cur: 0, tgt: 0, on: false };
-      let running = false;
+      let cv, ctx, gcv, gctx, W, H, dpr, raf = 0, last = 0, spawnT = null, pulseT = null;
+      let beams = [], waves = [], parts = [], pulses = [], amb = [], N = {};
+      let gauge = { cur: 0, tgt: 0, on: false };
+      let running = false, shake = 0, rot = 0, tSec = 0;
 
       function reset() {
         N = {};
-        for (const k in NODES) N[k] = Object.assign({ id: k, state: 'ok', glow: 0, pulse: 0, shake: 0, health: 1 }, NODES[k]);
-        beams = []; waves = []; gauge = { cur: 0, tgt: 0, on: false };
+        for (const k in NODES) N[k] = Object.assign({ id: k, state: 'ok', glow: 0, pulse: 0, shake: 0, health: 1, halo: Math.random() }, NODES[k]);
+        beams = []; waves = []; parts = []; pulses = []; shake = 0; rot = 0;
+        gauge = { cur: 0, tgt: 0, on: false };
+        // ambient drifting motes — depth behind the network
+        amb = Array.from({ length: 64 }, () => ({ x: Math.random(), y: Math.random(),
+          vx: (Math.random() - .5) * .01, vy: (Math.random() - .5) * .01, r: Math.random() * 1.6 + .3, a: Math.random() * .4 + .1 }));
         if (spawnT) { clearInterval(spawnT); spawnT = null; }
+      }
+      function spawnSparks(x, y, col, n) {
+        for (let i = 0; i < n; i++) {
+          const a = Math.random() * 6.283, sp = 40 + Math.random() * 130;
+          parts.push({ x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, life: 1, decay: 1.8 + Math.random(), r: 1.5 + Math.random() * 2, col, g: 0, spark: true });
+        }
+      }
+      function spawnEmber(n) {
+        const p = px(n);
+        parts.push({ x: p.x + (Math.random() - .5) * 16, y: p.y, vx: (Math.random() - .5) * 12, vy: -18 - Math.random() * 22, life: 1, decay: .8 + Math.random() * .5, r: 1 + Math.random() * 1.8, col: Math.random() < .5 ? '#eb5757' : '#f2994a', g: -6 });
       }
       function size() {
         if (!cv) return;
@@ -4918,11 +4933,20 @@ tr:hover td{background:#161b22}</style></head>
         reset(); size();
         window.addEventListener('resize', size);
         running = true; last = performance.now();
+        // benign network traffic — a light travelling along a random link, so the
+        // network looks alive between attacks (subtle, cyan, low alpha).
+        if (pulseT) clearInterval(pulseT);
+        pulseT = setInterval(() => {
+          if (pulses.length > 10) return;
+          const l = LINKS[Math.floor(Math.random() * LINKS.length)];
+          pulses.push({ a: l[0], b: l[1], t: 0, sp: .5 + Math.random() * .4 });
+        }, 460);
         cancelAnimationFrame(raf); raf = requestAnimationFrame(loop);
       }
       function stop() {
         running = false; cancelAnimationFrame(raf);
         if (spawnT) { clearInterval(spawnT); spawnT = null; }
+        if (pulseT) { clearInterval(pulseT); pulseT = null; }
         window.removeEventListener('resize', size);
       }
 
@@ -4985,6 +5009,9 @@ tr:hover td{background:#161b22}</style></head>
         n.state = 'hit'; n.glow = 1; n.pulse = 1;
         const p = px(n);
         waves.push({ x: p.x, y: p.y, r: 8, max: small ? 70 : 140, a: 1, col: COL.hit });
+        waves.push({ x: p.x, y: p.y, r: 4, max: small ? 44 : 90, a: .8, col: '#fff' });
+        spawnSparks(p.x, p.y, COL.hit, small ? 14 : 26);
+        shake = Math.max(shake, small ? 3 : 9);
         if (!small) fireFlash(n);
       }
       function fireFlash(n) {
@@ -5000,25 +5027,74 @@ tr:hover td{background:#161b22}</style></head>
       function loop(now) {
         if (!running) return;
         const dt = Math.min(.05, (now - last) / 1000); last = now;
+        tSec += dt; rot += dt; shake = Math.max(0, shake - dt * 22);
         ctx.clearRect(0, 0, W, H);
+        ctx.save();
+        if (shake > .3) ctx.translate((Math.random() - .5) * shake, (Math.random() - .5) * shake);
+        drawAmbient(dt);
+        drawGrid();
         drawPerimeter();
         drawLinks();
-        // beams
+        drawPulses(dt);
+        // beams — advance, draw, and on arrival throw a small spark burst
         for (let i = beams.length - 1; i >= 0; i--) {
           const bm = beams[i]; bm.t += dt * bm.sp;
           drawBeam(bm);
-          if (bm.t >= bm.stopAt) { if (bm.onArrive) bm.onArrive(); beams.splice(i, 1); }
+          if (bm.t >= bm.stopAt) {
+            if (bm.onArrive) bm.onArrive();
+            const pa = px(bm.a), pb = px(bm.b);
+            spawnSparks(pa.x + (pb.x - pa.x) * bm.stopAt, pa.y + (pb.y - pa.y) * bm.stopAt, bm.col, 5);
+            beams.splice(i, 1);
+          }
         }
+        drawParts(dt);
         // shockwaves
         for (let i = waves.length - 1; i >= 0; i--) {
-          const w = waves[i]; w.r += dt * 190; w.a -= dt * 1.5;
+          const w = waves[i]; w.r += dt * 220; w.a -= dt * 1.5;
           if (w.a <= 0) { waves.splice(i, 1); continue; }
-          ctx.beginPath(); ctx.arc(w.x, w.y, w.r, 0, 7); ctx.strokeStyle = rgba(w.col, w.a); ctx.lineWidth = 2; ctx.stroke();
+          ctx.beginPath(); ctx.arc(w.x, w.y, w.r, 0, 7); ctx.strokeStyle = rgba(w.col, w.a); ctx.lineWidth = 2.4; ctx.stroke();
         }
-        // nodes
+        // burning nodes throw embers
+        for (const k in N) { const n = N[k]; if (n.state === 'hit' && Math.random() < .4 && parts.length < 240) spawnEmber(n); }
         for (const k in N) drawNode(N[k], dt);
+        ctx.restore();
         drawGauge();
         raf = requestAnimationFrame(loop);
+      }
+      function drawAmbient(dt) {
+        for (const m of amb) {
+          m.x += m.vx * dt; m.y += m.vy * dt;
+          if (m.x < 0) m.x = 1; if (m.x > 1) m.x = 0; if (m.y < 0) m.y = 1; if (m.y > 1) m.y = 0;
+          ctx.beginPath(); ctx.arc(m.x * W, m.y * H, m.r, 0, 7);
+          ctx.fillStyle = rgba('#7b86e6', m.a * .5); ctx.fill();
+        }
+      }
+      function drawGrid() {
+        const step = 64, off = (tSec * 8) % step;
+        ctx.strokeStyle = 'rgba(123,134,230,.035)'; ctx.lineWidth = 1;
+        ctx.beginPath();
+        for (let x = -off; x < W; x += step) { ctx.moveTo(x, 0); ctx.lineTo(x, H); }
+        for (let y = -off; y < H; y += step) { ctx.moveTo(0, y); ctx.lineTo(W, y); }
+        ctx.stroke();
+      }
+      function drawPulses(dt) {
+        for (let i = pulses.length - 1; i >= 0; i--) {
+          const p = pulses[i]; p.t += dt * p.sp;
+          if (p.t >= 1) { pulses.splice(i, 1); continue; }
+          const pa = px(N[p.a]), pb = px(N[p.b]);
+          const x = pa.x + (pb.x - pa.x) * p.t, y = pa.y + (pb.y - pa.y) * p.t;
+          ctx.beginPath(); ctx.arc(x, y, 2, 0, 7); ctx.fillStyle = rgba('#22d3ee', .7 * (1 - p.t)); ctx.fill();
+        }
+      }
+      function drawParts(dt) {
+        for (let i = parts.length - 1; i >= 0; i--) {
+          const p = parts[i];
+          p.life -= dt * p.decay;
+          if (p.life <= 0) { parts.splice(i, 1); continue; }
+          p.vy += (p.g || 0); p.x += p.vx * dt; p.y += p.vy * dt;
+          ctx.beginPath(); ctx.arc(p.x, p.y, p.r * (p.spark ? p.life : 1), 0, 7);
+          ctx.fillStyle = rgba(p.col, p.life); ctx.shadowColor = p.col; ctx.shadowBlur = 6; ctx.fill(); ctx.shadowBlur = 0;
+        }
       }
       function rgba(hex, a) {
         const n = parseInt(hex.slice(1), 16);
@@ -5041,13 +5117,23 @@ tr:hover td{background:#161b22}</style></head>
       }
       function drawBeam(bm) {
         const pa = px(bm.a), pb = px(bm.b);
+        const ang = Math.atan2(pb.y - pa.y, pb.x - pa.x);
         const hx = pa.x + (pb.x - pa.x) * bm.t, hy = pa.y + (pb.y - pa.y) * bm.t;
-        const tailT = Math.max(0, bm.t - .18);
+        const tailT = Math.max(0, bm.t - .26);
         const tx = pa.x + (pb.x - pa.x) * tailT, ty = pa.y + (pb.y - pa.y) * tailT;
         const g = ctx.createLinearGradient(tx, ty, hx, hy);
-        g.addColorStop(0, rgba(bm.col, 0)); g.addColorStop(1, rgba(bm.col, .9));
-        ctx.beginPath(); ctx.moveTo(tx, ty); ctx.lineTo(hx, hy); ctx.strokeStyle = g; ctx.lineWidth = 2; ctx.stroke();
-        ctx.beginPath(); ctx.arc(hx, hy, 3.2, 0, 7); ctx.fillStyle = '#fff'; ctx.shadowColor = bm.col; ctx.shadowBlur = 12; ctx.fill(); ctx.shadowBlur = 0;
+        g.addColorStop(0, rgba(bm.col, 0)); g.addColorStop(1, rgba(bm.col, .95));
+        ctx.beginPath(); ctx.moveTo(tx, ty); ctx.lineTo(hx, hy); ctx.strokeStyle = g; ctx.lineWidth = 2.4; ctx.stroke();
+        // sparkle trail
+        for (let s = 1; s <= 3; s++) {
+          const tt = Math.max(0, bm.t - s * .06);
+          ctx.beginPath(); ctx.arc(pa.x + (pb.x - pa.x) * tt, pa.y + (pb.y - pa.y) * tt, 2.2 - s * .5, 0, 7);
+          ctx.fillStyle = rgba(bm.col, .5 - s * .12); ctx.fill();
+        }
+        // packet head — a glowing rotated square, like a datagram in flight
+        ctx.save(); ctx.translate(hx, hy); ctx.rotate(ang + rot * 3);
+        ctx.shadowColor = bm.col; ctx.shadowBlur = 14; ctx.fillStyle = '#fff';
+        ctx.fillRect(-3, -3, 6, 6); ctx.restore(); ctx.shadowBlur = 0;
       }
       function drawNode(n, dt) {
         const p = px(n); const col = COL[n.state] || COL.ok;
@@ -5062,6 +5148,21 @@ tr:hover td{background:#161b22}</style></head>
         const gi = (n.state === 'hit' ? .55 : n.state === 'target' ? .4 : .28) + n.pulse * .3;
         gl.addColorStop(0, rgba(col, gi)); gl.addColorStop(1, rgba(col, 0));
         ctx.fillStyle = gl; ctx.beginPath(); ctx.arc(x, y, r * 3.4, 0, 7); ctx.fill();
+        // continuous expanding halo rings for active nodes
+        if (n.state === 'hit' || n.state === 'target') {
+          n.halo = (n.halo + dt * .8) % 1;
+          for (let h = 0; h < 2; h++) {
+            const hp = (n.halo + h * .5) % 1;
+            ctx.beginPath(); ctx.arc(x, y, r + hp * 26, 0, 7);
+            ctx.strokeStyle = rgba(col, (1 - hp) * .5); ctx.lineWidth = 1.5; ctx.stroke();
+          }
+        }
+        // rotating dashed ring on the crown jewel and compromised hosts
+        if (n.crown || n.state === 'hit') {
+          ctx.save(); ctx.translate(x, y); ctx.rotate(rot * (n.state === 'hit' ? 2.4 : 1.2));
+          ctx.setLineDash([4, 6]); ctx.strokeStyle = rgba(col, .8); ctx.lineWidth = 1.4;
+          ctx.beginPath(); ctx.arc(0, 0, r + 9, 0, 7); ctx.stroke(); ctx.setLineDash([]); ctx.restore();
+        }
         // core
         ctx.beginPath(); ctx.arc(x, y, r, 0, 7); ctx.fillStyle = n.ext ? '#1a1030' : '#0b1020';
         ctx.strokeStyle = col; ctx.lineWidth = 2; ctx.fill(); ctx.stroke();
@@ -5070,7 +5171,6 @@ tr:hover td{background:#161b22}</style></head>
           ctx.beginPath(); ctx.arc(x, y, r + 5, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * n.health);
           ctx.strokeStyle = rgba(COL.hit, .9); ctx.lineWidth = 2.5; ctx.stroke();
         }
-        // crown mark
         if (n.crown) { ctx.fillStyle = col; ctx.font = '11px sans-serif'; ctx.textAlign = 'center'; ctx.fillText('◆', x, y + 4); }
         // label
         ctx.fillStyle = n.state === 'ok' ? 'rgba(199,204,210,.75)' : '#fff';
@@ -5302,6 +5402,7 @@ tr:hover td{background:#161b22}</style></head>
           <button class="film-x" onclick="closeDemoFilm()" title="Exit film">✕</button>
         </div>
         <canvas id="film-canvas"></canvas>
+        <div class="film-vignette"></div>
         <div class="film-flash" id="film-flash"></div>
         <div class="film-hud" id="film-hud"><canvas id="film-gauge" width="150" height="150"></canvas></div>
         <div class="film-kc" id="film-kc"></div>

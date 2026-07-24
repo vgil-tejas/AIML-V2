@@ -1826,6 +1826,9 @@ abbr.jg { text-decoration: none; border-bottom: 1px dotted rgba(255,255,255,.3);
 .film-act-sm { font-size: clamp(24px, 3.4vw, 42px); font-weight: 700; letter-spacing: -.02em; }
 .film-stat { display: flex; align-items: baseline; gap: 10px; margin-left: auto; }
 #demo-film[data-phase="act"] .film-cap { max-width: 78ch; margin: 0; }
+.film-vignette { position: absolute; inset: 0; z-index: 1; pointer-events: none; display: none;
+  background: radial-gradient(120% 100% at 50% 42%, transparent 55%, rgba(3,4,7,.62) 100%); }
+#demo-film[data-phase="act"] .film-vignette { display: block; }
 .film-flash { position: absolute; inset: 0; z-index: 1; pointer-events: none; opacity: 0;
   background: radial-gradient(circle at var(--fx,50%) var(--fy,50%), rgba(235,87,87,.55), transparent 45%); }
 .film-flash.fire { animation: filmflash .7s ease; }
