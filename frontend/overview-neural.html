@@ -852,7 +852,26 @@ body{font-family:var(--sans);color:var(--text);min-height:100vh;
 const REDUCED = matchMedia('(prefers-reduced-motion: reduce)').matches;
 const API = '/api';
 
-const j = async (u) => { try { const r = await fetch(u); return r.ok ? await r.json() : null; } catch (e) { return null; } };
+/* Fetch that returns null on failure so the page never crashes — but a failed
+   call is NOT the same as an empty result. Both used to collapse to "0" here,
+   so a broken endpoint showed a calm zero and nothing said the number was wrong.
+   Now a failure is announced (console + one toast per endpoint); a genuinely
+   empty 200 stays silent, as it should. */
+window.__apiFails = window.__apiFails || {};
+function flagApiFail(u, why) {
+  const key = String(u).split('?')[0];
+  if (window.__apiFails[key]) return;                 // once per endpoint, no spam
+  window.__apiFails[key] = why;
+  console.warn('[CyberSentinel] API failed:', key, '→', why, '· the UI will read 0/empty for this — not a real zero.');
+  try { toast('Data source unavailable: ' + key.replace(/^.*(\/api\/)/, '$1') + ' — showing 0', 'err', '!'); } catch (_) {}
+}
+const j = async (u) => {
+  try {
+    const r = await fetch(u);
+    if (!r.ok) { flagApiFail(u, 'HTTP ' + r.status); return null; }
+    return await r.json();
+  } catch (e) { flagApiFail(u, e.message || 'network error'); return null; }
+};
 const num = v => Number(v || 0).toLocaleString();
 const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const pretty = s => String(s || '').replace(/_/g, ' ');

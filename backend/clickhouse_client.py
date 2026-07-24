@@ -42,6 +42,16 @@ OPENSEARCH_ENABLED = CLICKHOUSE_ENABLED
 LOGS_TABLE = f"{CLICKHOUSE_DB}.logs"
 AGG_TABLE  = f"{CLICKHOUSE_DB}.agg_ip_daily"
 
+# Half-saturation constant for the entity risk score. The score is
+#   100 * pts / (pts + RISK_SATURATION_POINTS)
+# so an entity with exactly this many decayed points scores 50. This makes the
+# 0-100 an ABSOLUTE reading (a quiet window stays quiet) instead of the old
+# "percentage of the busiest entity", which forced the top entity to 100 even
+# on a dead-quiet day. Tunable per deployment: raise it to make red rarer.
+# 140 puts the demo breach attacker (~300 pts) in the high band and a genuinely
+# hot real entity (900+ pts) firmly in critical.
+RISK_SATURATION_POINTS = float(os.getenv("RISK_SATURATION_POINTS", "140"))
+
 # Thread-local storage: each thread gets its own ClickHouse connection.
 # asyncio.to_thread() spawns one thread per parallel query, so without this
 # all 7 concurrent queries share one session → "concurrent queries in same session" error.
@@ -1627,7 +1637,14 @@ def get_entity_risk_ranking(dimension: str = "ip", half_life_hours: int = 72,
     out = []
     for r in rows:
         pts = float(r.get("risk_points") or 0)
-        score = int(max(0, min(100, round(pts / top * 100))))   # relative to hottest entity
+        # ABSOLUTE score via soft saturation: 100 * pts/(pts+K). Monotonic in pts
+        # so the ranking order is unchanged, but the busiest entity is no longer
+        # pinned to 100 — on a quiet day the worst entity scores low, as it should.
+        score = int(round(100 * pts / (pts + RISK_SATURATION_POINTS))) if pts > 0 else 0
+        # Kept for context ("worst thing on the network right now"): where this
+        # entity sits relative to the busiest, which is a different question from
+        # how dangerous it is in absolute terms.
+        rel_pct = int(max(0, min(100, round(pts / top * 100))))
         band = ("critical" if score >= 80 else "high" if score >= 55
                 else "medium" if score >= 30 else "low")
 
@@ -1663,7 +1680,8 @@ def get_entity_risk_ranking(dimension: str = "ip", half_life_hours: int = 72,
             "dimension":   dimension,
             "events":      int(r.get("events") or 0),
             "risk_points": round(pts, 1),
-            "score":       score,            # 0-100 relative ranking, for bars/triage
+            "score":       score,            # 0-100 ABSOLUTE (saturating), for bars/triage
+            "rel_pct":     rel_pct,          # where it sits vs the busiest entity
             "band":        band,
             "max_level":   int(r.get("max_level") or 0),
             "critical":    int(r.get("n_critical") or 0),

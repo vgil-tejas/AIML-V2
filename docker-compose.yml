@@ -53,6 +53,9 @@ services:
       # Demo attack replay writes synthetic rows into the store — OFF by default.
       # Never set true on the .23 production box (it would pollute the 26M dataset).
       - DEMO_MODE=${DEMO_MODE:-false}
+      # Risk-score saturation constant (score = 100*pts/(pts+K)). Unset => 140
+      # (conservative, production). A demo box lowers it so a live attack reddens.
+      - RISK_SATURATION_POINTS=${RISK_SATURATION_POINTS:-140}
       - AI_API_KEY=${GROQ_API_KEY:-${AI_API_KEY}}
       - AI_MODEL=${GROQ_MODEL:-${AI_MODEL:-llama-3.3-70b-versatile}}
       # Every AI feature actually uses the FAST model — forward it so an on-prem /

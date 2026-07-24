@@ -3749,6 +3749,11 @@ async def playbook_label_queue(limit: int = 12):
 
 # -- Risk-Based Alerting (RBA): per-entity decaying risk watch-list -----------
 
+# Mirror of clickhouse_client.RISK_SATURATION_POINTS so the published model and
+# the actual computation can never silently disagree.
+_RISK_SATURATION = float(os.getenv("RISK_SATURATION_POINTS", "140"))
+
+
 @app.get("/api/entity-risk")
 async def entity_risk(dim: str = "ip", half_life_hours: int = 72,
                       window_days: int = 30, limit: int = 50):
@@ -3775,19 +3780,21 @@ async def entity_risk(dim: str = "ip", half_life_hours: int = 72,
         # The scoring model, published so the UI can show an analyst WHY an
         # entity scored what it did. A score nobody can defend gets ignored.
         "scoring": {
-            "method": "time-decayed severity sum, ranked relative to the busiest entity",
+            "method": "time-decayed severity sum, mapped to an absolute 0-100 by soft saturation",
             "weights": {"critical": 10, "high": 6.5, "medium": 3.5, "low": 1, "other": 0.5},
             "half_life_hours": half_life_hours,
             "window_days": window_days,
+            "saturation_points": _RISK_SATURATION,
             "steps": [
                 f"Every alert for the {dim} in the last {window_days} days scores points by severity "
                 f"(critical 10, high 6.5, medium 3.5, low 1).",
                 f"Each alert's points decay with age — half-life {half_life_hours}h, so an alert "
                 f"{half_life_hours}h old counts half as much as one right now.",
                 "Those decayed points are summed into the entity's raw risk points.",
-                "The 0-100 score is the entity's raw points as a percentage of the highest-scoring "
-                "entity in this window — so 100 always means 'the busiest thing on the network right "
-                "now', not an absolute danger level.",
+                f"The 0-100 score is absolute: 100 × points ÷ (points + {_RISK_SATURATION:g}). "
+                f"An entity needs {_RISK_SATURATION:g} decayed points to reach 50 and roughly "
+                f"{_RISK_SATURATION*4:g} to reach 80 — so a quiet window genuinely reads low, and "
+                "the score reflects real danger, not just who is busiest.",
             ],
             "bands": {"critical": ">= 80", "high": "55-79", "medium": "30-54", "low": "< 30"},
         },

@@ -2133,7 +2133,7 @@
   <!-- BUMP this version on every theme.css change — it is what invalidates
        browsers that cached the old URL. Forgetting it while nginx cached CSS
        for 1h caused the unstyled-page bug on 17 Jul 2026. -->
-  <link rel="stylesheet" href="theme.css?v=43-ist">
+  <link rel="stylesheet" href="theme.css?v=44-score">
 
   <style>
     /* ══════════════════════════════════════════════════════════════════════
@@ -3644,12 +3644,23 @@ tr:hover td{background:#161b22}</style></head>
       el.className = 'toast ' + type; el.textContent = msg;
       w.appendChild(el); setTimeout(() => el.remove(), 3500);
     }
+    // A failed fetch that silently becomes 0 is worse than a visible error: the
+    // dashboard looks calm while it's actually blind. Announce each dead endpoint
+    // once (console + toast) so "0 threats" can't quietly mean "the call 404'd".
+    window.__apiFails = window.__apiFails || {};
+    function flagApiFail(url, why) {
+      const key = String(url).split('?')[0];
+      if (window.__apiFails[key]) return;               // once per endpoint
+      window.__apiFails[key] = why;
+      console.warn('[CyberSentinel] API failed:', key, '→', why, '· the UI will read 0/empty for this — not a real zero.');
+      try { toast('Data source unavailable: ' + key.replace(/^.*(\/api\/|\/ml\/)/, '$1') + ' — showing 0', 'err'); } catch (_) {}
+    }
     async function get(url) {
       try {
         const r = await fetch(url);
         if (!r.ok) throw new Error('HTTP ' + r.status);
         return await r.json();
-      } catch (e) { toast('API: ' + e.message, 'err'); return null; }
+      } catch (e) { flagApiFail(url, e.message); return null; }
     }
     async function post(url, body = null) {
       try {
@@ -4095,26 +4106,13 @@ tr:hover td{background:#161b22}</style></head>
       });
       if (hot) {
         HOT_IPS = hot;
-        document.getElementById('hot-count').textContent =
-          `${hot.length} IPs · ${hot.reduce((n, h) => n + (h.user_count || 0), 0)} users · ${hot.reduce((n, h) => n + (h.host_count || 0), 0)} hosts`;
-        // Response queue — now resolved to identity, not bare IP.
-        document.getElementById('watchlist').innerHTML = hot.length
-          ? hot.slice(0, 6).map(h => {
-            const [threatName, threatCount] = topThreat(h.threat_types);
-            const [sev] = severityRank(h.severities);
-            const score = Math.min(99, Math.max(12, Math.round((Number(h.total || 0) * .18) + (sev === 'critical' ? 42 : sev === 'high' ? 28 : sev === 'medium' ? 16 : 9))));
-            return `<div class="watch-item" onclick="goTrail('${h.ip}')">
-          <div class="watch-ip">${identityTitle(h.identity, h.ip)}</div>
-          <div class="watch-meta">${h.ip} · ${String(threatName).replace(/_/g, ' ')} · ${Number(h.total || 0).toLocaleString()} events</div>
-          <div class="watch-score ${sev}">${score}</div>
-        </div>`;
-          }).join('')
-          : '<div class="empty" style="padding:18px">No hot IPs in the current index</div>';
-        // Entity spotlight — top sources as rich cards showing who/what was on them.
-        document.getElementById('entity-spot').innerHTML = hot.length
-          ? hot.slice(0, 6).map(renderEntityCard).join('')
-          : '<div class="empty" style="padding:18px">No active entities</div>';
-        renderHotTable();
+        // The Overview watchlist / entity-spotlight / hot-count DOM was removed
+        // when the Overview became the embedded deck (overview-neural.html), which
+        // renders its own queue from /api/entity-risk. Writing to those dead ids
+        // threw on every refresh (silently caught). The two watchlists users
+        // actually see — the Incidents #rba-body and the deck #queue — both use
+        // the real /api/entity-risk score, so the number is already consistent.
+        renderHotTable();   // hot-tbody, still live on the Sources view (self-guards)
       }
       if (mlh) {
         const fleetMlDot = document.getElementById('fleet-ml-dot');
@@ -4804,7 +4802,7 @@ tr:hover td{background:#161b22}</style></head>
           { k: 'ACT 2 · 22:11', t: 'Brute Force', n: 40,
             cap: 'The attacker locks onto BANK-DB-01 and hammers the SSH service — dozens of failed logins as service account svc_backup. CyberSentinel\'s baseline for this IP has already broken.',
             metric: 'failed authentications', icon: '🔨', tone: 'elevated', dur: 6500 },
-          { k: 'ACT 3 · 22:29', t: 'The Breach', n: 100, suffix: '/100',
+          { k: 'ACT 3 · 22:29', t: 'The Breach', n: 100, suffix: '/100', liveScore: '10.0.10.5',
             cap: 'One login succeeds. A legacy SIEM sees "authentication success" — a green event. CyberSentinel sees a success after 40 failures on a crown-jewel host and raises the risk to critical.',
             metric: 'risk score — patient zero 10.0.10.5', icon: '🚨', tone: 'critical', dur: 7000 },
           { k: 'ACT 4 · 22:40', t: 'Lateral Movement', n: 5,
@@ -4934,7 +4932,27 @@ tr:hover td{background:#161b22}</style></head>
         <div class="film-act">${a.icon} ${a.t}</div>
         <div class="film-metric"><span class="film-num" id="film-num">0</span>${a.suffix ? `<span class="film-suffix">${a.suffix}</span>` : ''}<span class="film-metriclabel">${a.metric}</span></div>
         <div class="film-cap">${a.cap}</div>`;
-      _countUp(document.getElementById('film-num'), a.n);
+      // A scripted act counts up to its written number. But an act flagged
+      // `liveScore` shows a REAL risk score — pull it from /api/entity-risk (the
+      // same number the dashboard shows once the demo attack has landed) so the
+      // film's climax can never contradict the live product. Falls back to the
+      // scripted number if the store hasn't caught up yet.
+      if (a.liveScore) {
+        document.getElementById('film-num').textContent = '···';
+        _filmLiveScore(a.liveScore, a.n);
+      } else {
+        _countUp(document.getElementById('film-num'), a.n);
+      }
+    }
+    async function _filmLiveScore(entity, fallback) {
+      let score = fallback;
+      try {
+        const r = await get(`${API}/entity-risk?dim=ip&limit=50`);
+        const e = r && r.entities && r.entities.find(x => x.entity === entity);
+        if (e && Number.isFinite(e.score)) score = e.score;
+      } catch (_) {}
+      const el = document.getElementById('film-num');
+      if (el) _countUp(el, score);
     }
     function _countUp(el, to) {
       if (!el) return;
@@ -5952,7 +5970,7 @@ tr:hover td{background:#161b22}</style></head>
           <div id="why-${key}" style="display:none"></div>
         </div>`;
       }).join('');
-      body.innerHTML = `<div style="font-size:11px;color:var(--muted);margin-bottom:6px">Top ${r.entities.length} by decaying risk (half-life ${r.half_life_hours}h, ${r.window_days}d window) · score is relative to the hottest ${label.toLowerCase()} — <b>click any score</b> for the breakdown</div>${rows}`;
+      body.innerHTML = `<div style="font-size:11px;color:var(--muted);margin-bottom:6px">Top ${r.entities.length} by decaying risk (half-life ${r.half_life_hours}h, ${r.window_days}d window) · score is absolute 0-100 (a quiet window reads low) — <b>click any score</b> for the breakdown</div>${rows}`;
     }
 
     /* ── "Why is this scored 87?" ──────────────────────────────────────────
@@ -5988,9 +6006,15 @@ tr:hover td{background:#161b22}</style></head>
       const hl = (RBA_SCORING && RBA_SCORING.half_life_hours) || 72;
       const retained = e.age_hours != null ? Math.pow(0.5, e.age_hours / hl) : null;
 
-      const verdict = e.is_top
-        ? `This is the highest-scoring entity in the window, so it <b>defines the 100</b> — every other score is measured against it.`
-        : `It scored <b>${e.risk_points} raw points</b> against the top entity's ${Math.round(e.risk_points / (e.score || 1) * 100)}, giving <b>${e.score}/100</b>.`;
+      // Absolute scoring: the number is 100·pts/(pts+K), not a share of the busiest
+      // entity. Explain it that way, and separately note if it also happens to be
+      // the loudest thing in the window — a different fact from how dangerous it is.
+      const sat = (RBA_SCORING && RBA_SCORING.saturation_points) || 140;
+      const verdict = `Score is <b>${e.score}/100</b> — an absolute reading: ${e.risk_points} decayed points map through `
+        + `100 × pts ÷ (pts + ${sat}), where ${sat} points would be 50.`
+        + (e.is_top
+            ? ` It is also the <b>busiest entity</b> in this window${e.rel_pct != null && e.rel_pct < 60 ? ' — but the network is quiet right now, so even the top entity isn\'t alarming.' : '.'}`
+            : (e.rel_pct != null ? ` It sits at <b>${e.rel_pct}%</b> of the busiest entity's activity.` : ''));
 
       el.innerHTML = `
         <div style="margin:8px 0 4px 44px;padding:11px 13px;background:var(--bg3);border:1px solid var(--border);border-left:3px solid var(--accent);border-radius:7px">
@@ -7582,7 +7606,15 @@ tr:hover td{background:#161b22}</style></head>
     /* One pull feeds every readout — the rail nodes AND the service-deck vitals.
        Real values only: anything the API doesn't return stays a dash. */
     async function syncLive() {
-      const g = async u => { try { const r = await fetch(u); return r.ok ? await r.json() : null; } catch (e) { return null; } };
+      // A failed call must not masquerade as a real 0 (see flagApiFail): warn once
+      // per endpoint so a dead route is visible instead of a calm, wrong zero.
+      const g = async u => {
+        try {
+          const r = await fetch(u);
+          if (!r.ok) { flagApiFail(u, 'HTTP ' + r.status); return null; }
+          return await r.json();
+        } catch (e) { flagApiFail(u, e.message || 'network error'); return null; }
+      };
       const fmt = n => n >= 10000 ? Math.round(n / 1000) + 'k' : n >= 1000 ? (n / 1000).toFixed(1) + 'k' : String(n);
 
       const [ov, anom, ueba, inc, recs, tele] = await Promise.all([
