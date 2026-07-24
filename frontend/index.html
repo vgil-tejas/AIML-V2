@@ -2133,7 +2133,7 @@
   <!-- BUMP this version on every theme.css change — it is what invalidates
        browsers that cached the old URL. Forgetting it while nginx cached CSS
        for 1h caused the unstyled-page bug on 17 Jul 2026. -->
-  <link rel="stylesheet" href="theme.css?v=44-score">
+  <link rel="stylesheet" href="theme.css?v=45-attackmap">
 
   <style>
     /* ══════════════════════════════════════════════════════════════════════
@@ -4798,19 +4798,24 @@ tr:hover td{background:#161b22}</style></head>
         acts: [
           { k: 'ACT 1 · 22:04', t: 'Reconnaissance', n: 30,
             cap: 'An external host begins probing the bank\'s internal network — a port sweep across five hosts. A legacy tool logs 30 low-priority "connection denied" lines and moves on.',
-            metric: 'ports swept across internal hosts', icon: '🛰️', tone: 'watch', dur: 6500 },
+            metric: 'ports swept across internal hosts', icon: '🛰️', tone: 'watch', dur: 6500,
+            scene: { mode: 'scan', from: 'ext', to: ['fw', 'db', 's1', 's2', 'web'], stage: 0 } },
           { k: 'ACT 2 · 22:11', t: 'Brute Force', n: 40,
             cap: 'The attacker locks onto BANK-DB-01 and hammers the SSH service — dozens of failed logins as service account svc_backup. CyberSentinel\'s baseline for this IP has already broken.',
-            metric: 'failed authentications', icon: '🔨', tone: 'elevated', dur: 6500 },
+            metric: 'failed authentications', icon: '🔨', tone: 'elevated', dur: 6500,
+            scene: { mode: 'barrage', from: 'ext', to: ['db'], stage: 1 } },
           { k: 'ACT 3 · 22:29', t: 'The Breach', n: 100, suffix: '/100', liveScore: '10.0.10.5',
             cap: 'One login succeeds. A legacy SIEM sees "authentication success" — a green event. CyberSentinel sees a success after 40 failures on a crown-jewel host and raises the risk to critical.',
-            metric: 'risk score — patient zero 10.0.10.5', icon: '🚨', tone: 'critical', dur: 7000 },
+            metric: 'risk score — patient zero 10.0.10.5', icon: '🚨', tone: 'critical', dur: 7000,
+            scene: { mode: 'breach', from: 'ext', to: ['db'], stage: 2, gauge: true } },
           { k: 'ACT 4 · 22:40', t: 'Lateral Movement', n: 5,
             cap: 'The compromised host fans out — SMB and RDP to hosts it has never touched in 15 days of baseline. This is the shape of a breach spreading. The engines agree; an incident is born.',
-            metric: 'internal hosts newly reached', icon: '🕸️', tone: 'critical', dur: 7000 },
+            metric: 'internal hosts newly reached', icon: '🕸️', tone: 'critical', dur: 7000,
+            scene: { mode: 'spread', from: 'db', to: ['s1', 's2', 's3', 'web'], stage: 3 } },
           { k: 'ACT 5 · 22:52', t: 'Exfiltration — Blocked', n: 1,
             cap: 'A large outbound transfer to the attacker is attempted. DLP fires, the firewall blocks it, and CyberSentinel has already written the verdict and staged the response playbook.',
-            metric: 'exfil attempt — blocked at the edge', icon: '🛡️', tone: 'ok', dur: 7000 },
+            metric: 'exfil attempt — blocked at the edge', icon: '🛡️', tone: 'ok', dur: 7000,
+            scene: { mode: 'block', from: 'db', to: ['ext'], stage: 4 } },
         ],
         finale: { legacy: 118,
           legacyList: ['30 "connection denied"', '40 "auth failed"', '1 "auth success" (looks fine)', '35 internal connections', '12 DLP hits'],
@@ -4823,13 +4828,16 @@ tr:hover td{background:#161b22}</style></head>
         acts: [
           { k: 'ACT 1 · 01:12', t: 'Credential Flood', n: 120,
             cap: 'Six IPs across six countries hammer the retail login with leaked username/password pairs. Each miss is a harmless "invalid credentials" line — but the volume and spread is the tell. CyberSentinel groups them into one campaign.',
-            metric: 'failed logins on /retail/login', icon: '🌊', tone: 'watch', dur: 6500 },
+            metric: 'failed logins on /retail/login', icon: '🌊', tone: 'watch', dur: 6500,
+            scene: { mode: 'barrage', from: 'ext', to: ['web'], stage: 0 } },
           { k: 'ACT 2 · 01:34', t: 'Account Takeover', n: 4,
             cap: 'Four pairs actually work. A legacy view shows four normal "login success" events. CyberSentinel flags impossible travel — the same customers logging in from a new device and a new country minutes apart — and escalates.',
-            metric: 'customer accounts taken over', icon: '🔓', tone: 'elevated', dur: 7000 },
+            metric: 'customer accounts taken over', icon: '🔓', tone: 'elevated', dur: 7000,
+            scene: { mode: 'breach', from: 'ext', to: ['web'], stage: 1, gauge: true, gaugeEntity: '10.0.30.9' } },
           { k: 'ACT 3 · 01:41', t: 'Fraudulent Payee — Blocked', n: 2,
             cap: 'From two hijacked accounts, a new beneficiary is added and a high-value transfer is attempted. The fraud engine fires on "new payee on a freshly-accessed account", the transfers are blocked, and a verdict is written for the fraud team.',
-            metric: 'fraudulent transfers stopped', icon: '🛡️', tone: 'ok', dur: 7000 },
+            metric: 'fraudulent transfers stopped', icon: '🛡️', tone: 'ok', dur: 7000,
+            scene: { mode: 'block', from: 'web', to: ['ext'], stage: 2 } },
         ],
         finale: { legacy: 126,
           legacyList: ['120 "invalid credentials"', '4 "login success" (look fine)', '2 "beneficiary added"', 'no link between them', 'analyst drowns in login noise'],
@@ -4842,22 +4850,271 @@ tr:hover td{background:#161b22}</style></head>
         acts: [
           { k: 'ACT 1 · 02:06', t: 'Off-Hours Access', n: 1,
             cap: 'DBA r.malhotra logs into the core banking database at 2 a.m. — a valid login with valid credentials. Nothing a rule would catch. CyberSentinel notes it: this user has never worked these hours in 30 days of baseline.',
-            metric: 'privileged login outside baseline hours', icon: '🌙', tone: 'watch', dur: 6500 },
+            metric: 'privileged login outside baseline hours', icon: '🌙', tone: 'watch', dur: 6500,
+            scene: { mode: 'scan', from: 'dba', to: ['db'], stage: 0 } },
           { k: 'ACT 2 · 02:14', t: 'Bulk PII Read', n: 30,
             cap: 'Then the queries: bulk SELECTs pulling the entire customers table — ten times this user\'s normal row volume. Every query is "authorised". The behaviour, not the permission, is the signal, and UEBA raises the risk.',
-            metric: 'abnormal bulk reads of customer PII', icon: '🗄️', tone: 'elevated', dur: 7000 },
+            metric: 'abnormal bulk reads of customer PII', icon: '🗄️', tone: 'elevated', dur: 7000,
+            scene: { mode: 'barrage', from: 'dba', to: ['db'], stage: 1, gauge: true, gaugeEntity: '10.0.40.12' } },
           { k: 'ACT 3 · 02:29', t: 'USB Staging', n: 8,
             cap: 'The pulled data is written to a USB drive — customers_00.csv through 07. DLP logs each write. A legacy SIEM has these events in three different silos; CyberSentinel ties login, reads and USB to one identity.',
-            metric: 'sensitive files copied to removable media', icon: '💾', tone: 'critical', dur: 7000 },
+            metric: 'sensitive files copied to removable media', icon: '💾', tone: 'critical', dur: 7000,
+            scene: { mode: 'breach', from: 'dba', to: ['dba'], stage: 2 } },
           { k: 'ACT 4 · 02:41', t: 'Cloud Exfil — Blocked', n: 6,
             cap: 'Finally, an upload to personal cloud storage. DLP blocks the transfer at the proxy, and CyberSentinel has already assembled the full insider case — one identity, one timeline, one verdict for HR and legal.',
-            metric: 'exfil uploads blocked at the proxy', icon: '🛡️', tone: 'ok', dur: 7000 },
+            metric: 'exfil uploads blocked at the proxy', icon: '🛡️', tone: 'ok', dur: 7000,
+            scene: { mode: 'block', from: 'dba', to: ['ext'], stage: 3 } },
         ],
         finale: { legacy: 45,
           legacyList: ['1 "privileged login"', '30 "query executed"', '8 "file written to USB"', '6 "upload" (blocked)', 'all authorised, all separate'],
           usList: ['✓ One insider case, one identity', '✓ Off-hours + bulk-read anomaly (UEBA)', '✓ Full timeline: login → read → USB → cloud', '✓ Behaviour flagged despite valid access', '✓ Verdict staged for HR & legal'] },
       },
     };
+    // ══════════════════════════════════════════════════════════════════════
+    //  CINEMATIC ATTACK MAP — a live canvas network behind the demo film.
+    //  Nodes are the bank's hosts inside a perimeter; the attacker fires beams
+    //  that travel, land, and ignite hosts red. A risk gauge sweeps to the REAL
+    //  score and a kill-chain strip lights up per act. Pure canvas 2D, one rAF.
+    // ══════════════════════════════════════════════════════════════════════
+    const FilmMap = (() => {
+      // ny values are kept in the upper ~62% so the broadcast lower-third never
+      // collides with a node label. ext sits outside the perimeter (the attacker).
+      const NODES = {
+        ext: { nx: .09, ny: .40, label: '⚠ EXTERNAL', ext: true },
+        fw:  { nx: .40, ny: .40, label: 'BANK-FW-01' },
+        dba: { nx: .55, ny: .16, label: 'BANK-DBA-07' },
+        db:  { nx: .70, ny: .26, label: 'BANK-DB-01', crown: true },
+        web: { nx: .60, ny: .44, label: 'BANK-WEB-01' },
+        s1:  { nx: .85, ny: .30, label: 'BANK-SRV-01' },
+        s2:  { nx: .87, ny: .50, label: 'BANK-SRV-02' },
+        s3:  { nx: .74, ny: .56, label: 'BANK-SRV-03' },
+      };
+      const LINKS = [['ext', 'fw'], ['fw', 'dba'], ['fw', 'db'], ['fw', 'web'],
+                     ['fw', 's1'], ['fw', 's2'], ['fw', 's3'], ['db', 's1'], ['db', 's3']];
+      const COL = { ok: '#5e6ad2', probe: '#22d3ee', target: '#f2c94c', hit: '#eb5757', safe: '#4cb782' };
+      let cv, ctx, gcv, gctx, W, H, dpr, raf = 0, last = 0, spawnT = null;
+      let beams = [], waves = [], N = {}, gauge = { cur: 0, tgt: 0, on: false };
+      let running = false;
+
+      function reset() {
+        N = {};
+        for (const k in NODES) N[k] = Object.assign({ id: k, state: 'ok', glow: 0, pulse: 0, shake: 0, health: 1 }, NODES[k]);
+        beams = []; waves = []; gauge = { cur: 0, tgt: 0, on: false };
+        if (spawnT) { clearInterval(spawnT); spawnT = null; }
+      }
+      function size() {
+        if (!cv) return;
+        const r = cv.getBoundingClientRect();
+        dpr = Math.min(2, window.devicePixelRatio || 1);
+        W = r.width; H = r.height;
+        cv.width = W * dpr; cv.height = H * dpr; ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      }
+      const px = n => ({ x: n.nx * W, y: n.ny * H });
+
+      function start() {
+        cv = document.getElementById('film-canvas'); if (!cv) return;
+        ctx = cv.getContext('2d');
+        gcv = document.getElementById('film-gauge'); gctx = gcv && gcv.getContext('2d');
+        reset(); size();
+        window.addEventListener('resize', size);
+        running = true; last = performance.now();
+        cancelAnimationFrame(raf); raf = requestAnimationFrame(loop);
+      }
+      function stop() {
+        running = false; cancelAnimationFrame(raf);
+        if (spawnT) { clearInterval(spawnT); spawnT = null; }
+        window.removeEventListener('resize', size);
+      }
+
+      // ── choreography ───────────────────────────────────────────────────────
+      function playScene(sc) {
+        if (!sc || !running) return;
+        if (spawnT) { clearInterval(spawnT); spawnT = null; }
+        const from = N[sc.from] || N.ext;
+        const targets = (sc.to || []).map(t => N[t]).filter(Boolean);
+        gauge.on = !!sc.gauge;
+
+        if (sc.mode === 'scan') {
+          let i = 0;
+          spawnT = setInterval(() => {
+            const t = targets[i % targets.length];
+            fire(from, t, COL.probe, () => { t.state = 'probe'; t.pulse = 1; setTimeout(() => { if (t.state === 'probe') t.state = 'ok'; }, 500); });
+            i++;
+          }, 380);
+        } else if (sc.mode === 'barrage') {
+          const t = targets[0]; if (t) t.state = 'target';
+          spawnT = setInterval(() => {
+            const t2 = targets[0]; if (!t2) return;
+            fire(from, t2, COL.hit, () => { t2.pulse = 1; t2.shake = 1; t2.health = Math.max(.12, t2.health - .05); });
+          }, 150);
+        } else if (sc.mode === 'breach') {
+          const t = targets[0];
+          let k = 0;
+          spawnT = setInterval(() => {
+            if (!t) return;
+            fire(from, t, COL.hit, () => {
+              t.pulse = 1; t.shake = 1;
+              if (++k >= 3) { ignite(t); clearInterval(spawnT); spawnT = null; }
+            });
+          }, 260);
+        } else if (sc.mode === 'spread') {
+          from.state = 'hit'; from.glow = 1;
+          let i = 0;
+          spawnT = setInterval(() => {
+            if (i >= targets.length) { clearInterval(spawnT); spawnT = null; return; }
+            const t = targets[i++];
+            fire(from, t, COL.hit, () => ignite(t, true));
+          }, 620);
+        } else if (sc.mode === 'block') {
+          from.state = 'hit'; from.glow = 1;
+          const dest = targets[0] || N.ext;
+          spawnT = setInterval(() => {
+            fire(from, dest, COL.safe, null, .62);   // stops at the perimeter — blocked
+            const p = blockPoint(from, dest);
+            waves.push({ x: p.x, y: p.y, r: 6, max: 46, a: 1, col: COL.safe });
+          }, 520);
+        }
+      }
+      function fire(a, b, col, onArrive, stopAt) {
+        if (!a || !b) return;
+        beams.push({ a, b, t: 0, sp: .6 + Math.random() * .5, col, onArrive, stopAt: stopAt || 1 });
+      }
+      function blockPoint(a, b) { const pa = px(a), pb = px(b); return { x: pa.x + (pb.x - pa.x) * .62, y: pa.y + (pb.y - pa.y) * .62 }; }
+      function ignite(n, small) {
+        if (!n) return;
+        n.state = 'hit'; n.glow = 1; n.pulse = 1;
+        const p = px(n);
+        waves.push({ x: p.x, y: p.y, r: 8, max: small ? 70 : 140, a: 1, col: COL.hit });
+        if (!small) fireFlash(n);
+      }
+      function fireFlash(n) {
+        const fl = document.getElementById('film-flash'); if (!fl) return;
+        const p = px(n);
+        fl.style.setProperty('--fx', (p.x / W * 100) + '%');
+        fl.style.setProperty('--fy', ((64 + p.y) / (H + 156) * 100) + '%');
+        fl.classList.remove('fire'); void fl.offsetWidth; fl.classList.add('fire');
+      }
+      function setGauge(v) { gauge.tgt = Math.max(0, Math.min(100, v || 0)); gauge.on = true; }
+
+      // ── render loop ────────────────────────────────────────────────────────
+      function loop(now) {
+        if (!running) return;
+        const dt = Math.min(.05, (now - last) / 1000); last = now;
+        ctx.clearRect(0, 0, W, H);
+        drawPerimeter();
+        drawLinks();
+        // beams
+        for (let i = beams.length - 1; i >= 0; i--) {
+          const bm = beams[i]; bm.t += dt * bm.sp;
+          drawBeam(bm);
+          if (bm.t >= bm.stopAt) { if (bm.onArrive) bm.onArrive(); beams.splice(i, 1); }
+        }
+        // shockwaves
+        for (let i = waves.length - 1; i >= 0; i--) {
+          const w = waves[i]; w.r += dt * 190; w.a -= dt * 1.5;
+          if (w.a <= 0) { waves.splice(i, 1); continue; }
+          ctx.beginPath(); ctx.arc(w.x, w.y, w.r, 0, 7); ctx.strokeStyle = rgba(w.col, w.a); ctx.lineWidth = 2; ctx.stroke();
+        }
+        // nodes
+        for (const k in N) drawNode(N[k], dt);
+        drawGauge();
+        raf = requestAnimationFrame(loop);
+      }
+      function rgba(hex, a) {
+        const n = parseInt(hex.slice(1), 16);
+        return `rgba(${n >> 16 & 255},${n >> 8 & 255},${n & 255},${Math.max(0, a)})`;
+      }
+      function drawPerimeter() {
+        const x = .30 * W, y = .04 * H, w = .68 * W, h = .64 * H;
+        ctx.save(); ctx.setLineDash([6, 8]); ctx.strokeStyle = 'rgba(123,134,230,.22)'; ctx.lineWidth = 1.2;
+        roundRect(x, y, w, h, 18); ctx.stroke(); ctx.setLineDash([]);
+        ctx.fillStyle = 'rgba(123,134,230,.5)'; ctx.font = '600 10px "JetBrains Mono",monospace';
+        ctx.fillText('BANK PERIMETER', x + 12, y + 18); ctx.restore();
+      }
+      function drawLinks() {
+        ctx.lineWidth = 1;
+        for (const [a, b] of LINKS) {
+          const pa = px(N[a]), pb = px(N[b]);
+          ctx.beginPath(); ctx.moveTo(pa.x, pa.y); ctx.lineTo(pb.x, pb.y);
+          ctx.strokeStyle = 'rgba(255,255,255,.06)'; ctx.stroke();
+        }
+      }
+      function drawBeam(bm) {
+        const pa = px(bm.a), pb = px(bm.b);
+        const hx = pa.x + (pb.x - pa.x) * bm.t, hy = pa.y + (pb.y - pa.y) * bm.t;
+        const tailT = Math.max(0, bm.t - .18);
+        const tx = pa.x + (pb.x - pa.x) * tailT, ty = pa.y + (pb.y - pa.y) * tailT;
+        const g = ctx.createLinearGradient(tx, ty, hx, hy);
+        g.addColorStop(0, rgba(bm.col, 0)); g.addColorStop(1, rgba(bm.col, .9));
+        ctx.beginPath(); ctx.moveTo(tx, ty); ctx.lineTo(hx, hy); ctx.strokeStyle = g; ctx.lineWidth = 2; ctx.stroke();
+        ctx.beginPath(); ctx.arc(hx, hy, 3.2, 0, 7); ctx.fillStyle = '#fff'; ctx.shadowColor = bm.col; ctx.shadowBlur = 12; ctx.fill(); ctx.shadowBlur = 0;
+      }
+      function drawNode(n, dt) {
+        const p = px(n); const col = COL[n.state] || COL.ok;
+        n.pulse = Math.max(0, n.pulse - dt * 1.6);
+        n.shake = Math.max(0, n.shake - dt * 3);
+        const jitter = n.shake > 0 ? (Math.random() - .5) * 6 * n.shake : 0;
+        const x = p.x + jitter, y = p.y + jitter * .6;
+        const base = n.crown ? 15 : 11;
+        const r = base + n.pulse * 7;
+        // glow
+        const gl = ctx.createRadialGradient(x, y, 0, x, y, r * 3.4);
+        const gi = (n.state === 'hit' ? .55 : n.state === 'target' ? .4 : .28) + n.pulse * .3;
+        gl.addColorStop(0, rgba(col, gi)); gl.addColorStop(1, rgba(col, 0));
+        ctx.fillStyle = gl; ctx.beginPath(); ctx.arc(x, y, r * 3.4, 0, 7); ctx.fill();
+        // core
+        ctx.beginPath(); ctx.arc(x, y, r, 0, 7); ctx.fillStyle = n.ext ? '#1a1030' : '#0b1020';
+        ctx.strokeStyle = col; ctx.lineWidth = 2; ctx.fill(); ctx.stroke();
+        // health ring while under barrage
+        if (n.state === 'target' && n.health < 1) {
+          ctx.beginPath(); ctx.arc(x, y, r + 5, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * n.health);
+          ctx.strokeStyle = rgba(COL.hit, .9); ctx.lineWidth = 2.5; ctx.stroke();
+        }
+        // crown mark
+        if (n.crown) { ctx.fillStyle = col; ctx.font = '11px sans-serif'; ctx.textAlign = 'center'; ctx.fillText('◆', x, y + 4); }
+        // label
+        ctx.fillStyle = n.state === 'ok' ? 'rgba(199,204,210,.75)' : '#fff';
+        ctx.font = '600 10px "JetBrains Mono",monospace'; ctx.textAlign = 'center';
+        ctx.fillText(n.label, x, y + r + 15);
+        ctx.textAlign = 'left';
+      }
+      function drawGauge() {
+        if (!gctx) return;
+        gauge.cur += (gauge.tgt - gauge.cur) * 0.06;
+        const show = gauge.on;
+        gcv.style.opacity = show ? 1 : 0; gcv.style.transition = 'opacity .4s';
+        if (!show) return;
+        const s = 150, c = s / 2, R = 56; gctx.clearRect(0, 0, s, s);
+        const a0 = Math.PI * .75, a1 = Math.PI * 2.25;
+        gctx.lineCap = 'round';
+        gctx.beginPath(); gctx.arc(c, c, R, a0, a1); gctx.strokeStyle = 'rgba(255,255,255,.1)'; gctx.lineWidth = 9; gctx.stroke();
+        const v = gauge.cur / 100, col = gauge.cur >= 80 ? COL.hit : gauge.cur >= 55 ? COL.target : COL.ok;
+        gctx.beginPath(); gctx.arc(c, c, R, a0, a0 + (a1 - a0) * v); gctx.strokeStyle = col; gctx.lineWidth = 9;
+        gctx.shadowColor = col; gctx.shadowBlur = 16; gctx.stroke(); gctx.shadowBlur = 0;
+        gctx.fillStyle = '#fff'; gctx.font = '700 34px "JetBrains Mono",monospace'; gctx.textAlign = 'center';
+        gctx.fillText(Math.round(gauge.cur), c, c + 6);
+        gctx.fillStyle = 'rgba(199,204,210,.7)'; gctx.font = '600 9px "JetBrains Mono",monospace';
+        gctx.fillText('RISK', c, c + 22);
+      }
+      function roundRect(x, y, w, h, r) { ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath(); }
+
+      return { start, stop, reset, playScene, setGauge, size };
+    })();
+
+    // Kill-chain strip: one chip per act of the active film, lit up to `stage`.
+    function _filmBuildKC() {
+      const kc = document.getElementById('film-kc'); if (!kc) return;
+      kc.innerHTML = _activeFilm().acts.map((a, i) =>
+        `<div class="film-kc-stage" data-i="${i}"><div class="film-kc-bar"></div><div class="film-kc-txt">${escapeHTML(a.t)}</div></div>`).join('');
+    }
+    function _filmSetStage(idx, safe) {
+      document.querySelectorAll('#film-kc .film-kc-stage').forEach(el => {
+        const i = +el.dataset.i;
+        el.classList.toggle('on', i <= idx);
+        el.classList.toggle('safe', safe && i === idx);
+      });
+    }
+
     let _filmKey = 'breach';
     function _activeFilm() { return DEMO_FILMS[_filmKey]; }
     let _film = { i: 0, paused: false, timer: null, running: false };
@@ -4893,6 +5150,8 @@ tr:hover td{background:#161b22}</style></head>
       _film = { i: -1, paused: false, timer: null, running: true };
       document.getElementById('film-controls').style.display = '';
       document.getElementById('film-pause').textContent = '⏸ Pause';
+      FilmMap.stop(); _mapReady = false;            // fresh map for this film
+      _filmBuildKC();
       _filmSetPhase('intro');
       // Kick the real attack (this scenario) through the pipeline in the background.
       fetch(`${API}/demo/run?scenario=${encodeURIComponent(key)}`, { method: 'POST' }).catch(() => {});
@@ -4923,36 +5182,57 @@ tr:hover td{background:#161b22}</style></head>
       _filmProgress();
       if (!_film.paused) _film.timer = setTimeout(_filmNext, acts[_film.i].dur);
     }
+    let _mapReady = false;
     function _renderAct(a) {
       _filmSetPhase('act');
       const stage = document.getElementById('film-stage');
       stage.className = 'film-stage tone-' + a.tone;
+      // Text drops to a broadcast-style lower third so the attack map is the star.
       stage.innerHTML = `
-        <div class="film-kicker">${a.k}</div>
-        <div class="film-act">${a.icon} ${a.t}</div>
-        <div class="film-metric"><span class="film-num" id="film-num">0</span>${a.suffix ? `<span class="film-suffix">${a.suffix}</span>` : ''}<span class="film-metriclabel">${a.metric}</span></div>
-        <div class="film-cap">${a.cap}</div>`;
-      // A scripted act counts up to its written number. But an act flagged
-      // `liveScore` shows a REAL risk score — pull it from /api/entity-risk (the
-      // same number the dashboard shows once the demo attack has landed) so the
-      // film's climax can never contradict the live product. Falls back to the
-      // scripted number if the store hasn't caught up yet.
+        <div class="film-lower">
+          <div class="film-kicker">${a.k}</div>
+          <div class="film-lower-row">
+            <div class="film-act-sm">${a.icon} ${a.t}</div>
+            <div class="film-stat"><span class="film-num" id="film-num">0</span>${a.suffix ? `<span class="film-suffix">${a.suffix}</span>` : ''}<span class="film-metriclabel">${a.metric}</span></div>
+          </div>
+          <div class="film-cap">${a.cap}</div>
+        </div>`;
+      // The canvas only has a real size once phase=act makes it visible, so start
+      // (and size) the map here on the first act, then choreograph this scene.
+      if (!_mapReady) { FilmMap.start(); _mapReady = true; } else { FilmMap.size(); }
+      if (a.scene) {
+        FilmMap.playScene(a.scene);
+        _filmSetStage(a.scene.stage, a.scene.mode === 'block');
+      }
+      // A scripted act counts up to its written number. An act flagged `liveScore`
+      // shows a REAL risk score — pulled from /api/entity-risk (the same number
+      // the dashboard shows once the attack has landed), so the film's climax can
+      // never contradict the live product. The gauge sweeps to that same value.
       if (a.liveScore) {
         document.getElementById('film-num').textContent = '···';
-        _filmLiveScore(a.liveScore, a.n);
+        _filmLiveScore(a.liveScore, a.n, true);
       } else {
         _countUp(document.getElementById('film-num'), a.n);
+        if (a.scene && a.scene.gauge && a.scene.gaugeEntity) _filmGauge(a.scene.gaugeEntity);
       }
     }
-    async function _filmLiveScore(entity, fallback) {
+    async function _filmGaugeScore(entity, fallback) {
       let score = fallback;
       try {
         const r = await get(`${API}/entity-risk?dim=ip&limit=50`);
         const e = r && r.entities && r.entities.find(x => x.entity === entity);
         if (e && Number.isFinite(e.score)) score = e.score;
       } catch (_) {}
+      return score;
+    }
+    async function _filmLiveScore(entity, fallback, gauge) {
+      const score = await _filmGaugeScore(entity, fallback);
       const el = document.getElementById('film-num');
       if (el) _countUp(el, score);
+      if (gauge) FilmMap.setGauge(score);
+    }
+    async function _filmGauge(entity) {
+      FilmMap.setGauge(await _filmGaugeScore(entity, 0));
     }
     function _countUp(el, to) {
       if (!el) return;
@@ -4972,6 +5252,7 @@ tr:hover td{background:#161b22}</style></head>
     function _filmFinale() {
       _filmSetPhase('finale');
       clearTimeout(_film.timer);
+      FilmMap.stop(); _mapReady = false;
       const f = _activeFilm(), fin = f.finale;
       const stage = document.getElementById('film-stage');
       stage.className = 'film-stage tone-ok';
@@ -5007,6 +5288,7 @@ tr:hover td{background:#161b22}</style></head>
     function _filmSkip() { clearTimeout(_film.timer); _filmNext(); }
     function closeDemoFilm() {
       _film.running = false; clearTimeout(_film.timer);
+      FilmMap.stop(); _mapReady = false;
       const ov = document.getElementById('demo-film');
       if (ov) ov.classList.remove('open');
     }
@@ -5019,6 +5301,10 @@ tr:hover td{background:#161b22}</style></head>
           <div class="film-brand">CYBER<b>SENTINEL</b> · Live Demo Film</div>
           <button class="film-x" onclick="closeDemoFilm()" title="Exit film">✕</button>
         </div>
+        <canvas id="film-canvas"></canvas>
+        <div class="film-flash" id="film-flash"></div>
+        <div class="film-hud" id="film-hud"><canvas id="film-gauge" width="150" height="150"></canvas></div>
+        <div class="film-kc" id="film-kc"></div>
         <div class="film-countdown" id="film-countdown"></div>
         <div class="film-stage" id="film-stage"></div>
         <div class="film-dots" id="film-dots"></div>
