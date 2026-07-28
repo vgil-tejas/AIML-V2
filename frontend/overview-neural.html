@@ -1909,10 +1909,22 @@ addEventListener('resize', () => { initMesh(); if (REDUCED) drawMesh(); });
       return;
     }
 
+    // Reference (general security knowledge) — no log rows; show the labelled answer.
+    if (r.reference) {
+      let rh = `<div class="a nl-answer"><span class="res" style="color:var(--accent)">ℹ ${esc(r.answer)}</span></div>`;
+      if (r.note) rh += `<div class="a" style="opacity:.65;font-size:12px;margin-top:4px">${esc(r.note)}</div>`;
+      box.insertAdjacentHTML('beforeend', rh);
+      box.scrollTop = box.scrollHeight;
+      return;
+    }
+
     const cols = r.columns || [], rows = r.rows || [];
     let html = '';
+    // The grounded answer, written STRICTLY from the rows below — headline first.
+    if (r.answer)
+      html += `<div class="a nl-answer"><span class="res" style="color:var(--accent)">▸ ${esc(r.answer)}</span></div>`;
     if (r.sql) html += `<div class="sql">${esc(r.sql)}</div>`;
-    html += `<div class="a"><span class="res">→ ${num(r.row_count || 0)} row${(r.row_count === 1) ? '' : 's'} · ${num(r.elapsed_ms || 0)}ms</span></div>`;
+    html += `<div class="a"><span class="res">→ ${num(r.row_count || 0)} row${(r.row_count === 1) ? '' : 's'} · ${num(r.elapsed_ms || 0)}ms · evidence below</span></div>`;
     if (rows.length) {
       const show = rows.slice(0, 8);
       html += `<div class="logtbl-wrap" style="margin-top:8px"><table class="logtbl">

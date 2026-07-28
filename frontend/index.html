@@ -6234,16 +6234,32 @@ tr:hover td{background:#161b22}</style></head>
           errorEl.textContent = data.detail || 'Query failed';
           return;
         }
+        // Reference (general security knowledge) — no log rows; show labelled answer.
+        if (data.reference) {
+          const _re = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+          sqlBlock.style.display = 'none';
+          document.getElementById('nl-result-title').textContent = 'Reference';
+          tableWrap.innerHTML =
+            `<div class="nl-answer" style="margin:0 0 10px;padding:12px 14px;border:1px solid var(--border);border-left:3px solid var(--accent);border-radius:8px;background:rgba(88,166,255,.06);line-height:1.5">ℹ ${_re(data.answer)}</div>`
+            + (data.note ? `<div style="color:var(--muted);font-size:12px;padding:0 2px">${_re(data.note)}</div>` : '');
+          return;
+        }
         sqlBlock.style.display = 'block';
         document.getElementById('nl-sql-text').textContent = data.sql;
         document.getElementById('nl-timing').textContent = `· ${data.elapsed_ms}ms · ${data.row_count} row${data.row_count !== 1 ? 's' : ''}`;
         _nlLastCols = data.columns; _nlLastRows = data.rows;
         document.getElementById('nl-result-title').textContent = `Results — ${data.row_count} row${data.row_count !== 1 ? 's' : ''}`;
+        // Grounded answer banner — plain-English, written strictly from the rows
+        // below (the evidence table + generated SQL let the analyst verify it).
+        const _nlEsc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+        const answerBanner = data.answer
+          ? `<div class="nl-answer" style="margin:0 0 12px;padding:12px 14px;border:1px solid var(--border);border-left:3px solid var(--accent);border-radius:8px;background:rgba(88,166,255,.06);line-height:1.5">${_nlEsc(data.answer)}</div>`
+          : '';
         if (!data.rows.length) {
-          tableWrap.innerHTML = '<div class="empty" style="padding:16px">No results returned</div>';
+          tableWrap.innerHTML = answerBanner + '<div class="empty" style="padding:16px">No results returned</div>';
           return;
         }
-        let html = '<table class="tbl" style="width:100%;border-collapse:collapse"><thead><tr>'
+        let html = answerBanner + '<table class="tbl" style="width:100%;border-collapse:collapse"><thead><tr>'
           + data.columns.map(c => `<th style="position:sticky;top:0;background:#161b22;z-index:3;white-space:nowrap;padding:8px 12px;color:var(--accent);text-align:left;border-bottom:2px solid var(--border)">${c}</th>`).join('')
           + '</tr></thead><tbody>';
         for (const row of data.rows) {
