@@ -49,13 +49,19 @@ ok "git and Docker are ready"
   warn "GROQ_API_KEY is still the placeholder — AI panels will show 'not configured' until it's set."
 
 # ── 2. GitHub token (the ONE prompt) ─────────────────────────────────────────
+# Prompted here, never stored in the script or on the command line. We read from
+# /dev/tty (not stdin) so the prompt works even when the script itself arrives on
+# stdin via `curl ... | bash`.
 say "GitHub access"
 PAT="${GH_PAT:-}"
 if [ -z "$PAT" ]; then
-  # -s hides the token; falls back gracefully if the shell has no controlling tty
-  printf '  Paste your GitHub Personal Access Token (input hidden): '
-  read -rs PAT || true
-  echo
+  if [ -r /dev/tty ]; then
+    printf '  Paste your GitHub Personal Access Token (input hidden): ' > /dev/tty
+    read -rs PAT < /dev/tty || true
+    printf '\n' > /dev/tty
+  else
+    die "No terminal to prompt on. Re-run as: GH_PAT=your_token bash bootstrap.sh"
+  fi
 fi
 [ -z "$PAT" ] && die "No token provided. Create one at https://github.com/settings/tokens (scope: repo)."
 ok "Token received"
