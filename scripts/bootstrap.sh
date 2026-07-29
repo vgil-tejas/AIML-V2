@@ -2,35 +2,30 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # CyberSentinel — MASTER one-command bootstrap for a brand-new server.
 #
-# Nothing needs to exist on the box first. Run ONE line on a fresh server — it
-# fetches itself from GitHub with your token and does the rest: clone the
-# product, write its config, build and start everything, apply the schema,
-# verify health, and install the `aiml` operator command — end to end.
+# This file contains NO secrets, so you host it at a PUBLIC url (a GitHub gist or
+# a tiny public repo). Then a fresh server installs the whole product with one
+# line — nothing needs to be on the box first:
 #
-#   TRUE ONE-LINER (nothing pre-installed but curl + docker + git):
+#     curl -fsSL https://<your-public-url>/bootstrap.sh | bash
 #
-#     GH_PAT=YOUR_TOKEN bash -c "$(curl -fsSL \
-#       -H "Authorization: token $GH_PAT" -H 'Accept: application/vnd.github.raw' \
-#       https://api.github.com/repos/Tejasvgipl/AIML-V2/contents/scripts/bootstrap.sh?ref=release/v2)"
+# It asks for ONE thing — your GitHub Personal Access Token — then clones the
+# private repo, and hands off to install.sh which writes the config (AI key +
+# store password come from the private repo, never typed), builds and starts
+# everything, applies the schema, verifies health, and installs the `aiml`
+# operator command. When it finishes it prints http://<server-ip>:19888.
 #
-#   Or, if you already copied this file over:   GH_PAT=YOUR_TOKEN bash bootstrap.sh
-#
-# The GitHub token is the ONLY input. The AI key, store password and ports are
-# baked in below, so the operator types nothing else.
-#
-# Re-runnable and safe: if the install already exists it updates in place, it
-# never overwrites an existing .env, and it never deletes data.
+# The token is prompted, never stored in this script or on the command line, and
+# is stripped from the git remote after the clone. Re-runnable and safe: an
+# existing install is updated in place, an existing .env is left untouched, and
+# no data is ever deleted.
 # ─────────────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
-# ═══ BAKE THESE IN ONCE (edit here, commit to the private repo) ══════════════
-# Each can also be overridden at run time by an env var of the same name.
-GH_REPO="${GH_REPO:-github.com/Tejasvgipl/AIML-V2.git}"     # repo host/path — NO token here
-GH_BRANCH="${GH_BRANCH:-release/v2}"                        # branch the server tracks
-INSTALL_DIR="${INSTALL_DIR:-/tejas/aiml}"                   # where the product installs
-GROQ_API_KEY="${GROQ_API_KEY:-gsk_REPLACE_WITH_YOUR_GROQ_KEY}"  # baked AI key — installs never ask
-STORE_PASS="${STORE_PASS:-tejas@123}"                       # ClickHouse password for a FRESH store
-# ═════════════════════════════════════════════════════════════════════════════
+# ── Which private repo to install (no secrets — safe to be public) ───────────
+# Overridable at run time with an env var of the same name.
+GH_REPO="${GH_REPO:-github.com/Tejasvgipl/AIML-V2.git}"   # repo host/path — NO token here
+GH_BRANCH="${GH_BRANCH:-release/v2}"                      # branch the server tracks
+INSTALL_DIR="${INSTALL_DIR:-/tejas/aiml}"                 # where the product installs
 
 say()  { printf '\n\033[1;36m▸ %s\033[0m\n' "$*"; }
 ok()   { printf '\033[1;32m  ✓ %s\033[0m\n' "$*"; }
@@ -45,13 +40,9 @@ docker compose version >/dev/null 2>&1 || die "The Docker Compose plugin is miss
 docker info >/dev/null 2>&1   || die "Cannot talk to the Docker daemon. Try: sudo systemctl start docker"
 ok "git and Docker are ready"
 
-[ "$GROQ_API_KEY" = "gsk_REPLACE_WITH_YOUR_GROQ_KEY" ] && \
-  warn "GROQ_API_KEY is still the placeholder — AI panels will show 'not configured' until it's set."
-
 # ── 2. GitHub token (the ONE prompt) ─────────────────────────────────────────
-# Prompted here, never stored in the script or on the command line. We read from
-# /dev/tty (not stdin) so the prompt works even when the script itself arrives on
-# stdin via `curl ... | bash`.
+# Prompted here, never stored in the script or on the command line. Read from
+# /dev/tty (not stdin) so the prompt works even under `curl ... | bash`.
 say "GitHub access"
 PAT="${GH_PAT:-}"
 if [ -z "$PAT" ]; then
@@ -86,23 +77,11 @@ git -C "$INSTALL_DIR" remote set-url origin "$CLEAN_URL"
 unset PAT
 ok "Source is in place ($GH_BRANCH)"
 
+# ── 4. Hand off to the installer ─────────────────────────────────────────────
+# install.sh creates .env (baking the AI key + store password from the private
+# repo's scripts/deploy.defaults), builds, applies the schema, verifies health,
+# and installs the `aiml` command.
 cd "$INSTALL_DIR"
-
-# ── 4. Configuration (.env) — created once, with the AI key + store password ─
-say "Configuration"
-if [ -f .env ]; then
-  warn ".env already exists — leaving it untouched (keeping this server's settings)."
-else
-  cp .env.example .env
-  # Inject the baked AI key and store password; leave every other default as-is.
-  #  - use | as the sed delimiter because keys can contain / and +
-  sed -i "s|^GROQ_API_KEY=.*|GROQ_API_KEY=${GROQ_API_KEY}|" .env
-  sed -i "s|^CLICKHOUSE_PASS=.*|CLICKHOUSE_PASS=${STORE_PASS}|" .env
-  chmod 600 .env
-  ok "Wrote .env (AI key baked in, store password set, UI on port 19888, DEMO_MODE=false)."
-fi
-
-# ── 5. Hand off to the installer (build → schema → verify → link `aiml`) ─────
 say "Running the installer"
 chmod +x scripts/install.sh scripts/aiml 2>/dev/null || true
 bash scripts/install.sh

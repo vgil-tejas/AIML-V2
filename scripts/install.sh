@@ -45,9 +45,22 @@ ok "Docker $(docker version -f '{{.Server.Version}}' 2>/dev/null || echo '?') is
 say "Configuration"
 if [ ! -f .env ]; then
   cp .env.example .env
+  # Bake in the AI key + store password from the private deploy defaults, so a
+  # fresh install is fully configured with no prompts. Missing file / unset
+  # values just fall through to the template defaults (AI shows "not configured").
+  if [ -f scripts/deploy.defaults ]; then
+    # shellcheck disable=SC1091
+    . scripts/deploy.defaults
+  fi
+  if [ -n "${GROQ_API_KEY:-}" ] && [ "${GROQ_API_KEY:-}" != "gsk_REPLACE_WITH_YOUR_GROQ_KEY" ]; then
+    sed -i "s|^GROQ_API_KEY=.*|GROQ_API_KEY=${GROQ_API_KEY}|" .env
+    ok "AI key applied from scripts/deploy.defaults."
+  else
+    warn "No AI key in scripts/deploy.defaults — AI panels will show 'not configured'."
+  fi
+  sed -i "s|^CLICKHOUSE_PASS=.*|CLICKHOUSE_PASS=${CLICKHOUSE_PASS:-tejas@123}|" .env
   chmod 600 .env
-  ok "Created .env from the template (defaults: UI on port 19888, AI disabled)."
-  echo "    Run ./scripts/setup.sh later to set an AI key or change the store password."
+  ok "Created .env (UI on port 19888, store password set, DEMO_MODE=false)."
 else
   ok ".env already present — leaving it untouched."
 fi
