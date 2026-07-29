@@ -98,7 +98,8 @@ template, builds and starts all six containers, waits for the event store, appli
 and confirms <code>"store":"connected"</code> before it reports success. It also
 <b>auto-recovers from the two failures that used to break fresh installs</b> — a leaked-Docker-network
 "cannot allocate memory" error, and a schema that was skipped on first boot. It is safe to re-run at any
-time; it never deletes data.</div>
+time; it never deletes data. Finally it installs the <code>aiml</code> operator command, so from then on you
+run the stack with <code>aiml start</code> / <code>aiml stop</code> / <code>aiml health</code> (see &sect;8).</div>
 
 <h3>If you prefer to run the steps yourself</h3>
 <pre><code>cp .env.example .env            <span class="cmt"># UI on port 19888, AI off by default</span>
@@ -107,7 +108,7 @@ docker compose --profile wazuh up -d --build
 curl -s localhost:19888/api/health
 <span class="cmt"># {"status":"ok","store":"connected","ai":"configured"|"missing"}</span></code></pre>
 <div class="box note" style="font-size:13px"><b>Private repo?</b> When Git asks for a password, paste a GitHub <b>Personal Access Token</b> (not your login password), or run <code>gh auth login</code> first.</div>
-<div class="box note"><b>Update later:</b> <code>git pull</code> then <code>docker compose --profile wazuh up -d --build</code>. The data volume is preserved.</div>
+<div class="box note"><b>Update later:</b> run <code>aiml update</code> (does <code>git pull</code> + rebuild for you), or manually <code>git pull</code> then <code>docker compose --profile wazuh up -d --build</code>. The data volume is preserved.</div>
 
 <h2 id="bundle">3. Option B — Install from the offline image bundle (no source)</h2>
 <p>Use this for a customer/bank server that must not receive the source code. You hand over the
@@ -180,12 +181,34 @@ docker compose -f docker-compose.prod.yml up -d backend   <span class="cmt"># bu
 <div class="box danger"><b>Never run <code>docker compose ... down -v</code></b> &mdash; the <code>-v</code> deletes the data volume (your entire log store). Plain <code>down</code> keeps the data.</div>
 
 <h2 id="ops">8. Everyday operations</h2>
+<p>After <code>install.sh</code> has run once, the whole stack is driven by a single command &mdash;
+<code>aiml</code>. It works the same on a GitHub install and a bundle install (it detects which one it is),
+so operators never need to remember Docker syntax.</p>
+<table>
+  <tr><th>Action</th><th>Command</th></tr>
+  <tr><td>Start everything</td><td><code>aiml start</code></td></tr>
+  <tr><td>Stop &mdash; pause, data kept</td><td><code>aiml stop</code></td></tr>
+  <tr><td>Restart everything</td><td><code>aiml restart</code></td></tr>
+  <tr><td>Quick status</td><td><code>aiml status</code></td></tr>
+  <tr><td>Full health report</td><td><code>aiml health</code></td></tr>
+  <tr><td>Follow logs (all / one service)</td><td><code>aiml logs</code> &nbsp;·&nbsp; <code>aiml logs backend</code></td></tr>
+  <tr><td>Update to latest code (GitHub install)</td><td><code>aiml update</code></td></tr>
+  <tr><td>Version / commit</td><td><code>aiml version</code></td></tr>
+</table>
+<div class="box ok"><b><code>aiml health</code> is the one to run when something looks off.</b> It reports every
+container's state, the event store (reachable, password OK, live <b>row count</b> and on-disk size), the
+backend API and store connection, the risk/ML engine, the ingestion watcher, and host disk headroom &mdash;
+ending in a clear <b>HEALTHY</b> or <b>ATTENTION</b> verdict.</div>
+<div class="box note"><b><code>aiml stop</code> is a safe pause</b> (<code>docker compose stop</code>). Containers halt;
+the event-store volume is never touched. The tool has no data-deleting command at all.</div>
+
+<h3>Raw Docker equivalents (if you ever need them)</h3>
 <table>
   <tr><th>Action</th><th>GitHub install</th><th>Bundle install</th></tr>
   <tr><td>Start</td><td><code>docker compose --profile wazuh up -d</code></td><td><code>docker compose -f docker-compose.prod.yml --profile wazuh up -d</code></td></tr>
   <tr><td>Status</td><td colspan="2"><code>docker compose [-f docker-compose.prod.yml] ps</code></td></tr>
   <tr><td>Logs</td><td colspan="2"><code>docker compose [-f docker-compose.prod.yml] logs -f backend</code></td></tr>
-  <tr><td>Stop (keep data)</td><td colspan="2"><code>docker compose [-f docker-compose.prod.yml] down</code></td></tr>
+  <tr><td>Stop (keep data)</td><td colspan="2"><code>docker compose [-f docker-compose.prod.yml] stop</code></td></tr>
 </table>
 
 <h2 id="trouble">9. Troubleshooting</h2>

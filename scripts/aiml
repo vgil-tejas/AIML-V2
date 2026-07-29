@@ -1,0 +1,277 @@
+#!/usr/bin/env bash
+# ─────────────────────────────────────────────────────────────────────────────
+# aiml — one command to run, stop and inspect the whole CyberSentinel stack.
+#
+# This is the operator-facing control command a bank's ops team uses instead of
+# raw `docker compose`. It wraps the exact same compose stack the installer runs,
+# so behaviour is identical — it just gives it a clean, safe, single verb.
+#
+#     aiml start        bring the whole stack up
+#     aiml stop         PAUSE the stack (containers stop, DATA IS KEPT)
+#     aiml restart      restart every service
+#     aiml status       one-line health of every service
+#     aiml health       full deep health report (store, app, ml, disk, rows)
+#     aiml logs [svc]   tail logs (all services, or one, e.g. `aiml logs backend`)
+#     aiml ps           raw container list
+#     aiml update       pull latest code and rebuild (source installs only)
+#     aiml version      show the running version
+#     aiml help         this help
+#
+# SAFETY: there is deliberately NO command here that deletes data. `stop` maps to
+# `docker compose stop` (a pause), never `down`, and the destructive `-v` flag
+# that would wipe the 60–70M-row store volume is not reachable from this tool at
+# all. To remove the stack an admin must run docker by hand, on purpose.
+# ─────────────────────────────────────────────────────────────────────────────
+set -uo pipefail
+
+# ── Locate the install root (this script lives in <root>/scripts/) ───────────
+SELF="$(cd "$(dirname "$0")" && pwd)"
+ROOT="$(cd "$SELF/.." && pwd)"
+cd "$ROOT"
+
+# ── Pretty output ────────────────────────────────────────────────────────────
+c_head=$'\033[1;36m'; c_ok=$'\033[1;32m'; c_warn=$'\033[1;33m'
+c_err=$'\033[1;31m'; c_dim=$'\033[2m'; c_off=$'\033[0m'
+say()  { printf '\n%s▸ %s%s\n' "$c_head" "$*" "$c_off"; }
+ok()   { printf '  %s✓%s %s\n' "$c_ok"  "$c_off" "$*"; }
+warn() { printf '  %s!%s %s\n' "$c_warn" "$c_off" "$*"; }
+bad()  { printf '  %s✗%s %s\n' "$c_err" "$c_off" "$*"; }
+die()  { bad "$*"; exit 1; }
+
+# ── Load .env (ports, store password) if present ─────────────────────────────
+if [ -f .env ]; then set -a; . ./.env; set +a; fi
+CH_PASS="${CLICKHOUSE_PASS:-tejas@123}"
+UI_PORT="${NGINX_HOST_PORT:-19888}"
+
+# ── Pick the right compose file automatically ────────────────────────────────
+#   Source/server install  -> docker-compose.yml   (has app source, builds images)
+#   Bank image-only install -> docker-compose.prod.yml (pre-built images, no source)
+#   Override anytime with:   AIML_COMPOSE=/path/to/compose.yml
+SOURCE_INSTALL=0
+if [ -n "${AIML_COMPOSE:-}" ]; then
+  COMPOSE_FILE="$AIML_COMPOSE"
+elif [ -f backend/main.py ] && [ -f docker-compose.yml ]; then
+  COMPOSE_FILE="docker-compose.yml"; SOURCE_INSTALL=1
+elif [ -f docker-compose.prod.yml ]; then
+  COMPOSE_FILE="docker-compose.prod.yml"
+elif [ -f docker-compose.yml ]; then
+  COMPOSE_FILE="docker-compose.yml"
+else
+  die "No docker-compose file found in $ROOT."
+fi
+COMPOSE="docker compose -f $COMPOSE_FILE --profile wazuh"
+
+need_docker() {
+  command -v docker >/dev/null 2>&1 || die "Docker is not installed."
+  docker info >/dev/null 2>&1 || die "Cannot reach the Docker daemon. Try: sudo systemctl start docker"
+}
+
+server_ip() { hostname -I 2>/dev/null | awk '{print $1}'; }
+
+# ── Commands ─────────────────────────────────────────────────────────────────
+cmd_start() {
+  need_docker
+  say "Starting CyberSentinel ($COMPOSE_FILE)"
+  if [ "$SOURCE_INSTALL" = 1 ]; then
+    $COMPOSE up -d --build || die "Startup failed. Run: aiml logs"
+  else
+    $COMPOSE up -d || die "Startup failed. Run: aiml logs"
+  fi
+  ok "All services requested. Waiting for health…"
+  wait_healthy
+}
+
+cmd_stop() {
+  need_docker
+  say "Pausing CyberSentinel (data is kept)"
+  # `stop` — NOT `down`. Containers halt; the store volume is untouched.
+  $COMPOSE stop || die "Could not stop the stack."
+  ok "Stopped. Your data volume is intact. Start again with: aiml start"
+}
+
+cmd_restart() {
+  need_docker
+  say "Restarting every service"
+  $COMPOSE restart || die "Restart failed."
+  ok "Restarted."
+  wait_healthy
+}
+
+cmd_ps() { need_docker; $COMPOSE ps; }
+
+cmd_logs() {
+  need_docker
+  local svc="${1:-}"
+  if [ -n "$svc" ]; then $COMPOSE logs -f --tail 100 "$svc"
+  else $COMPOSE logs -f --tail 100; fi
+}
+
+cmd_status() {
+  need_docker
+  say "Service status"
+  $COMPOSE ps --format 'table {{.Service}}\t{{.Status}}' 2>/dev/null || $COMPOSE ps
+  # quick app probe
+  local h
+  h="$(curl -fsS --max-time 8 "http://localhost:${UI_PORT}/api/health" 2>/dev/null || true)"
+  echo
+  case "$h" in
+    *'"store"'*'"connected"'*) ok "App healthy — UI: http://$(server_ip):${UI_PORT}" ;;
+    "") warn "App not responding on port ${UI_PORT} yet. Run: aiml health" ;;
+    *)  warn "App is up but store not connected. Run: aiml health" ;;
+  esac
+}
+
+wait_healthy() {
+  local h
+  for _ in $(seq 1 40); do
+    h="$(curl -fsS --max-time 10 "http://localhost:${UI_PORT}/api/health" 2>/dev/null || true)"
+    case "$h" in *'"store"'*'"connected"'*)
+      ok "Healthy — open http://$(server_ip):${UI_PORT}"; return 0 ;;
+    esac
+    sleep 3
+  done
+  warn "Not healthy yet after 2 min. Diagnose with: aiml health"
+  return 1
+}
+
+cmd_health() {
+  need_docker
+  local fail=0
+  say "CyberSentinel — full health report"
+  printf '  %sinstall%s   %s\n' "$c_dim" "$c_off" "$COMPOSE_FILE ($([ "$SOURCE_INSTALL" = 1 ] && echo source || echo image-only))"
+  printf '  %sUI port%s   %s\n' "$c_dim" "$c_off" "$UI_PORT"
+
+  # 1) container states
+  say "1. Containers"
+  $COMPOSE ps --format 'table {{.Service}}\t{{.Status}}\t{{.Ports}}' 2>/dev/null || $COMPOSE ps
+  local down
+  down="$($COMPOSE ps --status exited --status dead -q 2>/dev/null | wc -l | tr -d ' ')"
+  if [ "${down:-0}" != "0" ]; then bad "$down container(s) not running"; fail=1; else ok "All containers running"; fi
+
+  # 2) event store (ClickHouse)
+  say "2. Event store"
+  local ch
+  ch="$($COMPOSE ps -q clickhouse 2>/dev/null | head -n1)"
+  if [ -n "$ch" ] && docker exec "$ch" clickhouse-client --password "$CH_PASS" --query 'SELECT 1' >/dev/null 2>&1; then
+    ok "Store reachable and password OK"
+    local rows parts disk
+    rows="$(docker exec "$ch" clickhouse-client --password "$CH_PASS" --query \
+      'SELECT count() FROM cybersentinel.logs' 2>/dev/null || echo '?')"
+    parts="$(docker exec "$ch" clickhouse-client --password "$CH_PASS" --query \
+      "SELECT count() FROM system.parts WHERE database='cybersentinel' AND table='logs' AND active" 2>/dev/null || echo '?')"
+    disk="$(docker exec "$ch" clickhouse-client --password "$CH_PASS" --query \
+      "SELECT formatReadableSize(sum(bytes_on_disk)) FROM system.parts WHERE database='cybersentinel' AND active" 2>/dev/null || echo '?')"
+    printf '    logs rows      %s\n' "$rows"
+    printf '    active parts   %s\n' "$parts"
+    printf '    on-disk size   %s\n' "$disk"
+  else
+    bad "Store not reachable (or .env password drifted). Check: aiml logs clickhouse"; fail=1
+  fi
+
+  # 3) backend API
+  say "3. Backend API"
+  local h
+  h="$(curl -fsS --max-time 12 "http://localhost:${UI_PORT}/api/health" 2>/dev/null || true)"
+  if [ -n "$h" ]; then
+    ok "Backend responded on /api/health"
+    echo "$h" | sed 's/^/    /'
+    case "$h" in *'"store"'*'"connected"'*) ok "Backend ↔ store connected" ;;
+      *) bad "Backend up but store not connected"; fail=1 ;; esac
+  else
+    bad "Backend not responding on port ${UI_PORT}. Check: aiml logs backend"; fail=1
+  fi
+
+  # 4) risk / ML engine
+  say "4. Risk (ML) engine"
+  local ml
+  ml="$($COMPOSE ps -q ml-engine 2>/dev/null | head -n1)"
+  if [ -n "$ml" ]; then
+    local ms
+    ms="$(docker inspect -f '{{.State.Status}}' "$ml" 2>/dev/null || echo '?')"
+    if [ "$ms" = "running" ]; then ok "ML engine running"; else bad "ML engine state: $ms"; fail=1; fi
+  else
+    warn "ML engine container not found."
+  fi
+
+  # 5) ingestion watcher (optional profile)
+  say "5. Ingestion watcher"
+  local w
+  w="$($COMPOSE ps -q wazuh-watcher 2>/dev/null | head -n1)"
+  if [ -n "$w" ]; then
+    ok "Watcher present ($(docker inspect -f '{{.State.Status}}' "$w" 2>/dev/null))"
+  else
+    warn "Watcher not running (fine if this bank feeds the store another way)."
+  fi
+
+  # 6) host disk headroom
+  say "6. Host disk"
+  df -h "$ROOT" 2>/dev/null | sed 's/^/    /' || warn "Could not read disk usage."
+
+  echo
+  if [ "$fail" = 0 ]; then
+    ok "HEALTHY — CyberSentinel is fully operational."
+  else
+    bad "ATTENTION — one or more checks failed above."
+    return 1
+  fi
+}
+
+cmd_update() {
+  need_docker
+  if [ "$SOURCE_INSTALL" != 1 ]; then
+    warn "This is an image-only install — there is no source to pull."
+    warn "Update by loading the new image bundle from the vendor, then: aiml restart"
+    return 0
+  fi
+  say "Updating to the latest code"
+  command -v git >/dev/null 2>&1 || die "git is not installed."
+  git pull --ff-only || die "git pull failed (local changes?). Resolve, then retry."
+  ok "Code updated — rebuilding services"
+  $COMPOSE up -d --build || die "Rebuild failed. Run: aiml logs"
+  ok "Updated."
+  wait_healthy
+}
+
+cmd_version() {
+  echo "CyberSentinel (aiml control) — compose: $COMPOSE_FILE"
+  echo "CS_VERSION: ${CS_VERSION:-2.0.0}"
+  if [ "$SOURCE_INSTALL" = 1 ] && command -v git >/dev/null 2>&1; then
+    echo "commit:     $(git rev-parse --short HEAD 2>/dev/null || echo '?')  branch: $(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo '?')"
+  fi
+}
+
+cmd_help() {
+  cat <<EOF
+${c_head}CyberSentinel — aiml control command${c_off}
+
+  ${c_ok}aiml start${c_off}        Bring the whole stack up
+  ${c_ok}aiml stop${c_off}         Pause the stack — containers stop, data is KEPT
+  ${c_ok}aiml restart${c_off}      Restart every service
+  ${c_ok}aiml status${c_off}       Quick one-line health of every service
+  ${c_ok}aiml health${c_off}       Full deep report: store rows/size, app, ml, disk
+  ${c_ok}aiml logs [svc]${c_off}   Follow logs — all, or one (backend|ml-engine|clickhouse|frontend|nginx|wazuh-watcher)
+  ${c_ok}aiml ps${c_off}           Raw container list
+  ${c_ok}aiml update${c_off}       Pull latest code + rebuild (source installs)
+  ${c_ok}aiml version${c_off}      Show running version
+  ${c_ok}aiml help${c_off}         This help
+
+  UI: http://<server-ip>:${UI_PORT}
+
+  Note: 'stop' is a safe pause. This tool never deletes the data volume.
+EOF
+}
+
+# ── Dispatch ─────────────────────────────────────────────────────────────────
+case "${1:-help}" in
+  start)          cmd_start ;;
+  stop)           cmd_stop ;;
+  restart)        cmd_restart ;;
+  status)         cmd_status ;;
+  health|check)   cmd_health ;;
+  logs|log)       shift; cmd_logs "${1:-}" ;;
+  ps)             cmd_ps ;;
+  update|upgrade) cmd_update ;;
+  version|--version|-v) cmd_version ;;
+  help|--help|-h) cmd_help ;;
+  *) bad "Unknown command: $1"; echo; cmd_help; exit 1 ;;
+esac

@@ -107,6 +107,20 @@ ROWS="$(docker exec "$CH_CTR" clickhouse-client --password "$CH_PASS" \
 ok "Schema present — cybersentinel.logs holds $ROWS rows"
 
 # ── 5. Verify end to end ────────────────────────────────────────────────────
+# ── Install the `aiml` operator command (start/stop/status/health) ──────────
+# So ops can run `aiml start|stop|status|health` from anywhere instead of docker.
+chmod +x scripts/aiml 2>/dev/null || true
+if [ -w /usr/local/bin ] || sudo -n true 2>/dev/null; then
+  if ln -sf "$(pwd)/scripts/aiml" /usr/local/bin/aiml 2>/dev/null \
+     || sudo ln -sf "$(pwd)/scripts/aiml" /usr/local/bin/aiml 2>/dev/null; then
+    ok "Installed the 'aiml' command — try:  aiml status"
+  else
+    warn "Could not link 'aiml' into /usr/local/bin — run it as ./scripts/aiml instead."
+  fi
+else
+  warn "No permission for /usr/local/bin — run the command as ./scripts/aiml (or re-run with sudo)."
+fi
+
 say "Verifying the application"
 $COMPOSE up -d backend ml-engine >/dev/null 2>&1 || true   # pick up a corrected password
 HEALTH=""
