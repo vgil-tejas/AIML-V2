@@ -1,20 +1,19 @@
 #!/usr/bin/env bash
 # ─────────────────────────────────────────────────────────────────────────────
-# CyberSentinel — MASTER one-command bootstrap for a brand-new server.
+# CyberSentinel — MASTER one-command installer for a brand-new server.
 #
-# This file contains NO secrets, so you host it at a PUBLIC url (a GitHub gist or
-# a tiny public repo). Then a fresh server installs the whole product with one
-# line — nothing needs to be on the box first:
+# Copy THIS ONE FILE onto a fresh box and run it — that's the whole install:
 #
-#     curl -fsSL https://<your-public-url>/bootstrap.sh | bash
+#     bash bootstrap.sh
 #
 # It asks for ONE thing — your GitHub Personal Access Token — then clones the
-# private repo, and hands off to install.sh which writes the config (AI key +
-# store password come from the private repo, never typed), builds and starts
-# everything, applies the schema, verifies health, and installs the `aiml`
-# operator command. When it finishes it prints http://<server-ip>:19888.
+# product and hands off to install.sh, which writes the config (the AI key and
+# store password are baked into the private repo, so you never type them),
+# builds and starts everything, applies the schema, verifies health, and
+# installs the `aiml` operator command. When it finishes it prints
+# http://<server-ip>:19888.
 #
-# The token is prompted, never stored in this script or on the command line, and
+# The token is prompted (never stored in this script or on the command line) and
 # is stripped from the git remote after the clone. Re-runnable and safe: an
 # existing install is updated in place, an existing .env is left untouched, and
 # no data is ever deleted.

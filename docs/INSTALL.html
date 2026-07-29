@@ -76,22 +76,31 @@ docker --version
 docker compose version</code></pre>
 <div class="box note"><b>RHEL/CentOS:</b> the same convenience script works. Minimum server: 16&nbsp;GB RAM, 50&nbsp;GB disk, and port 19888 reachable by analysts.</div>
 
-<h2 id="github">2. Option A — Install from GitHub (builds on the server)</h2>
-<p>Use this when you have access to the repository (self-managed / your own servers).</p>
-<p>Copy-paste these four commands on a fresh server. Nothing else is needed.</p>
-<pre><code><span class="cmt"># 1 — make a working folder and enter it</span>
-mkdir tejas &amp;&amp; cd tejas
+<h2 id="github">2. Option A — One-command install (recommended)</h2>
+<p>The whole product installs from a single master script. Copy <code>scripts/bootstrap.sh</code>
+onto the fresh server (paste it into a file, or <code>scp</code> it over) and run it:</p>
+<pre><code>bash bootstrap.sh</code></pre>
+<p>It asks for <b>one thing — your GitHub Personal Access Token</b> — then does everything:
+clones the product, writes its configuration (the AI key and store password are already baked in,
+so you type nothing else), builds and starts all services, applies the database schema, verifies
+health, and installs the <code>aiml</code> operator command. When it finishes it prints the live
+URL — open <code>http://&lt;server-ip&gt;:19888</code>.</p>
+<div class="box ok"><b>That is the entire install.</b> The token is the only input; it is prompted (never
+stored in the script), used to clone, then stripped from the git config. The script is safe to
+re-run — an existing install updates in place and existing data is never touched. From then on the
+stack is run with <code>aiml start | stop | status | health</code> (&sect;8).</div>
+<div class="box note" style="font-size:13px"><b>Prerequisites:</b> Docker, git and curl on the box
+(<code>sudo apt-get install -y curl git</code> + Docker per &sect;1). <b>Token:</b> create one at
+<code>github.com/settings/tokens</code> with the <code>repo</code> scope.</div>
 
-<span class="cmt"># 2 — get the code</span>
-git clone https://github.com/Tejasvgipl/AIML-V3.git
-cd AIML-V3
+<h3>If you prefer the manual steps</h3>
+<pre><code><span class="cmt"># 1 — get the code (token = your PAT when Git prompts)</span>
+git clone https://github.com/Tejasvgipl/AIML-V2.git aiml
+cd aiml
 
-<span class="cmt"># 3 — install everything (builds, starts, applies the schema, verifies)</span>
-bash scripts/install.sh
-
-<span class="cmt"># 4 — set the AI key when you want one (optional, any time)</span>
-./scripts/setup.sh &amp;&amp; docker compose up -d backend</code></pre>
-<p>When step 3 finishes it prints the live URL. Open <code>http://&lt;server-ip&gt;:19888</code> in a browser.</p>
+<span class="cmt"># 2 — install everything (builds, starts, applies the schema, verifies, bakes the AI key)</span>
+bash scripts/install.sh</code></pre>
+<p>When it finishes it prints the live URL. Open <code>http://&lt;server-ip&gt;:19888</code> in a browser.</p>
 
 <div class="box ok"><b>What <code>install.sh</code> does for you.</b> It checks Docker, creates <code>.env</code> from the
 template, builds and starts all six containers, waits for the event store, applies the database schema,
