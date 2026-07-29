@@ -197,6 +197,16 @@ _incidents_cache: list = []
 _incidents_cache_ts: float = 0.0
 _INCIDENTS_TTL = 60  # seconds
 
+# -- Playbook-recommender inputs cache -----------------------------------------
+# The recommender pulls a multi-query pipeline from ClickHouse (feedback, entity
+# features, recurrence, ML scores). Recommendations change slowly, but the page
+# re-triggered the whole pipeline on every open — two concurrent opens stacked
+# minute-long scans and starved the pool. Cache + single-flight collapses that.
+_reco_cache: dict = {}
+_reco_cache_ts: float = 0.0
+_reco_sf_lock = asyncio.Lock()
+_RECO_TTL = 180  # seconds
+
 # -- Log store (ClickHouse) ----------------------------------------------------
 # STORE_ENABLED gates all log-derived reads (trail, stats, hot-ips, baselines,
 # ML features). The `osc` module is now the ClickHouse client.
@@ -3675,8 +3685,26 @@ async def list_adopted_playbooks():
 # fallback (product decision): below a minimum labelled set it returns a
 # "collecting labels" status instead of guessing.
 
-async def _recommender_inputs():
-    """Pull everything the (pure) recommender needs from ClickHouse, once."""
+async def _recommender_inputs(force: bool = False):
+    """Pull everything the (pure) recommender needs from ClickHouse, once.
+
+    Cached for _RECO_TTL with single-flight: opening the Playbooks page (or two
+    analysts doing so at once) used to re-run this whole pipeline every time,
+    each a minute-long set of scans that drained the connection pool. `force`
+    (used by the manual /train action) always recomputes fresh."""
+    global _reco_cache, _reco_cache_ts
+    if not force and _reco_cache and time.time() - _reco_cache_ts < _RECO_TTL:
+        return _reco_cache
+    async with _reco_sf_lock:
+        # Re-check inside the lock — a concurrent caller may have just filled it.
+        if not force and _reco_cache and time.time() - _reco_cache_ts < _RECO_TTL:
+            return _reco_cache
+        return await _recommender_inputs_uncached()
+
+
+async def _recommender_inputs_uncached():
+    """The actual pipeline. Callers go through _recommender_inputs (cached)."""
+    global _reco_cache, _reco_cache_ts
     feedback = await _to_thread(osc.get_all_feedback, 5000)
     score_rows = await _to_thread(osc.get_entity_features, None, 800)
     recurrence = await _to_thread(osc.get_threat_type_recurrence, 30)
@@ -3703,9 +3731,12 @@ async def _recommender_inputs():
         covered |= {a["threat_type"] for a in adopted if a.get("threat_type")}
     except Exception:
         pass
-    return {"train_rows": train_rows, "score_rows": score_rows, "recurrence": recurrence,
-            "anomaly_set": anomaly_set, "covered": covered,
-            "labelled_entities": set(disp.keys())}
+    result = {"train_rows": train_rows, "score_rows": score_rows, "recurrence": recurrence,
+              "anomaly_set": anomaly_set, "covered": covered,
+              "labelled_entities": set(disp.keys())}
+    _reco_cache = result
+    _reco_cache_ts = time.time()
+    return result
 
 
 @app.get("/api/playbooks/recommendations")
@@ -3727,7 +3758,7 @@ async def playbook_train():
     """(Re)fit the TP classifier on the current analyst labels; report honestly."""
     if not (osc and STORE_ENABLED and pbr):
         raise HTTPException(503, "Recommender unavailable")
-    inp = await _recommender_inputs()
+    inp = await _recommender_inputs(force=True)   # manual action -> recompute fresh
     model = pbr.train(inp["train_rows"], inp["anomaly_set"])
     model.pop("_model", None)   # never serialise the raw model object
     return model

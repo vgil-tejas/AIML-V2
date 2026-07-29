@@ -119,6 +119,11 @@ def get_client():
 # cartesian explosion. Time is the primary guard.
 READ_MAX_SECONDS = int(os.getenv("READ_MAX_SECONDS", "30"))
 READ_MAX_ROWS = int(os.getenv("READ_MAX_ROWS", "300000000"))   # 300M backstop
+
+# How far back the playbook recommender's scoring scan looks. Bounds a query
+# that was otherwise a full-table scan over the whole store (see
+# get_entity_features). Recent behaviour is what should drive new playbooks.
+RECO_SCORE_WINDOW_DAYS = int(os.getenv("RECO_SCORE_WINDOW_DAYS", "30"))
 _READ_SETTINGS = {
     "max_execution_time": READ_MAX_SECONDS,
     "max_rows_to_read": READ_MAX_ROWS,
@@ -547,21 +552,32 @@ def get_entity_features(entities: Optional[list] = None, limit: int = 500) -> li
     classifier. If `entities` is given, returns features for exactly those IPs
     (training set); otherwise the busiest `limit` IPs (scoring set). One scan."""
     if entities:
+        # Training set: exact features for a small, named set of IPs. The src_ip
+        # filter hits the sort key, so this is cheap and exact is fine.
         safe = ",".join("'" + str(e).replace("'", "") + "'" for e in entities if e)
         if not safe:
             return []
         where = f"WHERE src_ip IN ({safe})"
         tail = "GROUP BY entity"
+        uniq_fn, uniq_if = "uniqExact", "uniqExactIf"
     else:
-        where = "WHERE src_ip != ''"
+        # Scoring set: the busiest IPs across the store. Without a time bound this
+        # was a full-table scan with four exact-cardinality aggregates over every
+        # row (~14 min at 41M rows) — it held a pool slot for minutes and starved
+        # the whole dashboard. Bound it to a recent window (matches the 30-day
+        # recurrence signal it feeds) and use approximate cardinality (uniq/HLL,
+        # ~10x cheaper) — classifier features don't need exact distinct counts.
+        where = (f"WHERE src_ip != '' "
+                 f"AND ts >= now() - INTERVAL {RECO_SCORE_WINDOW_DAYS} DAY")
         tail = f"GROUP BY entity ORDER BY events DESC LIMIT {int(min(limit, 5000))}"
+        uniq_fn, uniq_if = "uniq", "uniqIf"
     sql = (
         f"SELECT src_ip AS entity, count() AS events, max(rule_level) AS max_lvl, "
         f"avg(rule_level) AS avg_lvl, "
         f"countIf(severity = 'critical') AS crit, countIf(severity = 'high') AS high, "
-        f"uniqExact(dst_ip) AS uniq_dst, uniqExactIf(dst_port, dst_port != '') AS uniq_ports, "
-        f"uniqExactIf(username, username != '') AS uniq_users, "
-        f"uniqExact(country) AS uniq_countries, "
+        f"{uniq_fn}(dst_ip) AS uniq_dst, {uniq_if}(dst_port, dst_port != '') AS uniq_ports, "
+        f"{uniq_if}(username, username != '') AS uniq_users, "
+        f"{uniq_fn}(country) AS uniq_countries, "
         f"arrayElement(topK(1)(threat_type), 1) AS top_threat, max(ts) AS last_seen "
         f"FROM {LOGS_TABLE} {where} {tail}"
     )
