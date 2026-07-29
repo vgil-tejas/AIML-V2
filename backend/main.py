@@ -3123,7 +3123,10 @@ async def ueba_account_takeover(days: int = 0):
 
 
 @app.get("/api/ueba/impossible-travel")
-async def ueba_impossible_travel(days: int = 0):
+async def ueba_impossible_travel(days: int = 14):
+    # days defaults to a bounded window (not 0/all-time): threat_type isn't in the
+    # sort key, so an unbounded login-event scan reads every partition (~52s at
+    # 41M rows). Recent logins are also the only ones meaningful for travel.
     if not (STORE_ENABLED and osc):
         return {"findings": [], "total": 0}
     events = await _to_thread(osc.get_recent_login_events, 5000, days)

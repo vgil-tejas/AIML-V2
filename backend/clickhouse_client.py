@@ -124,6 +124,11 @@ READ_MAX_ROWS = int(os.getenv("READ_MAX_ROWS", "300000000"))   # 300M backstop
 # that was otherwise a full-table scan over the whole store (see
 # get_entity_features). Recent behaviour is what should drive new playbooks.
 RECO_SCORE_WINDOW_DAYS = int(os.getenv("RECO_SCORE_WINDOW_DAYS", "30"))
+
+# Default look-back for auth-event sweeps (impossible-travel, ATO) when a caller
+# passes days<=0. Bounds an otherwise unbounded full-partition scan; recent-only
+# is also the correct horizon for these signals.
+LOGIN_EVENTS_DEFAULT_DAYS = int(os.getenv("LOGIN_EVENTS_DEFAULT_DAYS", "14"))
 _READ_SETTINGS = {
     "max_execution_time": READ_MAX_SECONDS,
     "max_rows_to_read": READ_MAX_ROWS,
@@ -1017,14 +1022,20 @@ def get_entity_aggregates(field: str = "username", limit: int = 500) -> list[dic
 
 
 def get_recent_login_events(limit: int = 5000, days: int = 0) -> list[dict]:
-    """Recent auth-related events (success + brute force) for ATO sweeps."""
+    """Recent auth-related events (success + brute force) for ATO sweeps.
+
+    Always time-bounded: threat_type is not in the sort/partition key, so an
+    unbounded scan reads every partition (~52s at 41M rows and a starvation
+    source). days<=0 falls back to LOGIN_EVENTS_DEFAULT_DAYS — impossible-travel
+    and ATO are recent-behaviour signals, so a bounded window is also correct."""
+    if days <= 0:
+        days = LOGIN_EVENTS_DEFAULT_DAYS
     where = ("threat_type IN ('login_success','brute_force','ssh_bruteforce',"
-             "'vpn_bruteforce','rdp_relay') AND username != ''")
-    if days > 0:
-        where += " AND ts >= now() - INTERVAL {days:UInt32} DAY"
+             "'vpn_bruteforce','rdp_relay') AND username != '' "
+             "AND ts >= now() - INTERVAL {days:UInt32} DAY")
     sql = (f"SELECT {_EVENT_COLS} FROM {LOGS_TABLE} WHERE {where} "
            f"ORDER BY ts ASC LIMIT {int(min(limit, 200000))}")
-    return _shape_events(_q(sql, {"days": days}))
+    return _shape_events(_q(sql, {"days": int(days)}))
 
 
 # ── ingestion (used by backend CSV/manual ingest; watcher inserts directly) ─
