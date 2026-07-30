@@ -1,0 +1,29 @@
+<?xml version="1.0"?>
+<!--
+  CPU-bounded profile for constrained hosts (e.g. a 12-core bank VM where
+  ClickHouse shares the box with Wazuh, the backend, the ML engine, etc.).
+
+  Every value here changes only HOW MANY CPU THREADS ClickHouse uses — never the
+  data it returns. Queries and merges just run with less parallelism (a little
+  slower, far lighter on CPU). All values come from environment variables set in
+  the compose file, so they are tunable per host without editing this file:
+
+     CH_MAX_THREADS             threads per query        (default 4)
+     CH_BACKGROUND_POOL_SIZE    concurrent merge threads (default 8)
+     CH_MAX_CONCURRENT_QUERIES  concurrent queries cap   (default 16)
+-->
+<clickhouse>
+    <!-- Background merge/mutation worker pool — the main "idle" CPU user. -->
+    <background_pool_size from_env="CH_BACKGROUND_POOL_SIZE"/>
+    <!-- Hard cap on simultaneous queries so a burst can't fan out over all cores. -->
+    <max_concurrent_queries from_env="CH_MAX_CONCURRENT_QUERIES"/>
+
+    <profiles>
+        <!-- Default profile: caps threads for ANY query, including the ML
+             engine's direct queries and interactive/admin queries that don't
+             pass through the backend's per-query setting. -->
+        <default>
+            <max_threads from_env="CH_MAX_THREADS"/>
+        </default>
+    </profiles>
+</clickhouse>

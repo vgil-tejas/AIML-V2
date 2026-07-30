@@ -4887,11 +4887,23 @@ async def get_resilience():
 
 @app.get("/api/health")
 async def health():
-    # Keep this lightweight - Docker health check has a 5s timeout.
-    # Only verify the client can be obtained; never run a query here.
+    # Keep this lightweight and, above all, POOL-FREE. Acquiring a client here
+    # blocks on a free connection slot when the pool is saturated by dashboard
+    # queries — which made /api/health hang ~17s and the container flap
+    # "unhealthy" even though the store was fine. Instead trust the liveness
+    # stamp (the watcher + cache-warmer touch the store constantly); only if it
+    # is stale do a short, off-loop probe that can never hang the event loop.
     ch_status = "disabled"
     if STORE_ENABLED and osc:
-        ch_status = "connected" if osc.get_client() else "connection_failed"
+        if osc.store_recently_ok(120):
+            ch_status = "connected"
+        else:
+            try:
+                ok = await asyncio.wait_for(
+                    _to_thread(lambda: osc.get_client() is not None), timeout=3)
+                ch_status = "connected" if ok else "connection_failed"
+            except Exception:
+                ch_status = "degraded"
     return {
         "status": "ok",
         "version": "2.2.0",

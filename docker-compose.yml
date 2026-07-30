@@ -15,12 +15,18 @@ services:
       - CLICKHOUSE_USER=default
       - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASS:-tejas@123}
       - CLICKHOUSE_PASS=${CLICKHOUSE_PASS:-tejas@123}   # for the healthcheck below
+      # CPU caps (read by clickhouse/config.d/low-cpu.xml). Sized for a ~12-core
+      # host; raise on a bigger box. Same query results, fewer CPU threads.
+      - CH_MAX_THREADS=${CH_MAX_THREADS:-4}
+      - CH_BACKGROUND_POOL_SIZE=${CH_BACKGROUND_POOL_SIZE:-8}
+      - CH_MAX_CONCURRENT_QUERIES=${CH_MAX_CONCURRENT_QUERIES:-16}
     ports:
       - "${CLICKHOUSE_HTTP_PORT:-18123}:8123"
       - "${CLICKHOUSE_NATIVE_PORT:-19000}:9000"
     volumes:
       - clickhouse_data:/var/lib/clickhouse
       - ./clickhouse/init:/docker-entrypoint-initdb.d:ro
+      - ./clickhouse/config.d:/etc/clickhouse-server/config.d:ro
     ulimits:
       nofile:
         soft: 262144

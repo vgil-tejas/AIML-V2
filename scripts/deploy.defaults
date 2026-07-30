@@ -1,0 +1,17 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Deployment defaults — applied by scripts/install.sh when it creates a FRESH
+# .env (i.e. only on a brand-new server, never overwriting an existing .env).
+#
+# This file lives ONLY in the private repo. It seeds a FRESH .env so a new
+# install never has to type these values.
+#
+# The Groq API key is intentionally NOT committed here (a live key in git is a
+# leak, even in a private repo). Leave the placeholder below and provide the
+# real key to install.sh in ONE of these ways on the new server:
+#   • export GROQ_API_KEY=gsk_...   before running the installer, OR
+#   • paste it into .env after install:  GROQ_API_KEY=gsk_...  then: aiml restart
+# install.sh detects the placeholder and skips baking, so nothing breaks.
+# ─────────────────────────────────────────────────────────────────────────────
+
+GROQ_API_KEY="gsk_REPLACE_WITH_YOUR_GROQ_KEY"
+CLICKHOUSE_PASS="tejas@123"

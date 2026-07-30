@@ -13,6 +13,7 @@ Synchronous helpers (safe to call from any context), matching the old client.
 """
 import os
 import re
+import time
 import json
 import hashlib
 import logging
@@ -129,12 +130,33 @@ RECO_SCORE_WINDOW_DAYS = int(os.getenv("RECO_SCORE_WINDOW_DAYS", "30"))
 # passes days<=0. Bounds an otherwise unbounded full-partition scan; recent-only
 # is also the correct horizon for these signals.
 LOGIN_EVENTS_DEFAULT_DAYS = int(os.getenv("LOGIN_EVENTS_DEFAULT_DAYS", "14"))
+# CPU cap: ClickHouse defaults max_threads to the CPU core count, so ONE query
+# can grab every core (a real problem on a 12-core bank VM where CH shares the
+# box with Wazuh etc.). Capping threads per query cuts CPU sharply with IDENTICAL
+# results — only speed changes, not the rows returned. 0 = leave ClickHouse's
+# default (use all cores). Tune per host with READ_MAX_THREADS.
+READ_MAX_THREADS = int(os.getenv("READ_MAX_THREADS", "4"))
 _READ_SETTINGS = {
     "max_execution_time": READ_MAX_SECONDS,
     "max_rows_to_read": READ_MAX_ROWS,
     "timeout_overflow_mode": "throw",
     "read_overflow_mode": "throw",
 }
+if READ_MAX_THREADS > 0:
+    _READ_SETTINGS["max_threads"] = READ_MAX_THREADS
+
+# Liveness stamp: the wall-clock time of the last SUCCESSFUL store interaction.
+# /api/health reads this instead of acquiring a pooled client, so a saturated
+# connection pool can never make the health check hang (it was queuing for a
+# free slot and timing out even though the store was fine). On a live feed the
+# watcher and cache-warmer touch the store constantly, so this stays fresh.
+_store_last_ok: float = 0.0
+
+
+def store_recently_ok(max_age: float = 120.0) -> bool:
+    """True if a store query succeeded within max_age seconds — a pool-free,
+    non-blocking way for /api/health to know the store is alive."""
+    return (time.time() - _store_last_ok) < max_age
 
 
 def _q(sql: str, params: Optional[dict] = None):
@@ -148,7 +170,10 @@ def _q(sql: str, params: Optional[dict] = None):
     try:
         res = client.query(sql, parameters=params or {}, settings=_READ_SETTINGS)
         cols = res.column_names
-        return [dict(zip(cols, row)) for row in res.result_rows]
+        rows = [dict(zip(cols, row)) for row in res.result_rows]
+        global _store_last_ok
+        _store_last_ok = time.time()   # stamp liveness for pool-free /api/health
+        return rows
     except Exception as e:
         logger.error(f"ClickHouse query failed: {e} :: {sql[:160]}")
         _thread_local.client = None   # force reconnect on next call from this thread
