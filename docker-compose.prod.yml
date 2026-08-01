@@ -36,7 +36,11 @@ services:
     volumes:
       - store_data:/var/lib/clickhouse
       - ./clickhouse/init:/docker-entrypoint-initdb.d:ro   # schema DDL only (no app code)
-      - ./clickhouse/config.d:/etc/clickhouse-server/config.d:ro
+      # Mount the SINGLE file, NOT the whole config.d dir — mounting the directory
+      # shadows the image's docker_related_config.xml (listen_host=0.0.0.0/::) and
+      # leaves ClickHouse on localhost-only, so networked clients get "Connection
+      # refused" on 8123 while the local healthcheck still passes.
+      - ./clickhouse/config.d/low-cpu.xml:/etc/clickhouse-server/config.d/low-cpu.xml:ro
     ulimits:
       nofile: { soft: 262144, hard: 262144 }
     deploy:
