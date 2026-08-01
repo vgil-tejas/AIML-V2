@@ -1,29 +1,22 @@
 <?xml version="1.0"?>
 <!--
-  CPU-bounded profile for constrained hosts (e.g. a 12-core bank VM where
-  ClickHouse shares the box with Wazuh, the backend, the ML engine, etc.).
+  CPU-bounded profile for constrained hosts (e.g. a 12-core bank VM).
 
-  Every value here changes only HOW MANY CPU THREADS ClickHouse uses — never the
-  data it returns. Queries and merges just run with less parallelism (a little
-  slower, far lighter on CPU). All values come from environment variables set in
-  the compose file, so they are tunable per host without editing this file:
+  IMPORTANT: the main CPU lever — per-query thread capping — is done APP-SIDE, not
+  here. The backend sends `max_threads` on every read via READ_MAX_THREADS
+  (backend/clickhouse_client.py, default 4). That is what actually keeps queries
+  off all 12 cores, and it works regardless of this file.
 
-     CH_MAX_THREADS             threads per query        (default 4)
-     CH_BACKGROUND_POOL_SIZE    concurrent merge threads (default 8)
-     CH_MAX_CONCURRENT_QUERIES  concurrent queries cap   (default 16)
+  This file sets only ONE server-level guardrail that is safe in ClickHouse 24.3:
+  a cap on how many queries may run at once, so a dashboard burst can't fan out
+  over every core. Tunable via CH_MAX_CONCURRENT_QUERIES in the compose file.
+
+  DO NOT re-add `background_pool_size` or a `<profiles><default><max_threads>`
+  block here. In ClickHouse 24.3 those forms are rejected when the SERVER config
+  is loaded, and the server crash-loops on startup (it did — the store went down
+  on 2026-08-01). Server-level settings only in config.d; profile/thread settings
+  belong in users.d, and default merge concurrency is already fine on 12 cores.
 -->
 <clickhouse>
-    <!-- Background merge/mutation worker pool — the main "idle" CPU user. -->
-    <background_pool_size from_env="CH_BACKGROUND_POOL_SIZE"/>
-    <!-- Hard cap on simultaneous queries so a burst can't fan out over all cores. -->
     <max_concurrent_queries from_env="CH_MAX_CONCURRENT_QUERIES"/>
-
-    <profiles>
-        <!-- Default profile: caps threads for ANY query, including the ML
-             engine's direct queries and interactive/admin queries that don't
-             pass through the backend's per-query setting. -->
-        <default>
-            <max_threads from_env="CH_MAX_THREADS"/>
-        </default>
-    </profiles>
 </clickhouse>
