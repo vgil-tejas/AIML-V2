@@ -180,6 +180,19 @@ BASELINE_TTL  = 60 * 60 * 24 * 90
 MIN_EVENTS_FOR_BASELINE = 10
 VOLUME_SPIKE_MULTIPLIER = 3
 
+# -- Baseline build-all guardrails --------------------------------------------
+# build-all used to rebuild a baseline for EVERY IP ever seen (get_all_unique_ips
+# = up to 10k IPs), synchronously, holding 10 pool connections for ~15 minutes.
+# The watcher re-fires it every TRAIN_COOLDOWN (900s), so it ran essentially
+# non-stop and starved the pool -> dashboard + /api/health timed out and the
+# container flapped "unhealthy". We now scope it to RECENTLY-ACTIVE IPs only
+# (cold IPs have no new events, so their baseline can't change), hard-cap the
+# count, run at low concurrency to leave pool headroom, and return immediately
+# as a background task. Same baselines for live traffic, a fraction of the cost.
+BASELINE_ACTIVE_HOURS = int(os.getenv("BASELINE_ACTIVE_HOURS", "24"))
+BASELINE_MAX_IPS      = int(os.getenv("BASELINE_MAX_IPS", "500"))
+BASELINE_CONCURRENCY  = int(os.getenv("BASELINE_CONCURRENCY", "4"))
+
 # -- Stats cache (avoids 7 ClickHouse queries every 10 s) ---------------------
 _stats_cache: dict = {}
 _stats_cache_ts: float = 0.0
@@ -947,15 +960,43 @@ async def force_build_baseline(ip: str):
     return {"status":"not_enough_data","ip":ip}
 
 
-@app.post("/api/baseline/build-all")
-async def build_all_baselines():
-    ips = osc.get_all_unique_ips() if (STORE_ENABLED and osc) else list(_ipcnt.keys())
-    sem = asyncio.Semaphore(10)  # max 10 concurrent ClickHouse queries
+async def _run_build_all(max_ips: int):
+    """Rebuild baselines for recently-active IPs only. Runs in the background so
+    the HTTP request (and the shared CH pool) is never held for the full scan."""
+    # Only IPs with events in the recent window need a refreshed baseline — a
+    # cold IP has no new data, so rebuilding its baseline is pure wasted CPU.
+    ips: list[str] = []
+    try:
+        rows = await _to_thread(
+            osc._q,
+            f"SELECT src_ip, count() AS c FROM cybersentinel.logs "
+            f"WHERE ts > now() - INTERVAL {int(BASELINE_ACTIVE_HOURS)} HOUR AND src_ip != '' "
+            f"GROUP BY src_ip ORDER BY c DESC LIMIT {int(max_ips)}",
+        )
+        ips = [r["src_ip"] for r in rows if r.get("src_ip")]
+    except Exception:
+        # Fallback: top IPs from the aggregate table (still capped).
+        try:
+            ips = (await _to_thread(osc.get_all_unique_ips, max_ips))[:max_ips]
+        except Exception:
+            ips = list(_ipcnt.keys())[:max_ips]
+
+    sem = asyncio.Semaphore(BASELINE_CONCURRENCY)  # leave pool headroom for the UI
     async def _build(ip: str):
         async with sem:
             await build_baseline(ip)
     await asyncio.gather(*[_build(ip) for ip in ips])
-    return {"status": "done", "baselines_built": len(ips)}
+    logger.info(f"Baseline build-all done: {len(ips)} active IP(s)")
+
+
+@app.post("/api/baseline/build-all")
+async def build_all_baselines(background_tasks: BackgroundTasks, max_ips: int = None):
+    """Kick off a bounded baseline rebuild in the background — returns immediately."""
+    if not (STORE_ENABLED and osc):
+        return {"status": "disabled"}
+    n = int(max_ips) if max_ips else BASELINE_MAX_IPS
+    background_tasks.add_task(_run_build_all, n)
+    return {"status": "started", "max_ips": n}
 
 
 async def _scan_ip_deviations(ip: str, events_per_ip: int) -> tuple[int, int]:
