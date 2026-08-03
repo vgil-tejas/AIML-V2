@@ -3,14 +3,12 @@
 This is the quick card. The full reasoning lives in
 `docs/PROD_SCALE_AND_DEPLOY.md` — read it once before your first deploy.
 
-## Layout of versions on GitHub (repo: `Tejasvgipl/AIML-V2`)
+## Layout of versions on GitHub (repo: `cybersentinel-06/CyberSentinel-AIML`)
 
 | Ref | What it is |
 |---|---|
-| `main` | the **old** version currently running on `.23` — left untouched as the safety anchor |
-| tag `v1-last-good` | immutable pointer to that old version → the rollback target |
-| branch `release/v2` | the **new** version (this whole revamp) |
-| tag `v2.0.0` | immutable pointer to the new version → the deploy target |
+| `main` | the **current** version — what installs and servers track |
+| tag `v2.0.0` | immutable pointer to the current release → the deploy target |
 
 Your data (the ~26M logs) lives in the `clickhouse_data` Docker volume, **not**
 in git — none of this moves it.

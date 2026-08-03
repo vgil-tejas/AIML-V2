@@ -22,8 +22,8 @@ set -euo pipefail
 
 # ── Which private repo to install (no secrets — safe to be public) ───────────
 # Overridable at run time with an env var of the same name.
-GH_REPO="${GH_REPO:-github.com/Tejasvgipl/AIML-V2.git}"   # repo host/path — NO token here
-GH_BRANCH="${GH_BRANCH:-release/v2}"                      # branch the server tracks
+GH_REPO="${GH_REPO:-github.com/cybersentinel-06/CyberSentinel-AIML.git}"   # repo host/path — NO token here
+GH_BRANCH="${GH_BRANCH:-main}"                            # branch the server tracks
 INSTALL_DIR="${INSTALL_DIR:-/tejas/aiml}"                 # where the product installs
 
 say()  { printf '\n\033[1;36m▸ %s\033[0m\n' "$*"; }
