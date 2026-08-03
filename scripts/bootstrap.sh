@@ -24,7 +24,7 @@ set -euo pipefail
 # Overridable at run time with an env var of the same name.
 GH_REPO="${GH_REPO:-github.com/cybersentinel-06/CyberSentinel-AIML.git}"   # repo host/path — NO token here
 GH_BRANCH="${GH_BRANCH:-main}"                            # branch the server tracks
-INSTALL_DIR="${INSTALL_DIR:-/tejas/aiml}"                 # where the product installs
+INSTALL_DIR="${INSTALL_DIR:-/opt/cybersentinel}"          # where the product installs
 
 say()  { printf '\n\033[1;36m▸ %s\033[0m\n' "$*"; }
 ok()   { printf '\033[1;32m  ✓ %s\033[0m\n' "$*"; }
