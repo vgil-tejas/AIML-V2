@@ -15,3 +15,12 @@
 
 GROQ_API_KEY="gsk_REPLACE_WITH_YOUR_GROQ_KEY"
 CLICKHOUSE_PASS="tejas@123"
+
+# ── Login gate (single operator) — baked into a fresh .env by install.sh ──
+AUTH_ENABLED="true"
+AUTH_USER="Tejas"
+AUTH_PASS="tejas@123"
+# Leave AUTH_SECRET empty here; install.sh generates a random one per server so
+# a stolen bundle can't forge sessions. (Falls back to a derived key if unset.)
+AUTH_SECRET=""
+AUTH_TTL_HOURS="12"

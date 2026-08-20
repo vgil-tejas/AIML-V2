@@ -59,6 +59,18 @@ if [ ! -f .env ]; then
     warn "No AI key in scripts/deploy.defaults — AI panels will show 'not configured'."
   fi
   sed -i "s|^CLICKHOUSE_PASS=.*|CLICKHOUSE_PASS=${CLICKHOUSE_PASS:-tejas@123}|" .env
+
+  # ── Login gate: bake the operator credential + a per-server signing key ──
+  # AUTH_USER/AUTH_PASS come from deploy.defaults (Tejas / tejas@123). AUTH_SECRET
+  # is generated FRESH per server so a copied bundle can never forge a session.
+  AUTH_SECRET_GEN="$(openssl rand -hex 32 2>/dev/null || head -c32 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+  sed -i "s|^AUTH_ENABLED=.*|AUTH_ENABLED=${AUTH_ENABLED:-true}|"        .env
+  sed -i "s|^AUTH_USER=.*|AUTH_USER=${AUTH_USER:-Tejas}|"                .env
+  sed -i "s|^AUTH_PASS=.*|AUTH_PASS=${AUTH_PASS:-tejas@123}|"            .env
+  sed -i "s|^AUTH_SECRET=.*|AUTH_SECRET=${AUTH_SECRET_GEN}|"             .env
+  sed -i "s|^AUTH_TTL_HOURS=.*|AUTH_TTL_HOURS=${AUTH_TTL_HOURS:-12}|"    .env
+  ok "Login gate set (user '${AUTH_USER:-Tejas}', unique session key generated)."
+
   chmod 600 .env
   ok "Created .env (UI on port 19888, store password set, DEMO_MODE=false)."
 else

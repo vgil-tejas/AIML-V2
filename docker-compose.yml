@@ -21,8 +21,8 @@ services:
       - CH_BACKGROUND_POOL_SIZE=${CH_BACKGROUND_POOL_SIZE:-8}
       - CH_MAX_CONCURRENT_QUERIES=${CH_MAX_CONCURRENT_QUERIES:-16}
     ports:
-      - "${CLICKHOUSE_HTTP_PORT:-18123}:8123"
-      - "${CLICKHOUSE_NATIVE_PORT:-19000}:9000"
+      - "127.0.0.1:${CLICKHOUSE_HTTP_PORT:-18123}:8123"
+      - "127.0.0.1:${CLICKHOUSE_NATIVE_PORT:-19000}:9000"
     volumes:
       - clickhouse_data:/var/lib/clickhouse
       - ./clickhouse/init:/docker-entrypoint-initdb.d:ro
@@ -57,10 +57,20 @@ services:
   backend:
     build: ./backend
     container_name: aiml_backend
+    # Bound to localhost: nginx is the ONLY external door (it enforces the login
+    # gate). The API is still reachable on the server itself and over the Docker
+    # network, just not from the LAN — so the gate cannot be bypassed via :18110.
     ports:
-      - "${BACKEND_HOST_PORT:-18110}:8000"
+      - "127.0.0.1:${BACKEND_HOST_PORT:-18110}:8000"
     environment:
       - ABUSEIPDB_KEY=${ABUSEIPDB_KEY:-demo}
+      # ── Login gate (single operator) — see backend/auth.py ──
+      - AUTH_ENABLED=${AUTH_ENABLED:-true}
+      - AUTH_USER=${AUTH_USER:-Tejas}
+      - AUTH_PASS=${AUTH_PASS:-tejas@123}
+      - AUTH_SECRET=${AUTH_SECRET:-}
+      - AUTH_TTL_HOURS=${AUTH_TTL_HOURS:-12}
+      - AUTH_COOKIE_SECURE=${AUTH_COOKIE_SECURE:-false}
       # Demo attack replay writes synthetic rows into the store — OFF by default.
       # Never set true on the .23 production box (it would pollute the 26M dataset).
       - DEMO_MODE=${DEMO_MODE:-false}
@@ -112,7 +122,7 @@ services:
     build: ./ml-engine
     container_name: aiml_ml
     ports:
-      - "${ML_ENGINE_HOST_PORT:-18111}:8001"
+      - "127.0.0.1:${ML_ENGINE_HOST_PORT:-18111}:8001"
     environment:
       - MODEL_RETRAIN_HOURS=24
       - ML_NEW_LOG_THRESHOLD=${ML_NEW_LOG_THRESHOLD:-10000}
@@ -142,7 +152,7 @@ services:
     build: ./frontend
     container_name: aiml_frontend
     ports:
-      - "${FRONTEND_HOST_PORT:-18180}:80"
+      - "127.0.0.1:${FRONTEND_HOST_PORT:-18180}:80"
     depends_on:
       - backend
       - ml-engine

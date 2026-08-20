@@ -32,7 +32,7 @@ services:
       - CH_BACKGROUND_POOL_SIZE=${CH_BACKGROUND_POOL_SIZE:-8}
       - CH_MAX_CONCURRENT_QUERIES=${CH_MAX_CONCURRENT_QUERIES:-16}
     ports:
-      - "${CLICKHOUSE_HTTP_PORT:-18123}:8123"
+      - "127.0.0.1:${CLICKHOUSE_HTTP_PORT:-18123}:8123"
     volumes:
       - store_data:/var/lib/clickhouse
       - ./clickhouse/init:/docker-entrypoint-initdb.d:ro   # schema DDL only (no app code)
@@ -58,10 +58,18 @@ services:
   backend:
     image: cybersentinel-backend:${CS_VERSION:-2.0.0}
     container_name: cs_backend
+    # Localhost-only: nginx is the sole external door and enforces the login gate.
     ports:
-      - "${BACKEND_HOST_PORT:-18110}:8000"
+      - "127.0.0.1:${BACKEND_HOST_PORT:-18110}:8000"
     environment:
       - ABUSEIPDB_KEY=${ABUSEIPDB_KEY:-demo}
+      # ── Login gate (single operator) — see backend/auth.py ──
+      - AUTH_ENABLED=${AUTH_ENABLED:-true}
+      - AUTH_USER=${AUTH_USER:-Tejas}
+      - AUTH_PASS=${AUTH_PASS:-tejas@123}
+      - AUTH_SECRET=${AUTH_SECRET:-}
+      - AUTH_TTL_HOURS=${AUTH_TTL_HOURS:-12}
+      - AUTH_COOKIE_SECURE=${AUTH_COOKIE_SECURE:-false}
       - DEMO_MODE=false                    # never demo on a real install
       - AI_API_KEY=${GROQ_API_KEY:-${AI_API_KEY}}
       - AI_MODEL=${GROQ_MODEL:-${AI_MODEL:-llama-3.3-70b-versatile}}
@@ -99,7 +107,7 @@ services:
     image: cybersentinel-ml:${CS_VERSION:-2.0.0}
     container_name: cs_ml
     ports:
-      - "${ML_ENGINE_HOST_PORT:-18111}:8001"
+      - "127.0.0.1:${ML_ENGINE_HOST_PORT:-18111}:8001"
     environment:
       - MODEL_RETRAIN_HOURS=24
       - ML_NEW_LOG_THRESHOLD=${ML_NEW_LOG_THRESHOLD:-10000}
@@ -125,7 +133,7 @@ services:
     image: cybersentinel-frontend:${CS_VERSION:-2.0.0}
     container_name: cs_frontend
     ports:
-      - "${FRONTEND_HOST_PORT:-18180}:80"
+      - "127.0.0.1:${FRONTEND_HOST_PORT:-18180}:80"
     depends_on:
       - backend
       - ml-engine

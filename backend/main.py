@@ -91,6 +91,15 @@ except Exception as _he:
     app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
     _HARDENED = False
 
+# ── Single-operator login gate (additive; enforced at nginx via auth_request) ─
+# Adds /api/auth/login|logout|verify|me. Wrapped so a failure here can never
+# take the API down — worst case the gate is simply absent.
+try:
+    import auth as _auth
+    _auth.install_auth(app)
+except Exception as _ae:
+    logging.getLogger("cybersentinel.backend").error("auth gate install failed: %s", _ae)
+
 # Explicit thread pool - default is only cpu_count+4 (6-8 threads on most servers).
 # With 2 uvicorn workers and multiple concurrent users, the default exhausts fast.
 _executor = ThreadPoolExecutor(max_workers=20, thread_name_prefix="cs-worker")

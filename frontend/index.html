@@ -8082,11 +8082,62 @@ tr:hover td{background:#161b22}</style></head>
     // when the server/network is slow. It NEVER caches /api (all live data goes
     // straight to the network), so it can't repeat the old "Failed to fetch" bug.
     // Registered after load so it never competes with the first paint.
+    // Service worker retired (it fought the login gate by serving a cached
+    // dashboard offline). Actively remove any stale registration + caches so a
+    // logged-out visit always reaches the server and shows the login page.
     if ('serviceWorker' in navigator) {
-      window.addEventListener('load', () => {
-        navigator.serviceWorker.register('/sw.js').catch(() => {});
-      });
+      navigator.serviceWorker.getRegistrations()
+        .then(rs => rs.forEach(r => r.unregister())).catch(() => {});
+      if (window.caches && caches.keys) {
+        caches.keys().then(ks => ks.forEach(k => caches.delete(k))).catch(() => {});
+      }
     }
+  </script>
+
+  <!-- ── Login-gate client glue (added by the auth gate) ──────────────────
+       1) If a session expires mid-use, any /api call returns 401 -> send the
+          operator to the login page instead of showing broken panels.
+       2) A small "Log out" control, bottom-left, that clears the session. -->
+  <script>
+    (function () {
+      // 1) Catch 401s from the API and bounce to login (once).
+      var bounced = false;
+      var _fetch = window.fetch;
+      window.fetch = function () {
+        return _fetch.apply(this, arguments).then(function (resp) {
+          try {
+            var url = (resp && resp.url) || '';
+            if (resp && resp.status === 401 && url.indexOf('/api/') !== -1
+                && url.indexOf('/api/auth/') === -1 && !bounced) {
+              bounced = true;
+              location.replace('/login.html');
+            }
+          } catch (e) {}
+          return resp;
+        });
+      };
+
+      // 2) Logout control.
+      window.addEventListener('load', function () {
+        var b = document.createElement('button');
+        b.textContent = '⎋ Log out';
+        b.title = 'End this session';
+        b.style.cssText =
+          'position:fixed;left:12px;bottom:12px;z-index:99999;' +
+          'font:600 12px/1 Inter,system-ui,sans-serif;color:#8b949e;' +
+          'background:#161b22cc;border:1px solid #30363d;border-radius:8px;' +
+          'padding:8px 11px;cursor:pointer;backdrop-filter:blur(6px);' +
+          'transition:color .15s,border-color .15s;';
+        b.onmouseenter = function () { b.style.color = '#f85149'; b.style.borderColor = '#f85149'; };
+        b.onmouseleave = function () { b.style.color = '#8b949e'; b.style.borderColor = '#30363d'; };
+        b.onclick = function () {
+          _fetch('/api/auth/logout', { method: 'POST', credentials: 'same-origin' })
+            .catch(function () {})
+            .then(function () { location.replace('/login.html'); });
+        };
+        document.body.appendChild(b);
+      });
+    })();
   </script>
 </body>
 
