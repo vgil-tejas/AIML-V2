@@ -5,7 +5,8 @@ JWT-based authentication, user management, and login audit.
 
 Roles:
   admin  — full access + user management + audit log
-  user   — full dashboard access, cannot manage users
+  user   — full dashboard access (read-write), cannot manage users
+  viewer — read-only dashboard access (SIEM SSO users whose access=read-only)
 
 Seed on first startup: Tejas / tejas@123  (admin)
 """
@@ -42,6 +43,35 @@ SEED_PASS = os.getenv("SEED_ADMIN_PASS", "tejas@123")
 # Shared secret between SIEM and AIML. SIEM signs the exchange token with this.
 # Set in .env: SSO_SECRET=your-strong-secret-here
 SSO_SECRET = os.getenv("SSO_SECRET", "")
+
+# Our three roles. `viewer` is the read-only tier the SIEM SSO contract requires.
+VALID_ROLES = ("admin", "user", "viewer")
+
+
+def map_sso_role(role: str, access: str) -> str:
+    """Map the SIEM's (role, access) pair to one of our three roles.
+
+    The SIEM sends TWO independent claims: `role` (the analyst tier:
+    administrator / L3-Analyst / L2-Analyst / L1-Analyst) and `access`
+    (read-write / read-only — the user's authority). Seniority does NOT imply
+    write access: a senior L3 can be read-only, a junior L1 can be read-write,
+    so the read-only cutoff keys on `access`, never on the tier.
+
+        administrator                -> admin
+        (any tier) + access=read-only -> viewer
+        (any tier) + read-write       -> user
+
+    The SIEM stamps access="read-only" whenever authority isn't read-write, so
+    an unknown/missing role lands on `viewer` (least privilege) with no
+    special-casing needed here.
+    """
+    role   = (role or "").strip()
+    access = (access or "").strip().lower()
+    if role == "administrator":
+        return "admin"
+    if access == "read-only":
+        return "viewer"
+    return "user"
 
 # ── Crypto ────────────────────────────────────────────────────────────────────
 pwd_ctx = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -215,13 +245,21 @@ def sso_status():
 @app.post("/api/auth/sso/validate")
 async def sso_validate(request: Request):
     """
-    Called by the frontend when the SIEM redirects to /auth/sso?token=<jwt>.
-    Validates the exchange token signed with SSO_SECRET, auto-creates the user
-    if they don't exist yet, and returns a standard AIML JWT.
+    Called by the frontend after the SIEM redirects to the SSO landing page
+    with an exchange token. Validates the token signed with SSO_SECRET,
+    creates-or-syncs the user (Just-In-Time), and returns a standard AIML JWT.
 
-    Token format SIEM must produce (JWT HS256):
-      { "sub": "username", "email": "user@company.com", "name": "Full Name" }
-    Signed with the same SSO_SECRET configured on both sides.
+    Token claims the SIEM produces (JWT HS256):
+      { "sub": "username", "email": "...", "name": "...",
+        "role": "administrator|L3-Analyst|L2-Analyst|L1-Analyst",
+        "access": "read-write|read-only" }
+    `role` + `access` map to our role model via map_sso_role() — the SIEM is
+    authoritative for the role on every login (promotions/demotions apply at
+    once). Signed with the same SSO_SECRET configured on both sides.
+
+    NOTE (coordinated hardening — see the SSO onboarding punch-list): iss/aud/
+    nonce/exp enforcement and the RS256+JWKS path are turned on jointly with the
+    SIEM once the token shape is agreed, so they are not enforced here yet.
     """
     if not SSO_SECRET:
         raise HTTPException(status_code=503, detail="SSO_SECRET not configured on this server")
@@ -231,7 +269,8 @@ async def sso_validate(request: Request):
     if not exchange_token:
         raise HTTPException(status_code=400, detail="token is required")
 
-    # Validate signature — no exp check since SIEM tokens are long-lived
+    # Validate signature. exp/aud/iss enforcement is a coordinated flip with the
+    # SIEM (see note above) — kept off for now so the live HS256 flow doesn't break.
     try:
         payload = jwt.decode(
             exchange_token,
@@ -253,21 +292,44 @@ async def sso_validate(request: Request):
     if not username:
         raise HTTPException(status_code=400, detail="Token must contain 'sub' (username) or 'email'")
 
-    # Auto-provision user on first SSO login
+    # ── Role: the SIEM is authoritative on every login ──────────────────────
+    mapped_role = map_sso_role(payload.get("role", ""), payload.get("access", ""))
+    # Lockout guard: never let an SSO login strip admin from the bootstrap
+    # account — losing the sole admin would break user management.
+    if username == SEED_USER and mapped_role != "admin":
+        mapped_role = "admin"
+
     user = _get_user(username)
+    provisioned = False
     if not user:
+        # First SSO login — auto-provision (SSO-only: empty password_hash).
         ch().insert(
             "cybersentinel.cs_users",
-            [[str(uuid.uuid4()), username,
-              "",           # empty password_hash — SSO users cannot use local login
-              "user",
-              datetime.now(timezone.utc),
-              f"siem_sso:{email or username}",
-              1]],
+            [[str(uuid.uuid4()), username, "", mapped_role,
+              datetime.now(timezone.utc), f"siem_sso:{email or username}", 1]],
             column_names=["id", "username", "password_hash", "role",
                           "created_at", "created_by", "is_active"],
         )
         user = _get_user(username)
+        provisioned = True
+    else:
+        if not user.get("is_active"):
+            raise HTTPException(status_code=403, detail="Account is disabled")
+        # Sync the role only when it actually changed — one write per change,
+        # not per login. ReplacingMergeTree keeps this newest row per username.
+        if user["role"] != mapped_role:
+            ch().insert(
+                "cybersentinel.cs_users",
+                [[str(uuid.uuid4()), username, user["password_hash"], mapped_role,
+                  datetime.now(timezone.utc),
+                  user.get("created_by") or f"siem_sso:{email or username}", 1]],
+                column_names=["id", "username", "password_hash", "role",
+                              "created_at", "created_by", "is_active"],
+            )
+            _log(username, "sso_role_sync",
+                 client_ip=request.client.host if request.client else "",
+                 extra=f"{user['role']} -> {mapped_role}")
+            user["role"] = mapped_role
 
     if not user or not user.get("is_active"):
         raise HTTPException(status_code=403, detail="Account is disabled")
@@ -278,13 +340,13 @@ async def sso_validate(request: Request):
     _log(username, "siem_sso_login",
          client_ip=request.client.host if request.client else "",
          session_id=sid,
-         extra=f"email:{email} name:{name}")
+         extra=f"email:{email} name:{name} role:{user['role']}")
 
     return {
         "access_token": token,
         "role":         user["role"],
         "username":     username,
-        "provisioned":  not bool(_get_user(username)),  # true if just created
+        "provisioned":  provisioned,
     }
 
 
@@ -347,8 +409,8 @@ def list_users(admin: dict = Depends(admin_only)):
 def create_user(req: CreateUserReq, admin: dict = Depends(admin_only)):
     if _get_user(req.username):
         raise HTTPException(status_code=409, detail="Username already exists")
-    if req.role not in ("admin", "user"):
-        raise HTTPException(status_code=400, detail="Role must be 'admin' or 'user'")
+    if req.role not in VALID_ROLES:
+        raise HTTPException(status_code=400, detail=f"Role must be one of {', '.join(VALID_ROLES)}")
     if len(req.password) < 6:
         raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
     ch().insert(

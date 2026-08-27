@@ -71,6 +71,12 @@ services:
       - AUTH_SECRET=${AUTH_SECRET:-}
       - AUTH_TTL_HOURS=${AUTH_TTL_HOURS:-12}
       - AUTH_COOKIE_SECURE=${AUTH_COOKIE_SECURE:-false}
+      # ── SIEM SSO (auto-login from the SIEM) — see backend/auth.py ──
+      # Shared HS256 secret from the SIEM team; empty => SSO stays off (direct
+      # login only). iss/aud are the SIEM's assigned identifiers for us.
+      - SSO_SECRET=${SSO_SECRET:-}
+      - SSO_ISS=${SSO_ISS:-cybersentinel-siem}
+      - SSO_AUD=${SSO_AUD:-cybersentinel-sentinelai}
       # Demo attack replay writes synthetic rows into the store — OFF by default.
       # Never set true on the .23 production box (it would pollute the 26M dataset).
       - DEMO_MODE=${DEMO_MODE:-false}
@@ -78,10 +84,10 @@ services:
       # (conservative, production). A demo box lowers it so a live attack reddens.
       - RISK_SATURATION_POINTS=${RISK_SATURATION_POINTS:-140}
       - AI_API_KEY=${GROQ_API_KEY:-${AI_API_KEY}}
-      - AI_MODEL=${GROQ_MODEL:-${AI_MODEL:-llama-3.3-70b-versatile}}
+      - AI_MODEL=${GROQ_MODEL:-${AI_MODEL:-openai/gpt-oss-120b}}
       # Every AI feature actually uses the FAST model — forward it so an on-prem /
       # self-hosted LLM install can point it at their own model, not a Groq default.
-      - AI_FAST_MODEL=${AI_FAST_MODEL:-llama-3.1-8b-instant}
+      - AI_FAST_MODEL=${AI_FAST_MODEL:-openai/gpt-oss-20b}
       - AI_BASE_URL=${AI_BASE_URL:-https://api.groq.com/openai/v1/chat/completions}
       - LOG_LEVEL=INFO
       - CLICKHOUSE_ENABLED=${CLICKHOUSE_ENABLED:-true}

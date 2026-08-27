@@ -72,8 +72,8 @@ services:
       - AUTH_COOKIE_SECURE=${AUTH_COOKIE_SECURE:-false}
       - DEMO_MODE=false                    # never demo on a real install
       - AI_API_KEY=${GROQ_API_KEY:-${AI_API_KEY}}
-      - AI_MODEL=${GROQ_MODEL:-${AI_MODEL:-llama-3.3-70b-versatile}}
-      - AI_FAST_MODEL=${AI_FAST_MODEL:-llama-3.1-8b-instant}
+      - AI_MODEL=${GROQ_MODEL:-${AI_MODEL:-openai/gpt-oss-120b}}
+      - AI_FAST_MODEL=${AI_FAST_MODEL:-openai/gpt-oss-20b}
       - AI_BASE_URL=${AI_BASE_URL:-https://api.groq.com/openai/v1/chat/completions}
       - LOG_LEVEL=INFO
       - CH_POOL_MAXSIZE=${CH_POOL_MAXSIZE:-24}

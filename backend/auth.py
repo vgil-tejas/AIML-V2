@@ -36,7 +36,7 @@ import os
 import time
 
 from fastapi import Request, Response
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 
 log = logging.getLogger("cybersentinel.auth")
 
@@ -103,6 +103,102 @@ def _current_user(request: Request) -> str | None:
     return _valid(request.cookies.get(COOKIE_NAME, ""), secret)
 
 
+# ── SIEM SSO (single sign-on from the SIEM) ─────────────────────────────────
+# The SIEM authenticates the operator, then redirects the browser to
+#   /api/auth/sso?token=<signed JWT>
+# We verify that short-lived token and, on success, mint the SAME cs_auth
+# cookie a normal login would — so nginx's auth_request lets them straight in,
+# no login page. A bad / absent / expired token just bounces to /login.html,
+# so direct visitors still get the password prompt. SSO stays inert until
+# SSO_SECRET is set, so this endpoint is safe to ship dark.
+#
+# Bring-up signs HS256 with a secret shared with the SIEM. The RS256/JWKS
+# upgrade is a later coordinated flip (see the SSO onboarding punch-list).
+
+_SSO_LEEWAY_S = 60                     # clock-skew grace for exp/nbf (SIEM back-dates nbf 60s)
+_seen_nonces: dict[str, float] = {}    # nonce -> unix-expiry; single-use replay guard
+
+
+def _sso_cfg():
+    """SSO config read fresh so a restart picks up new .env values."""
+    secret = os.getenv("SSO_SECRET", "").strip()
+    iss    = os.getenv("SSO_ISS", "cybersentinel-siem").strip()
+    aud    = os.getenv("SSO_AUD", "cybersentinel-sentinelai").strip()
+    return secret, iss, aud
+
+
+def _map_sso_role(role: str, access: str) -> str:
+    """SIEM (role, access) -> our tier. The read-only cutoff keys on access,
+    never on seniority: a senior analyst can be read-only, a junior read-write."""
+    role   = (role or "").strip()
+    access = (access or "").strip().lower()
+    if role == "administrator":
+        return "admin"
+    if access == "read-only":
+        return "viewer"
+    return "user"
+
+
+def _prune_nonces(now: float) -> None:
+    for n, exp in list(_seen_nonces.items()):
+        if exp < now:
+            _seen_nonces.pop(n, None)
+
+
+def _verify_sso_token(token: str, secret: str) -> tuple[dict | None, str]:
+    """Verify a SIEM exchange token (HS256, stdlib-only). Returns (claims, "")
+    on success or (None, reason) on failure. Enforces alg=HS256, signature,
+    iss, aud, purpose, exp/nbf (with leeway) and single-use nonce."""
+    if not token or token.count(".") != 2:
+        return None, "malformed token"
+    header_b64, payload_b64, sig_b64 = token.split(".")
+    # 1) signature — pin the algorithm first to defeat alg-confusion / 'none'
+    try:
+        header = json.loads(_b64d(header_b64))
+    except Exception:
+        return None, "bad header"
+    if header.get("alg") != "HS256":
+        return None, f"unexpected alg {header.get('alg')!r}"
+    expected = hmac.new(
+        secret.encode("utf-8"),
+        (header_b64 + "." + payload_b64).encode("ascii"),
+        hashlib.sha256,
+    ).digest()
+    try:
+        got = _b64d(sig_b64)
+    except Exception:
+        return None, "bad signature encoding"
+    if not hmac.compare_digest(expected, got):
+        return None, "signature mismatch"
+    # 2) claims
+    try:
+        claims = json.loads(_b64d(payload_b64))
+    except Exception:
+        return None, "bad payload"
+    _secret, want_iss, want_aud = _sso_cfg()
+    if want_iss and claims.get("iss") != want_iss:
+        return None, "issuer mismatch"
+    aud = claims.get("aud")
+    aud_ok = (aud == want_aud) or (isinstance(aud, list) and want_aud in aud)
+    if want_aud and not aud_ok:
+        return None, "audience mismatch"
+    if claims.get("purpose") not in (None, "sso-exchange"):
+        return None, "wrong purpose"
+    now = time.time()
+    if "exp" in claims and now > float(claims["exp"]) + _SSO_LEEWAY_S:
+        return None, "token expired"
+    if "nbf" in claims and now < float(claims["nbf"]) - _SSO_LEEWAY_S:
+        return None, "token not yet valid"
+    # 3) single-use nonce (replay guard)
+    nonce = claims.get("nonce")
+    if nonce:
+        _prune_nonces(now)
+        if nonce in _seen_nonces:
+            return None, "nonce replay"
+        _seen_nonces[nonce] = float(claims.get("exp", now + 120)) + _SSO_LEEWAY_S
+    return claims, ""
+
+
 def install_auth(app) -> None:
     """Attach the four /api/auth/* endpoints to the FastAPI app."""
 
@@ -153,6 +249,32 @@ def install_auth(app) -> None:
         if not u:
             return JSONResponse({"authenticated": False}, status_code=401)
         return {"authenticated": True, "user": u}
+
+    @app.get("/api/auth/sso", tags=["auth"])
+    async def sso(request: Request):
+        # SIEM redirects the browser here with ?token=<signed JWT>. A good token
+        # mints the cs_auth cookie and sends them to the dashboard; anything else
+        # falls through to the normal login page (so direct visitors still get
+        # the password prompt). Inert until SSO_SECRET is configured.
+        secret, _iss, _aud = _sso_cfg()
+        if not secret:
+            return RedirectResponse("/login.html?sso=disabled", status_code=302)
+        token = request.query_params.get("token", "")
+        claims, reason = _verify_sso_token(token, secret)
+        if not claims:
+            log.warning("SSO rejected: %s", reason)
+            return RedirectResponse("/login.html?sso=failed", status_code=302)
+        # Identity: prefer the human username for display; sub is the stable id.
+        username = str(claims.get("username") or claims.get("sub") or "").strip()
+        if not username:
+            return RedirectResponse("/login.html?sso=failed", status_code=302)
+        _u, _p, cookie_secret, ttl_s, _enabled = _cfg()
+        role = _map_sso_role(claims.get("role", ""), claims.get("access", ""))
+        session_token = _mint(username, cookie_secret, ttl_s)
+        resp = RedirectResponse("/", status_code=302)
+        _set_cookie(resp, session_token, ttl_s)
+        log.info("SSO login ok user=%r role=%s sub=%r", username, role, claims.get("sub"))
+        return resp
 
     _u, _p, _s, _ttl, enabled = _cfg()
     log.info("auth gate installed (enabled=%s, user=%r, ttl=%ss)", enabled, _u, _ttl)

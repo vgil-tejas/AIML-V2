@@ -181,9 +181,10 @@ def _abuseipdb_configured() -> bool:
     k = (ABUSEIPDB_KEY or "").strip()
     return k.lower() not in _ABUSEIPDB_PLACEHOLDERS and len(k) >= 20
 AI_API_KEY  = os.getenv("AI_API_KEY", os.getenv("GROQ_API_KEY", ""))
-AI_MODEL      = os.getenv("AI_MODEL", os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile"))
-# Fast model for explanations - 8b-instant is sub-second on Groq vs 10-15s for 70b
-AI_FAST_MODEL = os.getenv("AI_FAST_MODEL", "llama-3.1-8b-instant")
+AI_MODEL      = os.getenv("AI_MODEL", os.getenv("GROQ_MODEL", "openai/gpt-oss-120b"))
+# Fast model for the high-volume path (SQL gen, explanations). Groq retires models
+# periodically — pin to a currently-served id and override via .env if it changes.
+AI_FAST_MODEL = os.getenv("AI_FAST_MODEL", "openai/gpt-oss-20b")
 AI_BASE_URL = os.getenv("AI_BASE_URL", os.getenv("GROQ_URL", "https://api.groq.com/openai/v1/chat/completions"))
 BASELINE_TTL  = 60 * 60 * 24 * 90
 MIN_EVENTS_FOR_BASELINE = 10
