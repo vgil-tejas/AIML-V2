@@ -182,7 +182,10 @@ def _verify_sso_token(token: str, secret: str) -> tuple[dict | None, str]:
     aud_ok = (aud == want_aud) or (isinstance(aud, list) and want_aud in aud)
     if want_aud and not aud_ok:
         return None, "audience mismatch"
-    if claims.get("purpose") not in (None, "sso-exchange"):
+    # The SIEM sends purpose="sso_exchange" (UNDERSCORE — this is the live
+    # contract; a hyphen was an early-draft spelling). Accept both spellings so
+    # a mid-flight change on either side can't lock everyone out, plus None.
+    if claims.get("purpose") not in (None, "sso_exchange", "sso-exchange"):
         return None, "wrong purpose"
     now = time.time()
     if "exp" in claims and now > float(claims["exp"]) + _SSO_LEEWAY_S:
@@ -250,9 +253,44 @@ def install_auth(app) -> None:
             return JSONResponse({"authenticated": False}, status_code=401)
         return {"authenticated": True, "user": u}
 
+    @app.post("/api/auth/sso/validate", tags=["auth"])
+    async def sso_validate(request: Request):
+        # The LIVE SIEM flow: the SIEM redirects to  <frontend>/auth/sso#token=<JWT>.
+        # A '#fragment' never reaches the server, so our /auth/sso landing page reads
+        # the token from window.location.hash in JS and POSTs it here as JSON. We
+        # verify it and set the SAME cs_auth cookie a password login would — then the
+        # page navigates to '/', which nginx's auth_request now lets through.
+        secret, _iss, _aud = _sso_cfg()
+        if not secret:
+            return JSONResponse({"ok": False, "error": "sso_disabled"}, status_code=503)
+        token = ""
+        try:
+            body = await request.json()
+            token = str(body.get("token", "")).strip()
+        except Exception:
+            token = ""
+        if not token:
+            return JSONResponse({"ok": False, "error": "missing_token"}, status_code=400)
+        claims, reason = _verify_sso_token(token, secret)
+        if not claims:
+            log.warning("SSO validate rejected: %s", reason)
+            return JSONResponse({"ok": False, "error": "invalid_token"}, status_code=401)
+        username = str(claims.get("username") or claims.get("sub") or "").strip()
+        if not username:
+            return JSONResponse({"ok": False, "error": "no_identity"}, status_code=401)
+        _u, _p, cookie_secret, ttl_s, _enabled = _cfg()
+        role = _map_sso_role(claims.get("role", ""), claims.get("access", ""))
+        session_token = _mint(username, cookie_secret, ttl_s)
+        resp = JSONResponse({"ok": True, "user": username, "role": role, "redirect": "/"})
+        _set_cookie(resp, session_token, ttl_s)
+        log.info("SSO validate ok user=%r role=%s sub=%r", username, role, claims.get("sub"))
+        return resp
+
     @app.get("/api/auth/sso", tags=["auth"])
     async def sso(request: Request):
-        # SIEM redirects the browser here with ?token=<signed JWT>. A good token
+        # Legacy query-string flow (?token=<JWT>) kept as a harmless fallback. The
+        # live SIEM flow uses the fragment + POST /validate route above; this GET
+        # only fires if something links straight here with a ?token= query.
         # mints the cs_auth cookie and sends them to the dashboard; anything else
         # falls through to the normal login page (so direct visitors still get
         # the password prompt). Inert until SSO_SECRET is configured.

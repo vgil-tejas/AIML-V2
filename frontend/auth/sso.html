@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1.0" />
+  <title>Signing in · CyberSentinel</title>
+  <!-- SSO landing page. The SIEM redirects the browser here with the token in
+       the URL FRAGMENT:  /auth/sso#token=<JWT>.  A fragment never reaches the
+       server, so we read it here in JS, strip it from the URL immediately, and
+       POST it to the backend, which verifies it and sets the session cookie.
+       Fully self-contained (no external CSS/JS) so it loads before auth. -->
+  <style>
+    :root{ --bg:#0d1117; --panel:#161b22; --panel2:#1c2230; --border:#30363d;
+           --text:#e6edf3; --muted:#8b949e; --accent:#58a6ff; --danger:#f85149; }
+    *{box-sizing:border-box;margin:0;padding:0}
+    html,body{height:100%}
+    body{
+      font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
+      background:radial-gradient(1200px 700px at 50% -10%, #12213b 0%, transparent 55%), var(--bg);
+      color:var(--text); display:flex; align-items:center; justify-content:center;
+      min-height:100vh; padding:24px;
+    }
+    .card{
+      width:100%; max-width:360px; text-align:center;
+      background:linear-gradient(180deg,var(--panel),var(--panel2));
+      border:1px solid var(--border); border-radius:16px; padding:40px 30px;
+      box-shadow:0 30px 80px -20px #000c, 0 0 0 1px #ffffff08 inset;
+    }
+    .spinner{
+      width:38px; height:38px; margin:0 auto 20px; border-radius:50%;
+      border:3px solid #ffffff1a; border-top-color:var(--accent);
+      animation:spin .8s linear infinite;
+    }
+    @keyframes spin{to{transform:rotate(360deg)}}
+    #msg{color:var(--muted); font-size:14px; line-height:1.5}
+    .brand{font-weight:600; letter-spacing:.02em; margin-bottom:24px; color:var(--text)}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="brand">CyberSentinel</div>
+    <div class="spinner" id="spin"></div>
+    <p id="msg">Signing you in…</p>
+  </div>
+  <script>
+  (function () {
+    var msg = document.getElementById('msg');
+    var spin = document.getElementById('spin');
+
+    function fail(reason) {
+      // Fall back to the normal password login page.
+      window.location.replace('/login.html?sso=' + (reason || 'failed'));
+    }
+
+    // 1) Read the token from the URL fragment (#token=...). JS can see the
+    //    fragment; the server never does.
+    var hash = window.location.hash || '';
+    var token = '';
+    if (hash.charAt(0) === '#') {
+      try { token = new URLSearchParams(hash.substring(1)).get('token') || ''; }
+      catch (e) { token = ''; }
+    }
+
+    // 2) Strip the fragment right away so the token can't linger in browser
+    //    history or be re-shared by copying the URL.
+    try { history.replaceState(null, '', window.location.pathname); } catch (e) {}
+
+    if (!token) { fail('failed'); return; }
+
+    // 3) Hand the token to the backend, which verifies it and sets the cookie.
+    fetch('/api/auth/sso/validate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify({ token: token })
+    }).then(function (r) {
+      return r.json().catch(function () { return {}; }).then(function (data) {
+        if (r.ok && data && data.ok) {
+          window.location.replace(data.redirect || '/');
+        } else {
+          spin.style.display = 'none';
+          msg.textContent = 'Sign-in link is invalid or expired. Redirecting…';
+          setTimeout(function () { fail('failed'); }, 1200);
+        }
+      });
+    }).catch(function () { fail('failed'); });
+  })();
+  </script>
+</body>
+</html>
