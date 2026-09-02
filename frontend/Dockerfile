@@ -2,6 +2,8 @@ FROM nginx:1.25-alpine
 COPY index.html /usr/share/nginx/html/index.html
 COPY login.html /usr/share/nginx/html/login.html
 COPY overview-neural.html /usr/share/nginx/html/overview-neural.html
+# SSO landing page (served at /auth/sso — see nginx.conf). Its own subfolder.
+COPY auth/sso.html /usr/share/nginx/html/auth/sso.html
 COPY enhance.css /usr/share/nginx/html/enhance.css
 COPY theme.css /usr/share/nginx/html/theme.css
 COPY sw.js /usr/share/nginx/html/sw.js
