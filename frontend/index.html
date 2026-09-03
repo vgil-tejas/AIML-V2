@@ -2513,8 +2513,11 @@
         </div>
 
         <div class="ns"><span>Detect</span></div>
+        <div class="ni" data-label="Use-Case Coverage" title="Use-Case Coverage" onclick="nav('usecases')" style="--nc:#4cb782">
+          <span class="node"></span><i class="nix">03</i><span class="nlab">Use-Case Coverage</span><span class="nbadge" id="rb-uc"></span>
+        </div>
         <div class="ni" data-label="Deviations" title="Deviations" onclick="nav('deviations')" style="--nc:#eb5757">
-          <span class="node"></span><i class="nix">03</i><span class="nlab">Deviations</span><span class="nbadge" id="rb-dev"></span>
+          <span class="node"></span><i class="nix">04</i><span class="nlab">Deviations</span><span class="nbadge" id="rb-dev"></span>
         </div>
         <div class="ni" data-label="UEBA · Identity" title="UEBA · Identity" onclick="nav('ueba')" style="--nc:#a78bfa">
           <span class="node"></span><i class="nix">04</i><span class="nlab">UEBA &middot; Identity</span><span class="nbadge" id="rb-ueba"></span>
@@ -3027,6 +3030,28 @@
             <span class="ti-why">every action is audit-logged · closing requires a disposition — that verdict trains the feedback loop</span></div>
           <div class="cb" id="cases-body"><div class="empty">Loading cases…</div></div>
         </div>
+      </div>
+
+      <div id="page-usecases" class="page">
+        <div class="card" style="margin-bottom:16px">
+          <div class="ch">
+            <span class="ct">🛡 Detection use-case coverage
+              <span style="font-size:11px;color:var(--muted);font-weight:400">— every named use-case, its in-built AI/analytic detector, ATT&amp;CK mapping, and what the attack leads to</span>
+            </span>
+            <span style="display:flex;gap:8px;align-items:center">
+              <div class="seg seg-sm" role="radiogroup" aria-label="Detection window" data-seg="uc-win">
+                <button type="button" class="seg-btn" role="radio" data-val="6"  onclick="ucWin(this,6)">6h</button>
+                <button type="button" class="seg-btn active" role="radio" aria-checked="true" data-val="24" onclick="ucWin(this,24)">24h</button>
+                <button type="button" class="seg-btn" role="radio" data-val="168" onclick="ucWin(this,168)">7d</button>
+              </div>
+              <button class="btn" style="font-size:11px" onclick="loadUseCases()">↻</button>
+            </span>
+          </div>
+          <div class="cb">
+            <div id="uc-summary" class="empty">Loading…</div>
+          </div>
+        </div>
+        <div id="uc-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:12px"></div>
       </div>
 
       <div id="page-ueba" class="page">
@@ -3620,6 +3645,7 @@ tr:hover td{background:#161b22}</style></head>
         deviations: 'Baseline Deviations', bslexplorer: 'Baseline Explorer',
         aiinvestigate: 'AI Investigator', nlquery: 'SOC Query', ml: 'ML Anomaly',
         incidents: 'Incident Triage', ueba: 'UEBA — Users & Entities', killchain: 'ATT&CK Kill Chain',
+        usecases: 'Detection Use-Case Coverage',
         playbooks: 'Response Playbooks', reports: 'Reports', settings: 'Settings',
       };
       document.getElementById('page-title').textContent = T[name] || name;
@@ -3634,6 +3660,7 @@ tr:hover td{background:#161b22}</style></head>
       if (name === 'playbooks') loadPlaybooksPage();
       if (name === 'settings') { loadFieldCoverage(); loadIntelConnectors(); loadDemoCard(); }
       if (name === 'ueba') loadUEBA();
+      if (name === 'usecases') loadUseCases();
       if (name === 'killchain') { loadKCTopIPs(); }
       if (name === 'users') { loadUsers(); loadTopologyStatus(); }
       if (name === 'auditlog') loadAuditLog();
@@ -6866,6 +6893,76 @@ tr:hover td{background:#161b22}</style></head>
         </div>`;
       }).join('');
     }
+    // ── Detection use-case coverage (the named tender checklist, rendered live) ──
+    let _ucWindow = 24;
+    function ucWin(btn, hours) {
+      _ucWindow = hours;
+      document.querySelectorAll('[data-seg="uc-win"] .seg-btn').forEach(b => {
+        b.classList.toggle('active', b === btn);
+        b.setAttribute('aria-checked', b === btn ? 'true' : 'false');
+      });
+      loadUseCases();
+    }
+    function _ucWinLabel(h) { return h >= 168 ? '7 days' : (h + ' hours'); }
+    const _UC_SEVCOLOR = { critical: 'var(--danger)', high: '#f2994a', medium: 'var(--warn)', low: 'var(--muted)' };
+    async function loadUseCases() {
+      const grid = document.getElementById('uc-grid');
+      const sum = document.getElementById('uc-summary');
+      sum.textContent = 'Loading…';
+      grid.innerHTML = '';
+      const data = await get(`${API}/detections?window_hours=${_ucWindow}`);
+      if (!data || !data.use_cases) { sum.innerHTML = '<span style="color:var(--danger)">Coverage data unavailable.</span>'; return; }
+      const active = data.active || 0, total = data.total || data.use_cases.length;
+      const rb = document.getElementById('rb-uc'); if (rb) { rb.textContent = active || ''; rb.classList.toggle('hot', active > 0); }
+      sum.innerHTML =
+        `<div style="display:flex;gap:18px;flex-wrap:wrap;align-items:center;font-size:12.5px">
+           <span><b style="color:var(--text);font-size:16px">${total}</b> named use-cases mapped to in-built detectors</span>
+           <span><b style="color:var(--danger);font-size:16px">${active}</b> firing now</span>
+           <span><b style="color:var(--ok);font-size:16px">${total - active}</b> armed · monitoring</span>
+           <span style="color:var(--muted)">window: last ${_ucWinLabel(data.window_hours || _ucWindow)}</span>
+         </div>`;
+      grid.innerHTML = data.use_cases.map(uc => {
+        const firing = uc.status === 'active';
+        const err = uc.status === 'error';
+        const sev = uc.max_severity || 'low';
+        const edge = firing ? (_UC_SEVCOLOR[sev] || 'var(--danger)') : (err ? 'var(--warn)' : 'var(--border)');
+        const badge = err
+          ? `<span class="badge medium" title="${esc(uc.error || '')}">detector error</span>`
+          : firing
+            ? `<span class="badge ${sev === 'medium' ? 'medium' : (sev === 'low' ? '' : sev)}" style="text-transform:none">● ${uc.count} active${sev !== 'low' ? ' · ' + sev : ''}</span>`
+            : `<span class="badge" style="background:rgba(76,183,130,.14);color:var(--ok);text-transform:none">✓ monitoring</span>`;
+        const chips = (uc.techniques || []).map(t =>
+          `<span style="font-size:10px;font-family:var(--mono);background:var(--bg3);border:1px solid var(--border);border-radius:4px;padding:1px 6px" title="${esc(t.name)}">${esc(t.id)}</span>`).join('')
+          + `<span style="font-size:10px;background:rgba(94,106,210,.14);color:#8b93e6;border-radius:4px;padding:1px 6px">${esc(uc.category)}</span>`;
+        const hits = firing
+          ? `<div style="margin-top:4px">${uc.top.map(h => `
+               <div style="display:flex;gap:7px;align-items:flex-start;font-size:11.5px;margin-bottom:5px">
+                 <span style="width:7px;height:7px;border-radius:50%;background:${_UC_SEVCOLOR[h.severity] || 'var(--muted)'};margin-top:5px;flex:0 0 auto"></span>
+                 <span style="color:var(--text)">${esc(h.label)}</span>
+               </div>`).join('')}</div>`
+          : (err
+              ? `<div style="font-size:11.5px;color:var(--warn)">Detector query needs attention — check backend logs.</div>`
+              : `<div style="font-size:11.5px;color:var(--ok)">✓ Detector armed — no matches in the last ${_ucWinLabel(_ucWindow)}.</div>`);
+        return `<div class="card" style="border-left:3px solid ${edge};margin:0">
+          <div class="ch" style="align-items:flex-start;gap:8px">
+            <span class="ct" style="font-size:12.5px;line-height:1.35;font-weight:600">
+              <span style="font-family:var(--mono);color:var(--muted);font-size:10.5px">${esc(uc.code)}</span> ${esc(uc.name)}
+            </span>
+            ${badge}
+          </div>
+          <div class="cb">
+            <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:9px">${chips}</div>
+            <div style="font-size:11px;color:var(--muted);margin-bottom:9px"><b style="color:var(--text)">Detector:</b> ${esc(uc.engine)}</div>
+            <div style="font-size:11.5px;background:rgba(242,153,74,.08);border-left:2px solid #f2994a;border-radius:4px;padding:7px 10px;margin-bottom:10px;line-height:1.45">
+              <b style="color:#f2994a">⚠ This attack could happen:</b> <span style="color:var(--text)">${esc(uc.attack_could_happen)}</span>
+            </div>
+            <div style="font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px">${firing ? 'Detected now' : 'What it watches'}</div>
+            ${firing ? hits : `<div style="font-size:11.5px;color:var(--muted);margin-bottom:6px">${esc(uc.looks_for)}</div>` + hits}
+          </div>
+        </div>`;
+      }).join('');
+    }
+
     async function loadUEBA() {
       get(`${API}/ueba/risk`).then(renderUEBARisk);
       const [ato, travel, peers] = await Promise.all([

@@ -43,6 +43,10 @@ try:
     import intel_hub                   # pluggable external threat-intel connectors
 except Exception:
     intel_hub = None  # type: ignore
+try:
+    import detections as det           # named detection use-cases (tender checklist)
+except Exception:
+    det = None  # type: ignore
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
@@ -3250,6 +3254,28 @@ async def ueba_peer_outliers(field: str = "username", limit: int = 500):
     rows = await _to_thread(osc.get_entity_aggregates, fld, limit)
     return {"field": fld, "population": len(rows),
             "outliers": ub.peer_outliers(rows) if ub else []}
+
+
+# ── Named detection use-cases (the tender checklist, rendered live) ────────────
+_DETECTIONS_CACHE: dict = {}
+_DETECTIONS_TTL = 90
+
+
+@app.get("/api/detections")
+async def detections_catalog(window_hours: int = 24):
+    """Every named security use-case with its live status ('active' = firing now,
+    'monitoring' = armed, zero current hits). This is the evaluator-facing map of
+    requirement → in-built detector → ATT&CK technique → 'what this attack leads to'."""
+    if det is None:
+        return {"total": 0, "active": 0, "use_cases": [], "error": "catalog unavailable"}
+    w = max(1, min(int(window_hours or 24), 720))
+    key = f"det:{w}"
+    hit = _DETECTIONS_CACHE.get(key)
+    if hit and time.time() - hit[0] < _DETECTIONS_TTL:
+        return hit[1]
+    data = await _to_thread(det.run_catalog, osc, w)
+    _DETECTIONS_CACHE[key] = (time.time(), data)
+    return data
 
 
 # -- Incident correlation + triage queue (Phase 4) ------------------------------
