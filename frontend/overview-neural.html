@@ -771,6 +771,15 @@ body{font-family:var(--sans);color:var(--text);min-height:100vh;
     <div class="card-b" id="queue"></div>
   </div>
 
+  <!-- Threat forecast — projects live detections forward along the kill chain -->
+  <div class="card" style="margin-top:16px">
+    <div class="card-h">
+      <span class="card-t">🔮 Threat forecast — what could happen next</span>
+      <span class="card-badge" id="forecast-badge">predictive · from live detections</span>
+    </div>
+    <div class="card-b" id="forecast-b"><div class="empty-note">Projecting live signals forward…</div></div>
+  </div>
+
   <!-- 02 · WHY THESE ENTITIES -->
   <div class="sec" id="s-fusion"><span class="no">02</span><span class="nm">Why these entities</span><span class="ln"></span><span class="mod ai">Signal fusion · the arithmetic behind every score</span></div>
   <div class="card">
@@ -872,6 +881,65 @@ const j = async (u) => {
     return await r.json();
   } catch (e) { flagApiFail(u, e.message || 'network error'); return null; }
 };
+
+/* ═══ THREAT FORECAST — projects live named detections forward ═══
+   Pulls /api/detections (the same named use-case catalog SOC analysts see) and,
+   for every use-case FIRING now, shows the attack it is likely to lead to next.
+   This is the "what could happen in the future" read on the main dashboard. */
+(async function renderForecast() {
+  const box = document.getElementById('forecast-b');
+  const badge = document.getElementById('forecast-badge');
+  if (!box) return;
+  const esc = v => String(v == null ? '' : v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const SEVC = { critical: 'var(--danger)', high: '#f2994a', medium: '#f2c94c', low: 'var(--muted)' };
+  const SEVRANK = { critical: 3, high: 2, medium: 1, low: 0 };
+  const data = await j(`${API}/detections?window_hours=24`);
+  if (!data || !data.use_cases) {
+    box.innerHTML = '<div class="empty-note">Forecast unavailable — detection catalog did not respond.</div>';
+    return;
+  }
+  const active = data.use_cases.filter(u => u.status === 'active')
+    .sort((a, b) => (SEVRANK[b.max_severity] || 0) - (SEVRANK[a.max_severity] || 0));
+  const total = data.total || data.use_cases.length;
+  if (badge) badge.textContent = `${active.length} active · ${total} detectors armed`;
+
+  if (!active.length) {
+    box.innerHTML =
+      `<div style="display:flex;align-items:center;gap:10px;padding:6px 2px">
+         <span style="width:9px;height:9px;border-radius:50%;background:var(--ok);box-shadow:0 0 9px var(--ok)"></span>
+         <span style="font-size:13px;color:var(--text)">Forecast clear — no active attack chains right now.</span>
+       </div>
+       <div style="font-size:11.5px;color:var(--muted);margin-top:7px">
+         All <b style="color:var(--text)">${total}</b> named detectors are armed and watching. If an attack begins,
+         its predicted next move appears here.
+       </div>`;
+    return;
+  }
+
+  const lead = `<div style="font-size:12px;color:var(--muted);margin-bottom:12px">
+      <b style="color:var(--danger)">${active.length}</b> active attack signal${active.length === 1 ? '' : 's'} on the wire —
+      if unchecked, these are the likely next moves:</div>`;
+  const rows = active.slice(0, 6).map(u => {
+    const col = SEVC[u.max_severity] || 'var(--muted)';
+    const first = (u.top && u.top[0] && u.top[0].label) ? u.top[0].label : (u.looks_for || '');
+    return `<div style="display:grid;grid-template-columns:10px minmax(0,1fr);gap:12px;align-items:start;
+                 padding:12px 0;border-top:1px solid var(--border)">
+        <span style="width:9px;height:9px;border-radius:50%;background:${col};margin-top:5px;box-shadow:0 0 8px ${col}"></span>
+        <div style="min-width:0">
+          <div style="font-size:12.5px;color:var(--text);font-weight:600;margin-bottom:3px">
+            Detected now — ${esc(u.name)}
+            <span style="font-family:var(--mono);font-size:10px;color:var(--muted);font-weight:400">${esc(u.code)}</span>
+          </div>
+          <div style="font-size:11.5px;color:var(--muted);margin-bottom:6px">${esc(first)}</div>
+          <div style="font-size:12px;color:var(--text);background:rgba(242,153,74,.08);
+                      border-left:2px solid #f2994a;border-radius:5px;padding:7px 10px;line-height:1.5">
+            <b style="color:#f2994a">⚠ Could lead to:</b> ${esc(u.attack_could_happen)}
+          </div>
+        </div>
+      </div>`;
+  }).join('');
+  box.innerHTML = lead + rows;
+})();
 const num = v => Number(v || 0).toLocaleString();
 const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const pretty = s => String(s || '').replace(/_/g, ' ');
