@@ -36,6 +36,14 @@ services:
       nofile:
         soft: 262144
         hard: 262144
+    # CPU PRIORITY under contention. The box is shared with other teams' services
+    # (SIEM stack etc.); with equal default weight (1024) they starve ClickHouse
+    # whenever they're busy — the "slow when other services run" symptom. A higher
+    # share makes the kernel scheduler favour ClickHouse when cores are contested.
+    # It only bites UNDER contention (no cost when the box is idle). For hard
+    # isolation on a known-size box, also pin cores via CLICKHOUSE_CPUSET (e.g.
+    # cpuset: "0-7") and raise READ_MAX_THREADS to match — see .env guidance.
+    cpu_shares: ${CLICKHOUSE_CPU_SHARES:-4096}
     deploy:
       resources:
         limits:
@@ -107,6 +115,9 @@ services:
     depends_on:
       clickhouse:
         condition: service_healthy
+    # Give the API a scheduling edge over co-tenant services too, so the dashboard
+    # stays responsive under load — but below ClickHouse, which does the real work.
+    cpu_shares: ${BACKEND_CPU_SHARES:-2048}
     deploy:
       resources:
         limits:
