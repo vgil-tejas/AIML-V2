@@ -890,6 +890,10 @@ const j = async (u) => {
   const box = document.getElementById('forecast-b');
   const badge = document.getElementById('forecast-badge');
   if (!box) return;
+  // Defer: let the critical verdict/queue paint first. The forecast is a
+  // lower panel and reads a warm server cache, so a short delay keeps it off
+  // the boot's contention path without the user noticing.
+  await new Promise(r => setTimeout(r, 1500));
   const esc = v => String(v == null ? '' : v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   const SEVC = { critical: 'var(--danger)', high: '#f2994a', medium: '#f2c94c', low: 'var(--muted)' };
   const SEVRANK = { critical: 3, high: 2, medium: 1, low: 0 };

@@ -164,11 +164,17 @@ async def _start_background_refresh():
             await asyncio.sleep(_fast_every)
 
     async def _refresh_incidents():
-        """Incidents are heavier - first run at 10s, then every _inc_every."""
+        """Incidents + detection forecast are heavier - first run at 10s, then
+        every _inc_every. Warming these here means the Overview boot (which fetches
+        both) always reads a ready cache instead of triggering the compute itself."""
         await asyncio.sleep(10)
         while True:
             try:
                 await _gather_incidents()
+            except Exception:
+                pass
+            try:
+                await _gather_detections(24)
             except Exception:
                 pass
             await asyncio.sleep(_inc_every)
@@ -3257,8 +3263,54 @@ async def ueba_peer_outliers(field: str = "username", limit: int = 500):
 
 
 # ── Named detection use-cases (the tender checklist, rendered live) ────────────
-_DETECTIONS_CACHE: dict = {}
-_DETECTIONS_TTL = 90
+# The forecast panel on the Overview fetches this on boot, so it MUST follow the
+# same discipline as /api/stats: never block the critical path, never let a cache
+# miss storm the pool. It runs ~17 aggregations (a few over a multi-day baseline),
+# so we serve from a warm cache, single-flight the cold compute, and serve the
+# stale copy while a background task refreshes it. The refresh loop keeps it warm.
+_DETECTIONS_CACHE: dict = {}          # key -> data
+_DETECTIONS_TS: dict = {}             # key -> last-computed epoch
+_DETECTIONS_TTL = 300                 # forecast is not real-time; 5 min is plenty
+_detections_sf: dict = {}             # key -> asyncio.Lock (single-flight per window)
+_detections_computing: set = set()
+
+
+async def _recompute_detections(w: int, key: str):
+    if key in _detections_computing:
+        return
+    _detections_computing.add(key)
+    try:
+        data = await _to_thread(det.run_catalog, osc, w)
+        _DETECTIONS_CACHE[key] = data
+        _DETECTIONS_TS[key] = time.time()
+    except Exception:
+        pass
+    finally:
+        _detections_computing.discard(key)
+
+
+async def _gather_detections(window_hours: int = 24) -> dict:
+    if det is None or not (STORE_ENABLED and osc):
+        return {"total": 0, "active": 0, "use_cases": []}
+    w = max(1, min(int(window_hours or 24), 720))
+    key = f"det:{w}"
+    now = time.time()
+    cached = _DETECTIONS_CACHE.get(key)
+    age = now - _DETECTIONS_TS.get(key, 0.0)
+    if cached and age < _DETECTIONS_TTL:
+        return cached                                    # fresh
+    if cached:                                           # stale -> serve stale, refresh async
+        asyncio.create_task(_recompute_detections(w, key))
+        return cached
+    # cold: compute once under single-flight so N boots don't all recompute
+    lock = _detections_sf.setdefault(key, asyncio.Lock())
+    async with lock:
+        if _DETECTIONS_CACHE.get(key) and time.time() - _DETECTIONS_TS.get(key, 0.0) < _DETECTIONS_TTL:
+            return _DETECTIONS_CACHE[key]
+        data = await _to_thread(det.run_catalog, osc, w)
+        _DETECTIONS_CACHE[key] = data
+        _DETECTIONS_TS[key] = time.time()
+        return data
 
 
 @app.get("/api/detections")
@@ -3268,14 +3320,7 @@ async def detections_catalog(window_hours: int = 24):
     requirement → in-built detector → ATT&CK technique → 'what this attack leads to'."""
     if det is None:
         return {"total": 0, "active": 0, "use_cases": [], "error": "catalog unavailable"}
-    w = max(1, min(int(window_hours or 24), 720))
-    key = f"det:{w}"
-    hit = _DETECTIONS_CACHE.get(key)
-    if hit and time.time() - hit[0] < _DETECTIONS_TTL:
-        return hit[1]
-    data = await _to_thread(det.run_catalog, osc, w)
-    _DETECTIONS_CACHE[key] = (time.time(), data)
-    return data
+    return await _gather_detections(window_hours)
 
 
 # -- Incident correlation + triage queue (Phase 4) ------------------------------

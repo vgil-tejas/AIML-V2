@@ -24,6 +24,14 @@ Design notes
 """
 from __future__ import annotations
 
+import os
+
+# Baseline window for the "rare" detectors (rare user / rare error / rare-user
+# access). These GROUP BY over the raw logs, so at 100M+ rows a 30-day window is
+# an expensive scan. 7 days still identifies rarely-seen entities while touching
+# ~4x fewer daily partitions. Override with DETECT_BASELINE_DAYS if needed.
+BASELINE_DAYS = max(1, min(int(os.getenv("DETECT_BASELINE_DAYS", "7")), 30))
+
 # ── ATT&CK technique labels (kept in sync with threat_intel.KB) ────────────────
 _TECH = {
     "T1110": "Brute Force",
@@ -137,13 +145,14 @@ def _d_rare_user(osc, w, T):  # (e)
     rows = osc._q(f"""
         SELECT username, count() AS lifetime, min(ts) AS first_seen
         FROM {T}
-        WHERE ts >= now() - INTERVAL 30 DAY AND {_NOT_MACHINE}
+        WHERE ts >= now() - INTERVAL {BASELINE_DAYS} DAY AND {_NOT_MACHINE}
         GROUP BY username
         HAVING max(ts) >= now() - INTERVAL {w} HOUR
            AND (lifetime <= 3 OR first_seen >= now() - INTERVAL {w} HOUR)
         ORDER BY first_seen DESC LIMIT 8""")
     return [{"entity": _s(r["username"]),
-             "label": f"{_s(r['username'])} — rare account: only {int(r['lifetime'])} events in 30d, active now",
+             "label": f"{_s(r['username'])} — rare account: only {int(r['lifetime'])} events "
+                      f"in {BASELINE_DAYS}d, active now",
              "severity": "medium"} for r in rows]
 
 
@@ -179,7 +188,7 @@ def _d_rare_error(osc, w, T):  # (g)
         SELECT rule, rule_id, count() AS lifetime,
                countIf(ts >= now() - INTERVAL {w} HOUR) AS recent
         FROM {T}
-        WHERE ts >= now() - INTERVAL 30 DAY AND rule != ''
+        WHERE ts >= now() - INTERVAL {BASELINE_DAYS} DAY AND rule != ''
           AND (severity IN ('high','critical') OR action ILIKE '%den%'
                OR rule ILIKE '%error%' OR rule ILIKE '%fail%')
         GROUP BY rule, rule_id
@@ -187,7 +196,7 @@ def _d_rare_error(osc, w, T):  # (g)
         ORDER BY recent DESC, lifetime ASC LIMIT 8""")
     return [{"entity": _s(r["rule_id"]),
              "label": f"{_s(r['rule'])[:70]} (rule {_s(r['rule_id'])}) — rare error, only "
-                      f"{int(r['lifetime'])} times in 30d",
+                      f"{int(r['lifetime'])} times in {BASELINE_DAYS}d",
              "severity": "medium"} for r in rows]
 
 
@@ -299,7 +308,7 @@ def _d_rare_user_access(osc, w, T):  # (n)
         WHERE ts >= now() - INTERVAL {w} HOUR AND {_NOT_MACHINE}
           AND username IN (
             SELECT username FROM {T}
-            WHERE ts >= now() - INTERVAL 30 DAY AND username != '' AND NOT endsWith(username,'$')
+            WHERE ts >= now() - INTERVAL {BASELINE_DAYS} DAY AND username != '' AND NOT endsWith(username,'$')
             GROUP BY username HAVING count() <= 5
           )
         GROUP BY username
