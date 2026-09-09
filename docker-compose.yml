@@ -104,6 +104,12 @@ services:
       - CLICKHOUSE_DB=cybersentinel
       - CLICKHOUSE_USER=default
       - CLICKHOUSE_PASS=${CLICKHOUSE_PASS:-tejas@123}
+      # Per-query ClickHouse read budget. max_threads defaults to 4 — deliberately
+      # low for a small VM, but on a many-core host it throttles heavy 100M+ scans
+      # to 4 cores while the rest sit idle. Raise READ_MAX_THREADS in .env on a big
+      # box (e.g. 16 on the 80-core .23 server). READ_MAX_SECONDS is the kill budget.
+      - READ_MAX_THREADS=${READ_MAX_THREADS:-4}
+      - READ_MAX_SECONDS=${READ_MAX_SECONDS:-30}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
