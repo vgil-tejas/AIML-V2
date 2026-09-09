@@ -4181,7 +4181,7 @@ async def get_logs_latest(limit: int = 60):
         return {"logs": [], "count": 0, "source": "disabled"}
     for minutes in (1440, 10080, 43200, 525600):     # 1d -> 7d -> 30d -> 1y
         logs = await _to_thread(osc.get_recent_logs,
-                                minutes, "", "", None, 0, min(limit, 200), "")
+                                minutes, "", "", None, 0, min(limit, 1000), "")
         if logs:
             return {"logs": logs, "count": len(logs), "window_minutes": minutes,
                     "source": "event-store"}

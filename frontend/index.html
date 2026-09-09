@@ -5476,15 +5476,25 @@ tr:hover td{background:#161b22}</style></head>
     async function loadLogs() {
       const lvl = document.getElementById('logs-minlevel').value || 1;
       const term = (document.getElementById('logs-q')?.value || '').trim();
-      let q = `${API}/logs?limit=1000&min_level=${lvl}`;
-      // "All time" (mins = 0) has to actually mean all time. Omitting the param lets
-      // the API fall back to its own short default window, which returns nothing the
-      // moment the newest event is older than that window — the Logs Explorer then
-      // opens empty on a vault holding 10k events. Only skip it for an explicit range.
-      if (!logsRange.from && !logsRange.to) q += `&minutes=${logsRange.mins || 99999999}`;
-      if (logsRange.from) q += `&start=${encodeURIComponent(logsRange.from)}`;
-      if (logsRange.to) q += `&end=${encodeURIComponent(logsRange.to)}`;
-      if (term) q += `&q=${encodeURIComponent(term)}`;
+      const hasRange = logsRange.from || logsRange.to || logsRange.mins;
+      let q;
+      // DEFAULT view (no search, no chosen range, default level) — the one the
+      // prefetch fires on every boot: use /api/logs/latest. It walks back
+      // day-by-day and returns as soon as it finds rows, so it's instant on a
+      // live 100M+ feed AND still non-empty on a stale store. The old default
+      // (minutes=99999999 -> clamped to 30 days) full-scanned the store and took
+      // ~15s, which is what made the whole dashboard feel stuck.
+      if (!term && !hasRange && Number(lvl) <= 1) {
+        q = `${API}/logs/latest?limit=1000`;
+      } else {
+        q = `${API}/logs?limit=1000&min_level=${lvl}`;
+        // Explicit filter/search: honour it, but cap the implicit window to 30d
+        // (the server clamps anyway) instead of the old all-time full scan.
+        if (!logsRange.from && !logsRange.to) q += `&minutes=${logsRange.mins || 43200}`;
+        if (logsRange.from) q += `&start=${encodeURIComponent(logsRange.from)}`;
+        if (logsRange.to) q += `&end=${encodeURIComponent(logsRange.to)}`;
+        if (term) q += `&q=${encodeURIComponent(term)}`;
+      }
       const r = await get(q);
       if (!r) return;
       document.getElementById('logs-count').textContent =
