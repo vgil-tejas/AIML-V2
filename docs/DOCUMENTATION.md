@@ -1,6 +1,6 @@
-# CyberSentinel — Product & Architecture Documentation
+# CyberSentinel AIML — Product & Architecture Documentation
 
-> **CyberSentinel** is an AI-native SIEM / SOC analytics platform. It ingests
+> **CyberSentinel AIML** is an AI-native SIEM / SOC analytics platform. It ingests
 > high-volume security telemetry, normalises it into a single schema, scores it
 > with machine-learning and behavioural models, maps it to the MITRE ATT&CK
 > kill chain, and presents a SOC analyst with a small number of prioritised
