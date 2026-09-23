@@ -153,8 +153,8 @@ condition is true:
 
 ## For live/continuous ingestion
 
-### Option A — Wazuh alerts.json streamer (RECOMMENDED)
-Directly tails Wazuh's `alerts.json` with smart offset tracking:
+### Option A — CyberSentinel Collector (alerts.json streamer, RECOMMENDED)
+Directly tails the alert feed's `alerts.json` with smart offset tracking:
 - **First run:** ingests entire alert history
 - **After that:** only new alerts are ingested (no duplicates)
 - **Auto-triggers:** ML training + archive after threshold
@@ -164,7 +164,7 @@ Directly tails Wazuh's `alerts.json` with smart offset tracking:
 # 1. Set the path to your alerts.json in .env
 WAZUH_ALERTS_PATH=/var/ossec/logs/alerts/alerts.json
 
-# 2. Start with the wazuh profile
+# 2. Start the CyberSentinel Collector (wazuh profile)
 docker compose --profile wazuh up -d
 ```
 
@@ -186,7 +186,7 @@ python scripts/watch_and_ingest.py \
 ```
 
 ### Option C — Direct API push
-From your Wazuh / Fortigate log shipper, POST each event:
+From your agent / Fortigate log shipper, POST each event:
 ```bash
 curl -X POST http://localhost:8000/api/ingest/log \
   -H "Content-Type: application/json" \
@@ -277,7 +277,7 @@ WAZUH_ARCHIVE_THRESHOLD=5000  # auto-archive after N new alerts
 | ML_INTERN_DRIFT_THRESHOLD | 0.35 | Distribution drift threshold |
 | ML_INTERN_MIN_TRAINING_IPS | 5 | Minimum IP feature rows needed to train |
 | TRAIL_RETAIN | 200 | Events to keep in Redis per IP (rest archived to disk) |
-| WAZUH_ALERTS_PATH | ./sample-data/alerts.json | Host path to Wazuh alerts.json |
+| WAZUH_ALERTS_PATH | ./sample-data/alerts.json | Host path to the Collector's alerts.json feed |
 | WAZUH_POLL_INTERVAL | 5 | Seconds between tail checks |
 | WAZUH_BATCH_SIZE | 200 | Alerts per batch to backend |
 | WAZUH_TRAIN_THRESHOLD | 500 | Trigger ML train after N new alerts |
@@ -311,4 +311,4 @@ ML Engine :8001    ML Intern :8002       Backend :8000    Frontend :80
 | Grafana dashboards | Redis → Prometheus exporter → Grafana |
 | MISP integration | POST IOCs to MISP API from backend on each new hot IP |
 | Elasticsearch backend | Replace Redis trail store with ES for full-text search |
-| Wazuh direct integration | Use Wazuh Logstash output → POST to `/api/ingest/log` |
+| Agent log-shipper integration | Use your agent/SIEM Logstash output → POST to `/api/ingest/log` |

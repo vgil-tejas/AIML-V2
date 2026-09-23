@@ -57,7 +57,7 @@ TTL  low/medium/unknown  -> 90 days
      everything else     -> 180 days         -- retention already automatic
 ```
 
-**Ingestion** (`scripts/wazuh_watcher.py`) is already production-grade:
+**Ingestion — the CyberSentinel Collector** (`scripts/wazuh_watcher.py`) is already production-grade:
 
 - Batches inserts at `WAZUH_BATCH_SIZE=5000` — ClickHouse never sees tiny inserts.
 - Disk-spools a batch if ClickHouse is down, replays it later.

@@ -103,7 +103,7 @@ so a bank can run purple-team exercises without waiting for a real breach.</div>
 <h2 id="blue">2. How CyberSentinel performs each Blue Team job</h2>
 
 <h3>2.1 Collect &mdash; the SIEM foundation</h3>
-<p>The Wazuh watcher tails <code>alerts.json</code> <b>read-only</b> &mdash; we never modify the customer's
+<p>The CyberSentinel Collector tails <code>alerts.json</code> <b>read-only</b> &mdash; we never modify the customer's
 existing security stack &mdash; batches events 5,000 at a time, spools to disk so nothing is lost across a
 restart, and streams into ClickHouse.</p>
 <p>The store is the differentiator versus a classic SIEM: <code>cybersentinel.logs</code> is a columnar
@@ -218,12 +218,12 @@ event store.</div>
   <tr><td>UEBA &mdash; behavioural analytics</td><td><b style="color:var(--ok)">Yes</b></td><td>User and host as first-class entities.</td></tr>
   <tr><td>Threat-intel platform</td><td><b style="color:var(--ok)">Yes</b></td><td>With honest provenance and air-gapped operation.</td></tr>
   <tr><td>SOAR &mdash; response automation</td><td><b style="color:var(--warn)">Partial</b></td><td>Approval-gated playbooks with an audit ledger; not full enterprise orchestration.</td></tr>
-  <tr><td>EDR / XDR &mdash; endpoint</td><td><b style="color:var(--danger)">No</b></td><td>We consume endpoint telemetry via Wazuh; we do not own the endpoint agent.</td></tr>
+  <tr><td>EDR / XDR &mdash; endpoint</td><td><b style="color:var(--danger)">No</b></td><td>We consume endpoint telemetry from the agent feed; we do not own the endpoint agent.</td></tr>
   <tr><td>NDR &mdash; network detection</td><td><b style="color:var(--danger)">No</b></td><td>No raw packet or flow analysis.</td></tr>
   <tr><td>Vulnerability scanning</td><td><b style="color:var(--danger)">No</b></td><td>Out of scope.</td></tr>
 </table>
 <div class="box note"><b>The right way to position this to a bank:</b> <b>we are the brain, not the sensors.</b>
-They keep Wazuh, their firewalls and their EDR as collectors; CyberSentinel provides the detection,
+They keep their endpoint agents, their firewalls and their EDR as collectors; CyberSentinel provides the detection,
 correlation, investigation and response layer on top &mdash; with the behavioural analytics and AI assistance
 a rules-only SIEM cannot provide.</div>
 

@@ -4,7 +4,7 @@ Production log pipeline. Read this when something looks wrong — most issues ma
 to one command below.
 
 ```
-alerts.json ──► wazuh-watcher ──► ClickHouse (cybersentinel.logs)
+alerts.json ──► CyberSentinel Collector ──► Event Store (cybersentinel.logs)
                   │  (batch + disk spool)        │
                   │                               ├─ mv_ip_daily   → agg_ip_daily
                   └─ triggers baseline/ML/archive └─ mv_threat_hourly → agg_threat_hourly
@@ -20,7 +20,7 @@ alerts.json ──► wazuh-watcher ──► ClickHouse (cybersentinel.logs)
 # Core stack (no log ingestion)
 docker compose up -d --build
 
-# With the Wazuh watcher (the log ingester)
+# With the CyberSentinel Collector (the log ingester)
 docker compose --profile wazuh up -d --build
 
 # Logs
@@ -122,7 +122,7 @@ docker run --rm -v cybersentinel_clickhouse_data:/data -v "$PWD":/backup \
 | Var | Default | Meaning |
 |---|---|---|
 | `WAZUH_BATCH_SIZE` | 5000 | rows per ClickHouse insert |
-| `WAZUH_MIN_LEVEL` | 4 | drop alerts below this Wazuh level |
+| `WAZUH_MIN_LEVEL` | 4 | drop alerts below this rule level |
 | `WAZUH_SAMPLE_BELOW` / `WAZUH_SAMPLE_RATE` | 7 / 10 | sample 1/N for levels 4–6 |
 | `WAZUH_MAX_PER_MINUTE` | 0 (unlimited) | post-first-run rate cap |
 | `WATCHER_SINK` | clickhouse | ingestion sink |
