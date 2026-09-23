@@ -2,7 +2,7 @@
 -- CyberSentinel — ClickHouse schema (auto-applied on first container init)
 -- Runs from /docker-entrypoint-initdb.d on a FRESH data volume only.
 -- To re-apply after changes on an existing volume, run manually:
---   docker exec -i cs_clickhouse clickhouse-client --multiquery < clickhouse/init/01-schema.sql
+--   docker exec -i aiml_clickhouse clickhouse-client --multiquery < clickhouse/init/01-schema.sql
 -- ============================================================================
 
 CREATE DATABASE IF NOT EXISTS cybersentinel;

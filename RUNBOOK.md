@@ -40,13 +40,13 @@ The schema in `clickhouse/init/01-schema.sql` auto-applies **only on a fresh
 ClickHouse data volume**. To (re)apply on an existing volume:
 
 ```bash
-docker exec -i cs_clickhouse clickhouse-client --multiquery < clickhouse/init/01-schema.sql
+docker exec -i aiml_clickhouse clickhouse-client --multiquery < clickhouse/init/01-schema.sql
 ```
 
 Quick sanity queries:
 ```bash
-docker exec -it cs_clickhouse clickhouse-client -q "SELECT count() FROM cybersentinel.logs"
-docker exec -it cs_clickhouse clickhouse-client -q \
+docker exec -it aiml_clickhouse clickhouse-client -q "SELECT count() FROM cybersentinel.logs"
+docker exec -it aiml_clickhouse clickhouse-client -q \
   "SELECT src_ip, sum(events) e FROM cybersentinel.agg_ip_daily GROUP BY src_ip ORDER BY e DESC LIMIT 10"
 ```
 
@@ -54,10 +54,10 @@ docker exec -it cs_clickhouse clickhouse-client -q \
 
 | Check | Command | Healthy result |
 |---|---|---|
-| Backend ↔ ClickHouse | `curl -s localhost:18110/api/health` | `"clickhouse":"connected"` + a doc count |
+| Backend ↔ ClickHouse | `curl -s localhost:19110/api/health` | `"clickhouse":"connected"` + a doc count |
 | Rows landing | `clickhouse-client -q "SELECT count() FROM cybersentinel.logs"` (run twice) | number increasing |
 | Watcher progress | `docker compose logs --tail=20 wazuh-watcher` | `N kept … total: …` lines |
-| Spool backlog | `docker exec cs_wazuh_watcher ls /app/data/spool` | empty (or draining) |
+| Spool backlog | `docker exec aiml_wazuh_watcher ls /app/data/spool` | empty (or draining) |
 
 ## Failure → fix
 
@@ -66,22 +66,22 @@ Inserts arriving too small/fast. We already batch (`WAZUH_BATCH_SIZE`, default
 5000) and use `async_insert`. If it still happens, raise the batch size and
 check parts:
 ```bash
-docker exec -it cs_clickhouse clickhouse-client -q \
+docker exec -it aiml_clickhouse clickhouse-client -q \
   "SELECT table, count() FROM system.parts WHERE active GROUP BY table"
 # then: export WAZUH_BATCH_SIZE=10000 && docker compose up -d wazuh-watcher
 ```
 
 **Ingestion stalled (row count not moving)**
 1. `docker compose logs --tail=50 wazuh-watcher` — look for connect/insert errors.
-2. Is ClickHouse up? `docker compose ps clickhouse` / `curl -s localhost:18123/ping`.
-3. Spool filling? `docker exec cs_wazuh_watcher ls -la /app/data/spool` — if files
+2. Is ClickHouse up? `docker compose ps clickhouse` / `curl -s localhost:19123/ping`.
+3. Spool filling? `docker exec aiml_wazuh_watcher ls -la /app/data/spool` — if files
    exist, ClickHouse was down; they replay automatically once it's back.
-4. Offset: `docker exec cs_wazuh_watcher cat /app/data/wazuh_offset.json`.
+4. Offset: `docker exec aiml_wazuh_watcher cat /app/data/wazuh_offset.json`.
 
 **ClickHouse won't start / out of memory**
 ```bash
 docker compose logs --tail=80 clickhouse
-docker stats cs_clickhouse --no-stream
+docker stats aiml_clickhouse --no-stream
 ```
 Lower memory: add `--ulimit` is already set; to cap RAM, set a container
 `mem_limit` in compose and/or `max_server_memory_usage` via a config.d file.
@@ -89,11 +89,11 @@ Lower memory: add `--ulimit` is already set; to cap RAM, set a container
 **Disk filling up**
 Raw logs auto-expire via TTL (90 days). Inspect / drop early:
 ```bash
-docker exec -it cs_clickhouse clickhouse-client -q \
+docker exec -it aiml_clickhouse clickhouse-client -q \
   "SELECT partition, formatReadableSize(sum(bytes_on_disk)) FROM system.parts
    WHERE table='logs' AND active GROUP BY partition ORDER BY partition"
 # manual drop of an old day:
-docker exec -it cs_clickhouse clickhouse-client -q \
+docker exec -it aiml_clickhouse clickhouse-client -q \
   "ALTER TABLE cybersentinel.logs DROP PARTITION 20250101"
 ```
 Change retention: edit the `TTL` lines in `clickhouse/init/01-schema.sql` then
@@ -103,7 +103,7 @@ Change retention: edit the `TTL` lines in `clickhouse/init/01-schema.sql` then
 The materialized views only roll up rows inserted **after** they were created.
 If you backfilled raw rows before the MV existed, rebuild the rollup:
 ```bash
-docker exec -it cs_clickhouse clickhouse-client -q \
+docker exec -it aiml_clickhouse clickhouse-client -q \
   "INSERT INTO cybersentinel.agg_ip_daily
    SELECT toDate(ts), src_ip, threat_type, severity, count()
    FROM cybersentinel.logs GROUP BY toDate(ts), src_ip, threat_type, severity"
