@@ -102,7 +102,7 @@ normalise → store → analyse → serve.**
 
 | Component | Container | Role |
 |-----------|-----------|------|
-| **CyberSentinel Collector** | `aiml_wazuh_watcher` | Tails the alert feed, applies a smart filter, batches, disk-spools for zero loss, and bulk-inserts into the Event Store. Started with the `wazuh` compose profile. |
+| **CyberSentinel Collector** | *(ingestion service)* | Tails the alert feed, applies a smart filter, batches, disk-spools for zero loss, and bulk-inserts into the Event Store. Managed via `aiml start`. |
 | **CyberSentinel Normaliser** | *(runs inside the Collector)* | Flattens nested alert JSON, classifies `threat_type` + `severity`, extracts ATT&CK tactic/technique, geo, process and file-integrity fields, and maps everything to the 39-column event schema. |
 | **Event Store** | `aiml_clickhouse` | Columnar log store (ClickHouse). Day-partitioned, ZSTD-compressed, with materialised rollup views for millisecond dashboards. Holds the source-of-truth `logs` table. |
 | **Risk Engine** | `aiml_ml` | Unsupervised anomaly scoring (Isolation Forest) fused with baseline-deviation and threat-intel signals into a 0–100 per-entity risk score. Auto-retrains. |
@@ -119,15 +119,15 @@ external door** (default host port `19888`).
 
 ### 3.1 CyberSentinel Collector (ingestion)
 
-**Source:** `scripts/wazuh_watcher.py` · **Container:** `aiml_wazuh_watcher`
+**Role:** the log-ingestion service.
 
 The Collector is a lightweight, fully decoupled ingestor. It reads the alert
 feed read-only and never modifies the source.
 
-- **Byte-offset tail** — it reads the alert file (default source path
-  `/var/ossec/logs/alerts/alerts.json`) and tracks a byte offset on disk, so on
-  restart it resumes exactly where it stopped. Log rotation at midnight is
-  handled by mounting the *directory*, not the file.
+- **Byte-offset tail** — it reads the alert file (the alert-feed path set at
+  deploy time) and tracks a byte offset on disk, so on restart it resumes exactly
+  where it stopped. Log rotation at midnight is handled by mounting the
+  *directory*, not the file.
 - **Smart filter** — tames hundreds of thousands of events per hour. By policy
   it keeps every event at rule level ≥ 1 (no dropping) in production, but the
   filter is fully tunable: drop below a floor, sample the mid band 1-in-N, keep
@@ -149,7 +149,7 @@ platform keeps serving stored data with no impact.**
 
 ### 3.2 CyberSentinel Normaliser
 
-**Source:** the `flatten_wazuh` → `map_to_row` logic inside the Collector.
+**Role:** the classify-and-map logic inside the Collector.
 
 Raw security alerts arrive as deeply-nested, inconsistent JSON. The Normaliser
 turns each one into a single flat, analysis-ready row:
@@ -408,8 +408,8 @@ Because every service uses baked images, config/file changes require `--build`.
 ```bash
 # On the server (install dir, e.g. /tejas/aiml):
 git pull
-docker compose up -d --build            # core stack
-docker compose --profile wazuh up -d    # add the Collector (ingestion)
+aiml update      # pull latest + rebuild the whole stack (Collector included)
+# aiml start / aiml restart / aiml status manage the running stack
 ```
 
 **Ports** (host side, `19xxx` family): Gateway `19888`, Backend `19110`
@@ -472,12 +472,12 @@ Configuration is via `.env` (never committed — it holds secrets). Key knobs:
 | `AUTH_USER` / `AUTH_PASS` / `AUTH_SECRET` | Login gate credentials + cookie signing key. |
 | `SSO_SECRET` / `SSO_ISS` / `SSO_AUD` | SIEM SSO shared secret and issuer/audience (empty → SSO off). |
 | `AI_API_KEY` / `AI_MODEL` / `AI_BASE_URL` | LLM provider for narratives / NL query (external egress, on-demand only). |
-| `WAZUH_ALERTS_DIR` / `WAZUH_ALERTS_FILENAME` | Collector source path for the alert feed. |
-| `WAZUH_BATCH_SIZE` / `WAZUH_MIN_LEVEL` / `WAZUH_SAMPLE_*` | Collector batching and smart-filter policy. |
+| Collector source path | Where the Collector reads the alert feed. |
+| Collector batch size & filter policy | Batching and smart-filter (drop / sample / keep) tuning. |
 
-> The `WAZUH_*` variables are the Collector's internal configuration keys (kept
-> for deployment compatibility); the component is branded **CyberSentinel
-> Collector** in all product and analyst-facing surfaces.
+> Exact Collector environment-variable names are documented in the deployment
+> config; the component is branded **CyberSentinel Collector** across all product
+> and analyst-facing surfaces.
 
 ---
 

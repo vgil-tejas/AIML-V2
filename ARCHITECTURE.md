@@ -10,7 +10,7 @@
 ```
   Alert feed                              CyberSentinel platform
  ┌──────────────┐   read-only
- │ alerts.json  │──────────────►  CyberSentinel Collector   (scripts/wazuh_watcher.py)
+ │ alerts.json  │──────────────►  CyberSentinel Collector
  │ 100k–M/day   │                  • byte-offset tail
  └──────────────┘                  • smart filter (drop/sample/keep)
                                     • batch + DISK SPOOL (zero loss)
@@ -44,7 +44,7 @@
 
 | Component | Container | Role |
 |-----------|-----------|------|
-| **CyberSentinel Collector** | `aiml_wazuh_watcher` | Tail the alert feed, filter, batch-insert with disk spool. Started with `--profile wazuh`. |
+| **CyberSentinel Collector** | *(ingestion service)* | Tail the alert feed, filter, batch-insert with disk spool. Managed via `aiml start`. |
 | **CyberSentinel Normaliser** | *(in the Collector)* | Flatten, classify `threat_type`/`severity`, extract ATT&CK/geo/process/FIM, map to the 39-column schema. |
 | **Event Store** | `aiml_clickhouse` | Columnar log store + rollups (ClickHouse). Source of truth: `cybersentinel.logs`. |
 | **Risk Engine** | `aiml_ml` | Isolation-Forest anomaly + deviation + intel → 0–100 risk. Auto-retrains. |
@@ -57,8 +57,8 @@ Sidecar ports bind to `127.0.0.1`; the Gateway is the single external door.
 ## Run
 
 ```bash
-docker compose up -d --build            # core stack
-docker compose --profile wazuh up -d    # add the Collector (ingestion)
+aiml start      # bring the whole stack up (Collector included)
+aiml update     # pull latest + rebuild
 ```
 
 See **[`docs/DOCUMENTATION.md`](docs/DOCUMENTATION.md)** for the full explanation of
