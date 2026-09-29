@@ -96,18 +96,20 @@ def _d_spray(osc, w, T):  # (a)
 
 def _d_ato(osc, w, T):  # (b)
     rows = osc._q(f"""
-        SELECT username,
+        SELECT username, src_ip,
                countIf(threat_type IN {_FAIL_TYPES}) AS fails,
-               countIf(threat_type = 'login_success') AS success,
-               countDistinct(country) AS countries
+               countIf(threat_type = 'login_success') AS success
         FROM {T}
         WHERE ts >= now() - INTERVAL {w} HOUR AND {_NOT_MACHINE}
-        GROUP BY username
-        HAVING success >= 1 AND (fails >= 5 OR countries >= 2)
+        GROUP BY username, src_ip
+        HAVING success >= 1 AND fails >= 5
         ORDER BY fails DESC LIMIT 6""")
+    # Group by (user, source) so failures and the success must come from the SAME
+    # IP — a real takeover. Prevents pairing internet brute-force failures on one IP
+    # with a legit internal login on another (the "root takeover" false positive).
     return [{"entity": _s(r["username"]),
-             "label": f"{_s(r['username'])} — {int(r['success'])} successful login(s) after "
-                      f"{int(r['fails'])} failures across {int(r['countries'])} country(ies)",
+             "label": f"{_s(r['username'])} from {_s(r['src_ip'])} — {int(r['success'])} login(s) after "
+                      f"{int(r['fails'])} failures from the same source",
              "severity": "critical" if int(r["fails"]) >= 20 else "high"} for r in rows]
 
 
@@ -217,7 +219,7 @@ def _d_c2_persist_exfil(osc, w, T):  # (i)
     rows = osc._q(f"""
         SELECT src_ip,
                countIf(threat_type = 'known_malicious' OR mitre_tactic ILIKE '%command and control%') AS c2,
-               countIf(mitre_tactic ILIKE '%persistence%') AS persist,
+               countIf(mitre_tactic ILIKE '%persistence%' AND full_log NOT ILIKE '%webthreatdefusersvc%') AS persist,
                countIf(mitre_tactic ILIKE '%exfil%') AS exfil
         FROM {T}
         WHERE ts >= now() - INTERVAL {w} HOUR
@@ -244,7 +246,7 @@ def _d_malware_persist(osc, w, T):  # (j) & (m)
         SELECT if(agent != '', agent, src_ip) AS entity,
                countIf(threat_type = 'malware') AS malware,
                countIf(sc_event != '') AS file_changes,
-               countIf(mitre_tactic ILIKE '%persistence%') AS persist
+               countIf(mitre_tactic ILIKE '%persistence%' AND full_log NOT ILIKE '%webthreatdefusersvc%') AS persist
         FROM {T}
         WHERE ts >= now() - INTERVAL {w} HOUR
         GROUP BY entity
