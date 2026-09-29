@@ -2182,13 +2182,13 @@
     @keyframes coreBeat { 0%,100% { opacity: .5; transform: scale(.75) } 50% { opacity: 1; transform: scale(1.15) } }
     /* Brand logo image (replaces the old mark + wordmark). Square-ish emblem. */
     .rail .brand-logo {
-      height: 44px; width: auto; max-width: 100%; object-fit: contain;
-      border-radius: 8px; display: block;
-      /* the wordmark logo ships on a white ground; sit it in a clean white tile
-         so it reads as intentional on the dark rail rather than a stray patch */
-      background: #fff; padding: 4px 8px;
+      width: 100%; height: auto; max-height: 96px; object-fit: contain;
+      border-radius: 10px; display: block;
+      /* wide wordmark logo on a white ground — give it the FULL rail width in a
+         clean white tile so the text is large enough to read on the dark rail */
+      background: #fff; padding: 8px 10px;
     }
-    body.rail-min .rail .brand-logo { height: 34px; padding: 3px 5px; }   /* fits the 76px collapsed rail */
+    body.rail-min .rail .brand-logo { max-height: 42px; padding: 4px; }   /* collapsed 76px rail */
     .rail .logo-title { font-family: var(--sans); font-size: 13.5px !important; letter-spacing: -.02em; font-weight: 600 !important; }
     .rail .logo-sub {
       display: flex; align-items: center; gap: 5px;
