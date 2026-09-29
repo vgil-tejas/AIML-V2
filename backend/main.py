@@ -174,7 +174,7 @@ async def _start_background_refresh():
             except Exception:
                 pass
             try:
-                await _gather_detections(24)
+                await _gather_detections(72)
             except Exception:
                 pass
             await asyncio.sleep(_inc_every)

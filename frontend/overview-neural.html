@@ -897,7 +897,7 @@ const j = async (u) => {
   const esc = v => String(v == null ? '' : v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   const SEVC = { critical: 'var(--danger)', high: '#f2994a', medium: '#f2c94c', low: 'var(--muted)' };
   const SEVRANK = { critical: 3, high: 2, medium: 1, low: 0 };
-  const data = await j(`${API}/detections?window_hours=24`);
+  const data = await j(`${API}/detections?window_hours=72`);
   if (!data || !data.use_cases) {
     box.innerHTML = '<div class="empty-note">Forecast unavailable — detection catalog did not respond.</div>';
     return;
