@@ -923,7 +923,11 @@ const j = async (u) => {
   const lead = `<div style="font-size:12px;color:var(--muted);margin-bottom:12px">
       <b style="color:var(--danger)">${active.length}</b> active attack signal${active.length === 1 ? '' : 's'} on the wire —
       if unchecked, these are the likely next moves:</div>`;
-  const rows = active.slice(0, 6).map(u => {
+  // Pin the auth-volume finding (UC-R) to the top so the higher-severity signals
+  // never bury it, then show a few more rows.
+  const ordered = active.slice().sort((a, b) =>
+      (b.code === 'UC-R' ? 1 : 0) - (a.code === 'UC-R' ? 1 : 0));
+  const rows = ordered.slice(0, 8).map(u => {
     const col = SEVC[u.max_severity] || 'var(--muted)';
     const first = (u.top && u.top[0] && u.top[0].label) ? u.top[0].label : (u.looks_for || '');
     return `<div style="display:grid;grid-template-columns:10px minmax(0,1fr);gap:12px;align-items:start;
