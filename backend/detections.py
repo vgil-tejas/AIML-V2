@@ -374,6 +374,24 @@ def _d_rdp(osc, w, T):  # (q)
              "severity": "medium"} for r in rows]
 
 
+def _d_auth_volume(osc, w, T):  # (r) unusual authentication volume per user/source
+    rows = osc._q(f"""
+        SELECT username, src_ip, count() AS c
+        FROM {T}
+        WHERE ts >= now() - INTERVAL {w} HOUR
+          AND username != '' AND NOT endsWith(username,'$')
+          AND (threat_type IN ('login_success','admin_logout')
+               OR action IN ('login','logout')
+               OR rule ILIKE '%logged in%' OR rule ILIKE '%logout%')
+        GROUP BY username, src_ip
+        HAVING c >= 300
+        ORDER BY c DESC LIMIT 8""")
+    return [{"entity": f"{_s(r['username'])}@{_s(r['src_ip'])}",
+             "label": f"{_s(r['username'])} from {_s(r['src_ip'])} — {int(r['c'])} login/logout events "
+                      f"in {w}h (far above normal; review)",
+             "severity": "medium" if int(r["c"]) >= 1000 else "low"} for r in rows]
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 #  Catalog — the named use-cases (verbatim requirement wording)
 # ══════════════════════════════════════════════════════════════════════════════
@@ -500,6 +518,15 @@ CATALOG = [
      "attack_could_happen": "RDP is the most common lateral-movement channel inside bank networks toward "
                             "domain controllers and payment systems.",
      "detector": _d_rdp},
+    {"code": "UC-R", "letter": "r", "category": "Anomalous Behaviour",
+     "name": "Unusual Authentication Volume (Login/Logout Storm)",
+     "techniques": _techs("T1078"), "engine": "Per-entity authentication-rate analytic",
+     "looks_for": "A user or host generating far more login/logout events than its normal over the window "
+                  "(e.g. an admin console left open re-authenticating every few seconds).",
+     "attack_could_happen": "A burst of authentication events can hide session hijacking, credential misuse, "
+                            "or a misconfigured/looping account — worth a quick human glance even when it "
+                            "turns out benign.",
+     "detector": _d_auth_volume},
 ]
 
 

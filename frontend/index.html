@@ -2184,8 +2184,11 @@
     .rail .brand-logo {
       height: 44px; width: auto; max-width: 100%; object-fit: contain;
       border-radius: 8px; display: block;
+      /* the wordmark logo ships on a white ground; sit it in a clean white tile
+         so it reads as intentional on the dark rail rather than a stray patch */
+      background: #fff; padding: 4px 8px;
     }
-    body.rail-min .rail .brand-logo { height: 36px; }   /* fits the 76px collapsed rail */
+    body.rail-min .rail .brand-logo { height: 34px; padding: 3px 5px; }   /* fits the 76px collapsed rail */
     .rail .logo-title { font-family: var(--sans); font-size: 13.5px !important; letter-spacing: -.02em; font-weight: 600 !important; }
     .rail .logo-sub {
       display: flex; align-items: center; gap: 5px;
@@ -2496,7 +2499,7 @@
          docked to a live circuit trace. Collapses to a node-only column (Ctrl+B). ══ -->
     <aside class="sidebar rail" id="rail">
       <div class="logo rail-core">
-        <img class="brand-logo" src="logo-brand.jpg?v=1" alt="CyberSentinel" />
+        <img class="brand-logo" src="cybersentinel-logo.png?v=2" alt="CyberSentinel" />
         <button class="rail-btn" id="rail-btn" onclick="toggleRail()" title="Collapse rail — Ctrl+B"
           aria-label="Collapse rail">&#10216;</button>
       </div>

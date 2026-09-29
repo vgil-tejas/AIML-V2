@@ -329,7 +329,13 @@ _THREAT_RULES = [
     ("web_attack",            ("web", "sql_injection", "xss", "attack")),
     ("recon_scan",            ("scan", "nmap", "recon", "portscan")),
     ("known_malicious",       ("blacklist", "known_bad", "threat_intel", "ioc")),
-    ("login_success",         ("authentication_success", "login_success", "session_opened")),
+    ("login_success",         ("authentication_success", "login_success", "session_opened",
+                               "logged in successfully", "logged into firewall interface",
+                               "admin login successful")),
+    # Benign admin session churn (e.g. a FortiGate GUI left open re-authing every few
+    # seconds). Labelling it keeps it OUT of the "unknown" bucket so the auth-volume
+    # detector can see it, without treating it as a threat.
+    ("admin_logout",          ("logout successful", "admin logout successful", "user logout successful")),
 ]
 
 
