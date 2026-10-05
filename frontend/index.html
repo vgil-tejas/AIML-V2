@@ -3514,6 +3514,7 @@ tr:hover td{background:#161b22}</style></head>
               : a.status === 'degraded'
                 ? `volume down ${a.drop_pct}% vs its daily average`
                 : `${a.events_24h.toLocaleString()} events / 24h`}</span>
+            ${rawLogBtn('host', a.agent, a.agent)}
           </div>`).join('');
     }
     function renderFirstSeen(d) {
@@ -4343,6 +4344,57 @@ tr:hover td{background:#161b22}</style></head>
     // a no-op on already-clean values (a normal path has no \\ or \" sequences).
     function deEsc(s) {
       return String(s == null ? '' : s).replace(/\\\\/g, '\\').replace(/\\"/g, '"');
+    }
+    // ── Reusable "raw log" viewer: a small button on any feature that pops the
+    //    actual source log lines behind an entity (on-demand, bounded — safe). ──
+    function rawLogBtn(field, value, label) {
+      return `<button class="btn" title="Show the raw source logs behind this"
+        style="font-size:9px;padding:2px 7px;margin-left:6px"
+        data-f="${field}" data-v="${escapeHTML(String(value))}" data-l="${escapeHTML(String(label || value))}"
+        onclick="event.stopPropagation();showRawLogs(this.dataset.f,this.dataset.v,this.dataset.l)">&#9707; raw</button>`;
+    }
+    function ensureRawLogModal() {
+      let wrap = document.getElementById('rawlog-modal');
+      if (!wrap) {
+        wrap = document.createElement('div');
+        wrap.id = 'rawlog-modal';
+        wrap.style.cssText = 'position:fixed;inset:0;z-index:100000;background:rgba(0,0,0,.62);display:none;align-items:center;justify-content:center;padding:24px';
+        wrap.innerHTML =
+          `<div style="background:var(--panel,#0f1011);border:1px solid var(--border);border-radius:12px;max-width:920px;width:100%;max-height:82vh;display:flex;flex-direction:column;box-shadow:0 30px 80px -20px #000c">
+             <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid var(--border)">
+               <span id="rawlog-title" style="font-weight:600;font-size:14px;color:var(--text)">Raw logs</span>
+               <button onclick="document.getElementById('rawlog-modal').style.display='none'"
+                 style="background:none;border:none;color:var(--muted);font-size:22px;cursor:pointer;line-height:1">&times;</button>
+             </div>
+             <div id="rawlog-body" style="overflow:auto;padding:10px 16px"></div>
+           </div>`;
+        document.body.appendChild(wrap);
+        wrap.addEventListener('click', e => { if (e.target === wrap) wrap.style.display = 'none'; });
+      }
+      return { wrap, title: document.getElementById('rawlog-title'), body: document.getElementById('rawlog-body') };
+    }
+    async function showRawLogs(field, value, label) {
+      const m = ensureRawLogModal();
+      m.title.innerHTML = 'Raw source logs &mdash; ' + escapeHTML(label || value);
+      m.body.innerHTML = '<div class="empty" style="padding:18px">Loading raw logs…</div>';
+      m.wrap.style.display = 'flex';
+      const r = await get(`${API}/raw-logs?field=${encodeURIComponent(field)}&value=${encodeURIComponent(value)}&limit=25`);
+      const evs = (r && r.events) || [];
+      if (!evs.length) { m.body.innerHTML = '<div class="empty" style="padding:18px">No raw logs found for this entity.</div>'; return; }
+      m.body.innerHTML =
+        `<div style="font-size:11px;color:var(--muted);margin:2px 0 8px">${evs.length} most-recent source record${evs.length === 1 ? '' : 's'}</div>` +
+        evs.map(e => {
+          const raw = deEsc(e.full_log || '').trim();
+          return `<div style="border-top:1px solid var(--border);padding:9px 0">
+            <div style="font-size:11px;color:var(--muted);margin-bottom:4px">
+              ${escapeHTML(toIST(e.ts_raw || e.ts))}
+              ${e.severity ? ` · <span class="badge ${e.severity}">${e.severity}</span>` : ''}
+              ${e.rule ? ' · ' + escapeHTML(e.rule) : (e.action ? ' · ' + escapeHTML(e.action) : '')}</div>
+            ${raw
+              ? `<pre style="font-family:var(--mono);font-size:10.5px;color:var(--text);white-space:pre-wrap;word-break:break-all;background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:9px 11px;margin:0">${escapeHTML(raw)}</pre>`
+              : '<span style="font-size:11px;color:var(--muted)">(no raw line stored on this record)</span>'}
+          </div>`;
+        }).join('');
     }
     // Short MITRE technique names so the analyst doesn't have to look up the id.
     const MITRE_NAMES = {
@@ -6415,6 +6467,7 @@ tr:hover td{background:#161b22}</style></head>
           <td style="white-space:nowrap">
             <button class="btn" style="font-size:10px;padding:3px 8px;margin-right:3px" onclick="event.stopPropagation();openMLScore('${a.ip}')">Explain</button>
             <button class="btn ai" style="font-size:10px;padding:3px 8px" onclick="event.stopPropagation();aiMLExplainFor('${a.ip}')">AI</button>
+            ${rawLogBtn('ip', a.ip)}
           </td></tr>`).join('')
         : `<tr><td colspan="5" class="empty">${ready ? 'No anomalies found' : 'Train the model first'}</td></tr>`;
     }

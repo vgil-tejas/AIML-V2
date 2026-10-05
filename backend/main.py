@@ -907,6 +907,26 @@ async def entity_trail(field: str = "ip", value: str = "", limit: int = 200):
     return summary
 
 
+@app.get("/api/raw-logs")
+async def raw_logs(field: str = "ip", value: str = "", limit: int = 25):
+    """Bounded, on-demand raw source-log lines for ONE entity (ip | username | host).
+    Powers the small "raw log" button across features — the evidence behind a finding.
+    Capped small (<=50) and entity-scoped so it never bulk-loads (full_log stays off
+    the heavy list/boot queries that previously starved the pool)."""
+    value = (value or "").strip()
+    if not value or not (STORE_ENABLED and osc):
+        return {"events": [], "value": value}
+    if field not in ("ip", "username", "host"):
+        field = "ip"
+    lim = max(1, min(int(limit or 25), 50))
+    events = await _to_thread(osc.get_entity_events_desc, field, value, lim)
+    out = [{"ts": e.get("@timestamp"), "ts_raw": e.get("ts_raw"),
+            "rule": e.get("rule"), "action": e.get("action"),
+            "severity": e.get("severity"), "src_ip": e.get("src_ip"),
+            "agent": e.get("agent"), "full_log": e.get("full_log")} for e in events]
+    return {"field": field, "value": value, "count": len(out), "events": out}
+
+
 @app.get("/api/trail/{ip}/summary")
 async def trail_summary(ip: str):
     """IP summary: threat types, severities, first/last seen."""
