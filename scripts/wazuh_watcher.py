@@ -363,6 +363,20 @@ def _threat_from_alert(flat: dict) -> str:
     return "unknown"
 
 
+def _is_agent_selfcheck(flat: dict) -> bool:
+    """Benign noise: the CyberSentinel/Wazuh agent monitoring itself — its SCA
+    compliance checks (secedit/PowerShell reading the local security policy) and
+    the WerFault crash-reporting it spawns. These trip 'high' process-spawn rules
+    but are not a threat, so we downgrade them instead of flagging them high."""
+    parent = (_first(flat, "data.win.eventdata.parentImage", "data.parent.name") or "").lower()
+    if "ossec-agent" not in parent and "cybersentinel-agent" not in parent:
+        return False
+    cmd = (_first(flat, "data.win.eventdata.commandLine", "data.command") or "").lower()
+    image = (_first(flat, "data.win.eventdata.image", "data.process.name") or "").lower()
+    return ("secedit" in cmd or "secpol.cfg" in cmd or "secedit.exe" in image
+            or "werfault" in image or "get-content" in cmd)
+
+
 def map_to_row(raw_alert: dict):
     """Map a raw Wazuh alert to a ClickHouse row (column order = INSERT_COLS)."""
     flat = flatten_wazuh(raw_alert)
@@ -372,6 +386,10 @@ def map_to_row(raw_alert: dict):
                     "data.win.eventdata.ipAddress", "agent.ip")
     if not src_ip:
         return None
+
+    # Downgrade the agent's own self-monitoring (benign) so it stops inflating the
+    # high-severity counts and the anomaly/forecast noise.
+    sev = "low" if _is_agent_selfcheck(flat) else _severity_from_level(level)
 
     ts = _parse_ts(_first(flat, "@timestamp", "timestamp") or datetime.now(timezone.utc))
     now = datetime.now(timezone.utc).replace(tzinfo=None)
@@ -383,7 +401,7 @@ def map_to_row(raw_alert: dict):
         _first(flat, "data.dstip", "data.dest_ip", "data.win.eventdata.destinationIp"),
         _first(flat, "data.dstport", "data.dest_port", "data.win.eventdata.destinationPort"),
         _threat_from_alert(flat),                                    # threat_type
-        _severity_from_level(level),                                 # severity
+        sev,                                                         # severity
         _first(flat, "rule.description")[:200],                      # rule
         _first(flat, "rule.id"),                                     # rule_id
         max(0, min(level, 255)),                                     # rule_level (UInt8)
