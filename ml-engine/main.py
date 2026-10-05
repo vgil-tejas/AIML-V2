@@ -294,18 +294,23 @@ async def score_ip(ip: str, live: bool = False):
     return {**s, "features": features, "source": "live"}
 
 
+_anomalies_total = 0  # real count of is_anomaly=1 (the list is capped at 500)
+
+
 @app.get("/api/ml/anomalies")
 async def list_anomalies():
-    global _anomalies_cache, _anomalies_cache_ts
+    global _anomalies_cache, _anomalies_cache_ts, _anomalies_total
     if _anomalies_cache and time.time() - _anomalies_cache_ts < _ANOMALIES_TTL:
-        return {"anomalies": _anomalies_cache}
+        return {"anomalies": _anomalies_cache, "total": _anomalies_total, "shown": len(_anomalies_cache)}
     if not (STORE_ENABLED and osc):
-        return {"anomalies": []}
+        return {"anomalies": [], "total": 0, "shown": 0}
     result = await _to_thread(osc.get_ml_anomalies, 500)
+    total = await _to_thread(osc.count_ml_anomalies)
     if result is not None:
         _anomalies_cache = result
         _anomalies_cache_ts = time.time()
-    return {"anomalies": _anomalies_cache}
+        _anomalies_total = int(total or 0)
+    return {"anomalies": _anomalies_cache, "total": _anomalies_total, "shown": len(_anomalies_cache)}
 
 
 @app.get("/api/ml/scores")

@@ -6401,8 +6401,10 @@ tr:hover td{background:#161b22}</style></head>
       const [r, mlh] = await Promise.all([get(`${ML}/anomalies`), get(`${ML}/health`)]);
       if (!r) return;
       const ready = Boolean(mlh?.model_ready);
+      const anomTotal = (r.total != null ? r.total : r.anomalies.length);
+      const capNote = anomTotal > r.anomalies.length ? ` (showing top ${r.anomalies.length})` : '';
       document.getElementById('train-status').textContent = ready
-        ? `Current model loaded · ${r.anomalies.length} anomalies`
+        ? `Current model loaded · ${Number(anomTotal).toLocaleString()} anomalies${capNote}`
         : 'No trained model yet';
       document.getElementById('anom-tbody').innerHTML = r.anomalies.length
         ? r.anomalies.map(a => `<tr onclick="openMLScore('${a.ip}')" style="cursor:pointer">
@@ -8108,7 +8110,7 @@ tr:hover td{background:#161b22}</style></head>
         sevCrit: +sev.critical || 0,
         hot: (stats.hot_ips || []).length,
         critIps: (stats.critical_ips || []).length,
-        anomalies: ((anom && anom.anomalies) || []).length,
+        anomalies: +((anom && anom.total) != null ? anom.total : ((anom && anom.anomalies) || []).length) || 0,
         scored: +mlh.scored_ips || 0,
         users: ((ueba && ueba.users) || []).length,
         uebaPop: +((ueba && ueba.population) || 0),   // identities profiled, not IPs seen

@@ -510,6 +510,13 @@ def count_ml_scores() -> int:
     return int(rows[0]["c"]) if rows else 0
 
 
+def count_ml_anomalies() -> int:
+    """Real number of flagged anomalies (is_anomaly=1) — the honest total behind
+    the capped anomalies list, so the UI shows the true count, not the 500 cap."""
+    rows = _q(f"SELECT count() AS c FROM {ML_SCORES_TABLE} FINAL WHERE is_anomaly = 1")
+    return int(rows[0]["c"]) if rows else 0
+
+
 # ── ML feature extraction (identical logic to the OpenSearch client) ───────
 
 FEATURE_COLS = [
