@@ -2771,6 +2771,20 @@
               <span id="trail-ips-note" style="font-size:11px;color:var(--muted)"></span></div>
             <div class="cb" id="trail-ips-body" style="display:flex;flex-wrap:wrap;gap:6px"></div>
           </div>
+          <div id="trail-summary-panel" style="display:none" class="card">
+            <div class="ch"><span class="ct">Activity summary &mdash; what happened &amp; where</span>
+              <span id="trail-sum-note" style="font-size:11px;color:var(--muted)"></span></div>
+            <div class="cb" style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
+              <div>
+                <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin-bottom:9px">Events by type</div>
+                <div id="trail-sum-events"></div>
+              </div>
+              <div>
+                <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin-bottom:9px">Agents / hosts involved</div>
+                <div id="trail-sum-agents"></div>
+              </div>
+            </div>
+          </div>
           <div class="card">
             <div class="ch" style="flex-wrap:wrap;gap:10px">
               <span class="ct">Event trail — chronological</span>
@@ -4243,10 +4257,44 @@ tr:hover td{background:#161b22}</style></head>
         ipsPanel.style.display = 'block';
       } else { ipsPanel.style.display = 'none'; }
 
+      // Activity summary — what events happened, and on which agents/hosts
+      renderTrailSummary(sum);
+
       TRAIL_EVENTS = sum.events || [];
       trailFilter = { source: '', user: '' };
       buildTrailFilters();
       renderTrailEvents();
+    }
+    // Summarised breakdown bars: [{label, events}] with a proportional bar.
+    function trailSumRows(items, key, clickKind) {
+      if (!items || !items.length) return '<span style="font-size:12px;color:var(--muted)">—</span>';
+      const max = Math.max(1, ...items.map(x => +x.events || 0));
+      return items.slice(0, 10).map(it => {
+        const label = String(it[key] == null ? '—' : it[key]);
+        const pct = Math.max(3, Math.round((+it.events || 0) / max * 100));
+        const click = clickKind
+          ? `onclick="goTrailEntity('${clickKind}', this.dataset.v)" data-v="${escapeHTML(label)}"` : '';
+        const cur = clickKind ? 'cursor:pointer;' : '';
+        return `<div ${click} title="${escapeHTML(label)}" style="${cur}margin-bottom:8px">
+            <div style="display:flex;justify-content:space-between;gap:10px;font-size:12px;margin-bottom:3px">
+              <span style="color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHTML(label)}</span>
+              <b style="color:var(--accent);flex:0 0 auto">${Number(it.events).toLocaleString()}</b>
+            </div>
+            <div style="height:5px;background:var(--bg3);border-radius:3px;overflow:hidden">
+              <div style="height:100%;width:${pct}%;background:var(--accent)"></div>
+            </div>
+          </div>`;
+      }).join('');
+    }
+    function renderTrailSummary(sum) {
+      const ev = sum.event_types || [], ag = sum.agents || [];
+      const panel = document.getElementById('trail-summary-panel');
+      if (!ev.length && !ag.length) { panel.style.display = 'none'; return; }
+      document.getElementById('trail-sum-events').innerHTML = trailSumRows(ev, 'rule', null);
+      document.getElementById('trail-sum-agents').innerHTML = trailSumRows(ag, 'agent', 'host');
+      document.getElementById('trail-sum-note').textContent =
+        `${ev.length} event type${ev.length === 1 ? '' : 's'} · ${ag.length} agent${ag.length === 1 ? '' : 's'}`;
+      panel.style.display = 'block';
     }
     // Build the log-source + user filter chips from the loaded events.
     function buildTrailFilters() {

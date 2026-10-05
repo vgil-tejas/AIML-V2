@@ -563,6 +563,10 @@ def get_entity_summary(field: str, value: str) -> dict:
     # distinct source IPs the identity used (the whole point of identity-based trailing)
     ips = _q(f"SELECT src_ip i, count() c {base} AND src_ip != '' GROUP BY i ORDER BY c DESC LIMIT 50", p)
     users = _q(f"SELECT username u, count() c {base} AND username != '' GROUP BY u ORDER BY c DESC LIMIT 50", p)
+    # Summarised breakdowns: which agents/hosts were involved, and what events
+    # (human-readable rule descriptions) occurred — the "what happened, where" view.
+    agents = _q(f"SELECT agent a, count() c {base} AND agent != '' GROUP BY a ORDER BY c DESC LIMIT 20", p)
+    rules = _q(f"SELECT rule r, count() c {base} AND rule != '' GROUP BY r ORDER BY c DESC LIMIT 20", p)
     return {
         "found": True,
         "total": int(total[0]["c"]),
@@ -572,6 +576,8 @@ def get_entity_summary(field: str, value: str) -> dict:
         "severities": {r["s"]: int(r["c"]) for r in sevs},
         "src_ips": [{"ip": r["i"], "events": int(r["c"])} for r in ips],
         "users": [{"name": r["u"], "events": int(r["c"])} for r in users],
+        "agents": [{"agent": r["a"], "events": int(r["c"])} for r in agents],
+        "event_types": [{"rule": r["r"], "events": int(r["c"])} for r in rules],
     }
 
 
