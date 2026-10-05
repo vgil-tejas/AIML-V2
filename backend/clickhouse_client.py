@@ -298,7 +298,10 @@ _RAW_PROCESS = (
 # Logs-LIST column set: lean columns + resolved destination name + cheap id/time.
 # No heavy process/policy extraction (the list never renders those) — keeps the
 # logs explorer fast even on large real-Wazuh raw blobs.
-_EVENT_COLS_LIST = _EVENT_COLS + ", " + _URL_FALLBACK + ", " + _RAW_TIME
+# UI/trail/logs queries also carry the raw log line (full_log) so every finding
+# can show the underlying evidence — "here is the exact log behind this". It's a
+# stored column (no JSON parse), only on these UI queries, not the ML/baseline scans.
+_EVENT_COLS_LIST = _EVENT_COLS + ", " + _URL_FALLBACK + ", " + _RAW_TIME + ", full_log"
 # TRAIL column set = the list set PLUS the heavy per-event process/policy fields
 # that only the single-entity trail card shows.
 _EVENT_COLS_UI = _EVENT_COLS_LIST + ", " + _RAW_PROCESS

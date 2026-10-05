@@ -4444,8 +4444,18 @@ tr:hover td{background:#161b22}</style></head>
           ${k(blocked ? 'Target (blocked)' : 'Target', e.url ? `<span class="tev-url">${escapeHTML(e.url)}</span>` : '')}
           ${k('Country', e.country)}
           ${procRows}
+          ${rawLogBlock(e.full_log)}
         </div>
       </div>`;
+    }
+    // Collapsible raw log line — the exact record behind this event ("proof").
+    function rawLogBlock(full) {
+      full = deEsc(full || '').trim();
+      if (!full) return '';
+      return `<details style="margin-top:9px">
+        <summary style="cursor:pointer;font-size:11px;color:var(--accent);user-select:none;list-style:none">&#9707; Raw log (source record)</summary>
+        <pre style="font-family:var(--mono);font-size:10.5px;color:var(--muted);white-space:pre-wrap;word-break:break-all;background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:9px 11px;margin-top:6px;max-height:280px;overflow:auto">${escapeHTML(full)}</pre>
+      </details>`;
     }
     async function aiExplainIP() {
       if (!curIP) return;
@@ -5628,8 +5638,13 @@ tr:hover td{background:#161b22}</style></head>
       if (!el) return;
       if (el.style.display === 'none') {
         const e = LOGS_ROWS[i] || {};
-        const skip = new Set(['_ts', 'threat_label', 'entity', 'log_source', 'user_display']);
-        el.innerHTML = '<table class="lg-kv">' + Object.entries(e)
+        const skip = new Set(['_ts', 'threat_label', 'entity', 'log_source', 'user_display', 'full_log']);
+        const raw = deEsc(e.full_log || '').trim();
+        const rawBlock = raw
+          ? `<div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin:2px 0 4px">Raw log — source record</div>
+             <pre style="font-family:var(--mono);font-size:10.5px;color:var(--text);white-space:pre-wrap;word-break:break-all;background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:9px 11px;margin-bottom:8px;max-height:280px;overflow:auto">${escapeHTML(raw)}</pre>`
+          : '';
+        el.innerHTML = rawBlock + '<table class="lg-kv">' + Object.entries(e)
           .filter(([k, v]) => !skip.has(k) && v !== '' && v !== 0 && v != null)
           .map(([k, v]) => `<tr><td>${escapeHTML(k)}</td><td>${escapeHTML(typeof v === 'object' ? JSON.stringify(v) : String(v)).substring(0, 500)}</td></tr>`).join('') + '</table>';
         el.style.display = '';
