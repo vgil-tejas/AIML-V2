@@ -497,6 +497,24 @@ def get_entity_events_desc(field: str, value: str, limit: int = 200) -> list[dic
     return _shape_events(_q(sql, {"v": value}))
 
 
+def get_entity_raw_logs(field: str, value: str, limit: int = 25) -> list[dict]:
+    """Lean raw-log fetch for the 'raw log' button: the source line (full_log) plus
+    the full alert JSON (raw) as a fallback, since correlation-rule alerts carry no
+    full_log of their own. Bounded (<=50), no per-row JSON extraction — cheap and
+    on-demand only, so it never touches the heavy list/boot queries."""
+    col = _TRAIL_COLS.get(field, "src_ip")
+    sql = (f"SELECT ts, rule, severity, action, src_ip, agent, full_log, raw "
+           f"FROM {LOGS_TABLE} WHERE {col} = {{v:String}} "
+           f"ORDER BY ts DESC LIMIT {int(min(max(limit, 1), 50))}")
+    rows = _q(sql, {"v": value})
+    return [{
+        "ts": _iso(r.get("ts")),
+        "rule": r.get("rule"), "severity": r.get("severity"), "action": r.get("action"),
+        "src_ip": r.get("src_ip"), "agent": r.get("agent"),
+        "full_log": r.get("full_log") or "", "raw": r.get("raw") or "",
+    } for r in rows]
+
+
 def get_ueba_user_profiles(days: int = 30, limit: int = 300) -> list[dict]:
     """Per-user behavioural profile: 30-day baseline vs last-24h, in ONE
     aggregation pass (bounded arrays, no raw column). This is the feeder for

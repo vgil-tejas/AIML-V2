@@ -4384,15 +4384,18 @@ tr:hover td{background:#161b22}</style></head>
       m.body.innerHTML =
         `<div style="font-size:11px;color:var(--muted);margin:2px 0 8px">${evs.length} most-recent source record${evs.length === 1 ? '' : 's'}</div>` +
         evs.map(e => {
-          const raw = deEsc(e.full_log || '').trim();
+          const line = deEsc(e.full_log || '').trim();
+          const rawj = deEsc(e.raw || '').trim();
+          const shown = line || rawj;
+          const jsonTag = (!line && rawj) ? ' · <span style="color:var(--muted);font-size:9px">full alert JSON</span>' : '';
           return `<div style="border-top:1px solid var(--border);padding:9px 0">
             <div style="font-size:11px;color:var(--muted);margin-bottom:4px">
-              ${escapeHTML(toIST(e.ts_raw || e.ts))}
+              ${escapeHTML(toIST(e.ts))}
               ${e.severity ? ` · <span class="badge ${e.severity}">${e.severity}</span>` : ''}
-              ${e.rule ? ' · ' + escapeHTML(e.rule) : (e.action ? ' · ' + escapeHTML(e.action) : '')}</div>
-            ${raw
-              ? `<pre style="font-family:var(--mono);font-size:10.5px;color:var(--text);white-space:pre-wrap;word-break:break-all;background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:9px 11px;margin:0">${escapeHTML(raw)}</pre>`
-              : '<span style="font-size:11px;color:var(--muted)">(no raw line stored on this record)</span>'}
+              ${e.rule ? ' · ' + escapeHTML(e.rule) : (e.action ? ' · ' + escapeHTML(e.action) : '')}${jsonTag}</div>
+            ${shown
+              ? `<pre style="font-family:var(--mono);font-size:10.5px;color:var(--text);white-space:pre-wrap;word-break:break-all;background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:9px 11px;margin:0;max-height:320px;overflow:auto">${escapeHTML(shown)}</pre>`
+              : '<span style="font-size:11px;color:var(--muted)">(no source record stored)</span>'}
           </div>`;
         }).join('');
     }

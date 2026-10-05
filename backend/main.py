@@ -919,12 +919,8 @@ async def raw_logs(field: str = "ip", value: str = "", limit: int = 25):
     if field not in ("ip", "username", "host"):
         field = "ip"
     lim = max(1, min(int(limit or 25), 50))
-    events = await _to_thread(osc.get_entity_events_desc, field, value, lim)
-    out = [{"ts": e.get("@timestamp"), "ts_raw": e.get("ts_raw"),
-            "rule": e.get("rule"), "action": e.get("action"),
-            "severity": e.get("severity"), "src_ip": e.get("src_ip"),
-            "agent": e.get("agent"), "full_log": e.get("full_log")} for e in events]
-    return {"field": field, "value": value, "count": len(out), "events": out}
+    events = await _to_thread(osc.get_entity_raw_logs, field, value, lim)
+    return {"field": field, "value": value, "count": len(events), "events": events}
 
 
 @app.get("/api/trail/{ip}/summary")
