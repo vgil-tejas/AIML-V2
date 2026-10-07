@@ -967,7 +967,9 @@ const j = async (u) => {
 })();
 const num = v => Number(v || 0).toLocaleString();
 const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-const pretty = s => String(s || '').replace(/_/g, ' ');
+// "unknown" / blank is never shown in the UI — it collapses to empty so callers
+// fall back to a real label or drop the chip entirely.
+const pretty = s => { const v = String(s || '').replace(/_/g, ' ').trim(); return (!v || v.toLowerCase() === 'unknown') ? '' : v; };
 
 /* ═══ IST (Asia/Kolkata) ═══
    The store keeps every timestamp in UTC; the SOC reading this dashboard sits
@@ -1089,7 +1091,7 @@ function rankRows(el, rows, clickable = true) {
 /* ── helpers over the real API shapes ── */
 function topThreat(types) {
   const e = Object.entries(types || {}).filter(([k]) => k && k !== 'unknown');
-  if (!e.length) return ['unknown', 0];
+  if (!e.length) return ['', 0];
   return e.sort((a, b) => b[1] - a[1])[0];
 }
 function worstSev(sevs) {
@@ -1494,7 +1496,7 @@ async function runTrail(entity, reveal = true, fieldHint = '') {
     const cls = sev === 'critical' ? 'crit' : (sev === 'high' ? 'warn' : '');
     const ts = toIST(ev['@timestamp'] || ev.ts);
     const tags = [ev.threat_type, ev.username, ev.country, ev.dst_port ? 'port ' + ev.dst_port : '', ev.agent]
-      .filter(Boolean).map(t => pretty(t).toUpperCase());
+      .map(t => pretty(t)).filter(Boolean).map(t => t.toUpperCase());   // pretty() already drops "unknown"/blank
     return `<div class="tl-item ${cls}">
       <div class="tl-time">${esc(ts)} IST</div>
       <div class="tl-tx">${esc(ev.rule || pretty(ev.threat_type) || 'event')}
@@ -1730,7 +1732,8 @@ addEventListener('resize', () => { initMesh(); if (REDUCED) drawMesh(); });
   const wire = hot.slice(0, 10).map(h => {
     const [t, c] = topThreat(h.threat_types);
     const s = worstSev(h.severities);
-    return { cls: s === 'critical' ? 'crit' : s === 'high' ? 'warn2' : '', e: h.ip, d: `${pretty(t)} ×${num(c)} · ${num(h.total)} events` };
+    const tt = pretty(t);
+    return { cls: s === 'critical' ? 'crit' : s === 'high' ? 'warn2' : '', e: h.ip, d: `${tt ? tt + ' ×' + num(c) + ' · ' : ''}${num(h.total)} events` };
   });
   /* ── SIEM kill chain from the real threat mix ── */
   const g = k => +threats[k] || 0;

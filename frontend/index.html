@@ -3338,6 +3338,9 @@
   <script>
     const API = '/api';
     const ML  = '/api/ml';
+    // Threat/field display: "unknown" or blank is never shown — it collapses to ''
+    // so callers fall back to a real label (|| 'activity') or drop the chip.
+    const TT = v => { const s = String(v == null ? '' : v).replace(/_/g, ' ').trim(); return (!s || s.toLowerCase() === 'unknown') ? '' : s; };
 
     async function openClickHousePlay(ip) {
       const q = ip
@@ -3834,7 +3837,7 @@ tr:hover td{background:#161b22}</style></head>
     }
     function topThreat(threats = {}) {
       const real = Object.entries(threats).filter(([k]) => k && k !== 'unknown');
-      return (real.sort((a, b) => b[1] - a[1])[0]) || ['unknown', 0];
+      return (real.sort((a, b) => b[1] - a[1])[0]) || ['', 0];
     }
     // Render the users/hosts seen on an IP as compact chips (top N + "+more").
     // Chips for the identities on an IP. Clicking a chip trails THAT identity:
@@ -3886,7 +3889,7 @@ tr:hover td{background:#161b22}</style></head>
           <span class="badge ${sev}">${sev}</span>
         </div>
         <div class="ent-card-ip ent-chip-go" onclick="goTrailEntity('ip', '${h.ip}')" title="Trail this source IP">
-          &#128279; <b>${h.ip}</b> · ${Number(h.total || 0).toLocaleString()} events · ${String(threatName).replace(/_/g, ' ')}</div>
+          &#128279; <b>${h.ip}</b> · ${Number(h.total || 0).toLocaleString()} events${TT(threatName) ? ' · ' + TT(threatName) : ''}</div>
         <div class="ent-card-row"><span class="ent-lbl" title="Accounts seen on this IP — click to trail the user">Users</span><span class="ent-vals">${identChips(h.users, 'user', 3)}</span></div>
         <div class="ent-card-row"><span class="ent-lbl" title="CyberSentinel sensor (agent name) reporting these events — click to trail the agent's endpoint">Agents</span><span class="ent-vals">${identChips(h.hosts, 'host', 3)}</span></div>
       </div>`;
@@ -3913,7 +3916,7 @@ tr:hover td{background:#161b22}</style></head>
         <td>${identChips(h.users, 'user', 3)}</td>
         <td>${identChips(h.hosts, 'host', 3)}</td>
         <td>${Number(h.total || 0).toLocaleString()}</td>
-        <td>${String(tt || '').replace(/_/g, ' ')}</td>
+        <td>${TT(tt) || '—'}</td>
         <td><span class="badge ${sv || 'low'}">${sv || 'low'}</span></td>
         <td style="font-size:11px;color:var(--muted);white-space:nowrap">${(h.last_seen || '').substring(0, 19).replace('T', ' ')}</td>
         <td style="white-space:nowrap">
@@ -3964,7 +3967,7 @@ tr:hover td{background:#161b22}</style></head>
         const [sev] = severityRank(top.severities);
         items.push({
           rank: 1, sev: sev || 'high',
-          text: `<b>${escapeHTML(top.identity?.label || top.ip)}</b> — ${escapeHTML(String(threatName || 'most active source').replace(/_/g, ' '))} · ${Number(top.total || 0).toLocaleString()} events`,
+          text: `<b>${escapeHTML(top.identity?.label || top.ip)}</b> — ${escapeHTML(TT(threatName) || 'most active source')} · ${Number(top.total || 0).toLocaleString()} events`,
           go: () => goTrail(top.ip),
         });
       }
@@ -4246,7 +4249,7 @@ tr:hover td{background:#161b22}</style></head>
       const sv = sum.severities ? Object.entries(sum.severities).sort((a, b) => b[1] - a[1])[0] : ['low', 0];
       const b = document.getElementById('t-sev-badge');
       b.className = 'badge ' + (sv ? sv[0] : 'low'); b.textContent = sv ? sv[0] : 'low';
-      document.getElementById('t-badges').innerHTML = Object.entries(sum.threat_types || {}).map(([k, v]) => `<span class="badge medium" style="margin-bottom:4px">${k.replace(/_/g, ' ')}: ${v}</span>`).join('');
+      document.getElementById('t-badges').innerHTML = Object.entries(sum.threat_types || {}).filter(([k]) => TT(k)).map(([k, v]) => `<span class="badge medium" style="margin-bottom:4px">${TT(k)}: ${v}</span>`).join('');
       document.getElementById('ai-trail-panel').style.display = 'none';
 
       // "IPs used by this identity" — the payoff of identity-based trailing.
@@ -4427,7 +4430,7 @@ tr:hover td{background:#161b22}</style></head>
     function trailPlain(e, blocked, allowed) {
       const host = e.agent ? deEsc(e.agent) : (e.src_ip || 'the source host');
       const who = deEsc((e.user_display !== undefined ? e.user_display : e.username) || '');
-      const what = e.rule || e.threat_label || String(e.threat_type || '').replace(/_/g, ' ') || 'activity';
+      const what = e.rule || TT(e.threat_label) || TT(e.threat_type) || 'activity';
       const child = exeLeaf(e.proc_image || e.proc_cmdline);
       const parent = exeLeaf(e.proc_parent || e.proc_parent_cmdline);
       let s = who
@@ -4487,7 +4490,7 @@ tr:hover td{background:#161b22}</style></head>
           <span class="badge ${sc}">${sc}</span>
           <span class="src-badge src-${e.log_source || 'endpoint'}">${e.log_source || 'endpoint'}</span>
           ${actHtml}
-          <span class="tev-threat">${e.threat_label || (e.threat_type || '').replace(/_/g, ' ')}</span>
+          <span class="tev-threat">${TT(e.threat_label) || TT(e.threat_type)}</span>
           ${e.alert_id
             ? `<span class="tev-eid" onclick="copyEid(event,'${e.alert_id}')" title="Source log id — search this exact value in your log store to find the original record. Click to copy">_id ${escapeHTML(e.alert_id)}</span>`
             : (e.event_id ? `<span class="tev-eid" style="opacity:.65" onclick="copyEid(event,'${e.event_id}')" title="Internal reference (hash) — no source id on this row. Click to copy">${e.event_id}</span>` : '')}
@@ -5668,7 +5671,7 @@ tr:hover td{background:#161b22}</style></head>
         const bits = [];
         bits.push(`<span class="lg-ip" onclick="goTrail('${e.src_ip}')" title="Open ${e.src_ip} in IP Trail">${e.src_ip || '—'}</span>`);
         if (e.dst_ip) bits.push(` <span class="lg-arr">→</span> <span class="lg-ip" onclick="goTrail('${e.dst_ip}')" title="Open ${e.dst_ip} in IP Trail">${e.dst_ip}</span>${e.dst_port ? `<span class="lg-port">:${escapeHTML(e.dst_port)}</span>` : ''}`);
-        bits.push(` — ${pv(e.threat_type, e.threat_label || (e.threat_type || 'event').replace(/_/g, ' '))}`);
+        bits.push(` — ${pv(e.threat_type, TT(e.threat_label) || TT(e.threat_type) || 'event')}`);
         if (e.rule) bits.push(`: <i class="lg-rule">${escapeHTML(e.rule.substring(0, 90))}</i>`);
         if (e.user_display) bits.push(` as ${pv(e.user_display)}`);
         if (e.agent) bits.push(` on ${pv(e.agent)}`);
@@ -5718,7 +5721,7 @@ tr:hover td{background:#161b22}</style></head>
         <td style="font-size:11px;white-space:nowrap" title="${e.ts_raw ? 'alert.json: ' + escapeHTML(e.ts_raw) : ''}">${toIST(e.ts_raw || e['@timestamp'])}${e.event_id ? `<br><span class="log-eid" onclick="copyEid(event,'${e.event_id}')" title="Event ID — click to copy">${e.event_id}</span>` : ''}</td>
         <td style="color:var(--accent);cursor:pointer" onclick="goTrail('${e.src_ip}')">${e.src_ip || '—'}</td>
         <td><span class="src-badge src-${e.log_source || 'endpoint'}">${e.log_source || 'endpoint'}</span></td>
-        <td>${e.threat_label || (e.threat_type || '').replace(/_/g, ' ')}</td>
+        <td>${TT(e.threat_label) || TT(e.threat_type) || '—'}</td>
         <td><span class="badge ${e.severity || 'low'}">${e.severity || 'low'}</span></td>
         <td>${actHtml}</td>
         <td style="font-size:11px">${e.country || '—'}</td>
@@ -6163,8 +6166,8 @@ tr:hover td{background:#161b22}</style></head>
       const t = sum || { total: 0, first_seen: '', last_seen: '', threat_types: {} };
       const ml = mlRes || { risk_score: 0, anomaly_score: 0, is_anomaly: false };
 
-      const tt = t.threat_types ? Object.entries(t.threat_types).sort((a,b)=>b[1]-a[1])[0] : null;
-      const threatStr = tt ? `${tt[0].replace(/_/g, ' ')}: ${tt[1]}` : 'none';
+      const tt = t.threat_types ? Object.entries(t.threat_types).filter(([k]) => TT(k)).sort((a,b)=>b[1]-a[1])[0] : null;
+      const threatStr = tt ? `${TT(tt[0])}: ${tt[1]}` : 'none';
 
       let html = `<div style="display:flex;flex-direction:column;gap:15px;margin-top:10px;">
         <div style="padding:15px;background:var(--bg3);border-radius:6px;border-left:4px solid ${ml.risk_score > 70 ? 'var(--danger)' : ml.risk_score > 40 ? 'var(--warn)' : 'var(--ok)'}">
@@ -6555,7 +6558,7 @@ tr:hover td{background:#161b22}</style></head>
           <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:7px">Why ${escapeHTML(e.entity)} scored ${e.score}</div>
 
           <div style="font-size:11.5px;line-height:1.65;margin-bottom:9px">
-            ${top ? `Driven mainly by <b style="color:${sevCol[top.severity]}">${top.events.toLocaleString()} ${top.severity}</b> alert${top.events === 1 ? '' : 's'} (${top.pct}% of the score)` : 'Built from low-weight events'}${e.top_threat ? `, mostly <b>${escapeHTML(String(e.top_threat).replace(/_/g, ' '))}</b>` : ''}.
+            ${top ? `Driven mainly by <b style="color:${sevCol[top.severity]}">${top.events.toLocaleString()} ${top.severity}</b> alert${top.events === 1 ? '' : 's'} (${top.pct}% of the score)` : 'Built from low-weight events'}${TT(e.top_threat) ? `, mostly <b>${escapeHTML(TT(e.top_threat))}</b>` : ''}.
             ${fresh ? ` Last seen <b>${fresh}</b>${retained != null ? ` — decay has it at <b>${Math.round(retained * 100)}%</b> of full weight.` : '.'}` : ''}
             ${e.events_24h ? ` <b>${e.events_24h.toLocaleString()}</b> of its ${e.events.toLocaleString()} events landed in the last 24h.` : ' No activity in the last 24h — this score is history, not a live threat.'}
           </div>
@@ -6808,7 +6811,7 @@ tr:hover td{background:#161b22}</style></head>
       if (adopted) {
         const lv = p.live || {};
         body += `<div class="pbx-stats">
-          <span>Covers <span class="pbx-cov">${escapeHTML((p.threat_type || '').replace(/_/g,' '))}</span></span>
+          <span>Covers <span class="pbx-cov">${escapeHTML(TT(p.threat_type) || 'general activity')}</span></span>
           <span><b>${(lv.events||0).toLocaleString()}</b> events</span>
           <span><b>${lv.ips||0}</b> source IPs</span>
           <span><b>${lv.critical||0}</b> critical</span>
