@@ -781,7 +781,7 @@ body{font-family:var(--sans);color:var(--text);min-height:100vh;
   </div>
 
   <!-- 02 · WHY THESE ENTITIES -->
-  <div class="sec" id="s-fusion"><span class="no">02</span><span class="nm">Why these entities</span><span class="ln"></span><span class="mod ai">Signal fusion · the arithmetic behind every score</span></div>
+  <div class="sec" id="s-fusion"><span class="no">02</span><span class="nm">Why these entities</span><span class="ln"></span><span class="mod ai">Signal fusion · where independent detectors corroborate</span></div>
   <div class="card">
     <div class="card-h"><span class="card-t">Signal fusion</span><span class="card-badge" id="fuse-badge">loading…</span></div>
     <div class="card-b">
@@ -1792,60 +1792,98 @@ addEventListener('resize', () => { initMesh(); if (REDUCED) drawMesh(); });
   const order = Object.keys(groups).sort((a, b) =>
     groups[b][0].sig.length - groups[a][0].sig.length || groups[b].length - groups[a].length);
 
-  const maxAgree = fused.length ? fused[0].sig.length : 0;
+  /* A signature shared by this many entities is a MASS signature — collapsed into
+     a single finding instead of N near-identical rows, because that many hosts
+     breaking the same way at once almost always has one common cause, not N
+     incidents. Small groups and any intel / all-3-agree group stay as standouts. */
+  const MASS = 8;
+  const MASS_CAUSE = {
+    'anomaly+deviation': 'That many hosts drifting from their own baseline together almost always share one cause — a scan or sweep hitting them, a patch / GPO / agent rollout, or a monitoring job — not that many separate intrusions.',
+    'anomaly': 'A large block flagged by the model alone, with nothing corroborating, is usually an environmental shift (a new job, a rollout). Confirm the common cause before treating any single host as compromised.',
+    'deviation': 'A large block drifting from baseline together points to a shared change in the environment, not many independent incidents.',
+  };
+  const fzRow = f => `
+    <div class="fz-row" tabindex="0" data-e="${esc(f.ip)}">
+      <span class="fz-ip" title="Trace ${esc(f.ip)} in IP Trail">${esc(f.ip)}<i class="fz-arrow">→</i></span>
+      <span class="fz-bar">${EK.map(k => {
+        const pts = f.c[k]?.points || 0;
+        return pts ? `<span class="fz-seg" style="flex:${pts};background:${ENGINE[k].col}"
+                            title="${ENGINE[k].label}: +${pts} pts — ${esc(ENGINE[k].why)}"></span>` : '';
+      }).join('')}${f.floored
+        ? `<span class="fz-seg fz-floor" style="flex:${f.lift}" title="Model flagged this but the parts total only ${f.parts}, so the score is held at the 50 floor (+${f.lift})"></span>`
+        : ''}</span>
+      <span class="fz-sum">${EK.filter(k => f.c[k]?.points).map(k =>
+        `<span class="fz-chip" style="color:${ENGINE[k].col}">${ENGINE[k].label} +${f.c[k].points}</span>`).join('')}</span>
+      <span class="fz-score${f.floored ? ' fl' : ''}">${f.score}</span>
+    </div>`;
+
+  // Split: credible standouts (strong agreement / intel / small groups) vs mass.
+  const standouts = [], masses = [];
+  order.forEach(key => {
+    const rows = groups[key], agree = rows[0].sig.length, hasIntel = key.includes('intel');
+    if (rows.length >= MASS && agree < 3 && !hasIntel) masses.push(key); else standouts.push(key);
+  });
+  standouts.sort((a, b) => groups[b][0].sig.length - groups[a][0].sig.length || groups[b].length - groups[a].length);
+  masses.sort((a, b) => groups[b].length - groups[a].length);
+  const nStand = standouts.reduce((t, k) => t + groups[k].length, 0);
+  const nMass = masses.reduce((t, k) => t + groups[k].length, 0);
+
   document.getElementById('fuse-badge').textContent = fused.length
-    ? `${num(fused.length)} flagged · best agreement ${maxAgree} of 3 engines`
+    ? `${num(nStand)} corroborated standout${nStand === 1 ? '' : 's'}${nMass ? ` · ${num(nMass)} in mass signatures` : ''}`
     : 'nothing flagged';
 
-  document.getElementById('fuse-board').innerHTML = fused.length ? order.map(key => {
+  const standoutHtml = standouts.map(key => {
     const rows = groups[key];
     const [name, blurb] = ARCHETYPE[key] || [key, ''];
     const agree = rows[0].sig.length;
     return `<div class="fz-group">
       <div class="fz-gh">
-        <span class="fz-agree ${agree >= 3 ? 'hi' : agree === 2 ? 'mid' : ''}" title="${agree} of the 3 detection engines (ML anomaly, baseline, intel) independently flagged these — agreement is evidence, not a list position">${agree}/3 engines</span>
+        <span class="fz-agree ${agree >= 3 ? 'hi' : agree === 2 ? 'mid' : ''}" title="${agree} of the 3 independent detectors (ML anomaly, baseline, intel) flagged this — agreement is corroboration, not a louder alert">${agree}/3 engines agree</span>
         <span class="fz-gn">${esc(name)}</span>
         <span class="fz-gc">${num(rows.length)} ${rows.length === 1 ? 'entity' : 'entities'}</span>
       </div>
       <div class="fz-gb">${esc(blurb)}</div>
-      ${rows.slice(0, 5).map(f => `
-        <div class="fz-row" tabindex="0" data-e="${esc(f.ip)}">
-          <span class="fz-ip" title="Trace ${esc(f.ip)} in IP Trail">${esc(f.ip)}<i class="fz-arrow">→</i></span>
-          <span class="fz-bar">${EK.map(k => {
-            const pts = f.c[k]?.points || 0;
-            return pts ? `<span class="fz-seg" style="flex:${pts};background:${ENGINE[k].col}"
-                                title="${ENGINE[k].label}: +${pts} pts — ${esc(ENGINE[k].why)}"></span>` : '';
-          }).join('')}${f.floored
-            ? `<span class="fz-seg fz-floor" style="flex:${f.lift}"
-                     title="Anomaly floor: the parts total ${f.parts}, but the model flagged this entity, so the score is held at a minimum of 50 (+${f.lift})"></span>`
-            : ''}</span>
-          <span class="fz-sum">${EK.filter(k => f.c[k]?.points).map(k =>
-            `<span class="fz-chip" style="color:${ENGINE[k].col}">${ENGINE[k].label} +${f.c[k].points}</span>`).join('')}${
-            f.floored ? `<span class="fz-chip fz-fchip" title="parts total ${f.parts}; held at the 50 floor">floor +${f.lift}</span>` : ''}</span>
-          <span class="fz-score${f.floored ? ' fl' : ''}">${f.score}</span>
-        </div>`).join('')}
+      ${rows.slice(0, 5).map(fzRow).join('')}
       ${rows.length > 5 ? `<div class="fz-more">+${num(rows.length - 5)} more with the same signature</div>` : ''}
     </div>`;
-  }).join('') : '<div class="empty-note">No entity is carrying a risk signal right now — every score is zero.</div>';
+  }).join('');
+
+  const massHtml = masses.map(key => {
+    const rows = groups[key];
+    const [name] = ARCHETYPE[key] || [key, ''];
+    const examples = rows.slice(0, 3).map(f => esc(f.ip)).join(', ');
+    const cause = MASS_CAUSE[key] || 'A large group sharing one signature usually has a single common cause — chase that rather than each host separately.';
+    return `<div class="fz-group" style="border-left:3px solid var(--warn);padding-left:11px">
+      <div class="fz-gh">
+        <span class="fz-agree mid" title="Collapsed: too many hosts share this exact signature to be separate incidents">mass signature</span>
+        <span class="fz-gn">${esc(name)}</span>
+        <span class="fz-gc">${num(rows.length)} hosts</span>
+      </div>
+      <div class="fz-gb">${cause}</div>
+      <div style="font-size:11.5px;color:var(--muted);margin:5px 0 7px">e.g. ${examples} …</div>
+      <div style="font-size:12px;color:var(--text);background:rgba(94,106,210,.1);border-left:2px solid var(--accent);
+                  border-radius:5px;padding:7px 10px;line-height:1.5">
+        <b style="color:var(--accent)">✓ Do now:</b> treat as one finding — identify the common cause (a scan source,
+        a change ticket, a rollout) before triaging any host individually.</div>
+    </div>`;
+  }).join('');
+
+  document.getElementById('fuse-board').innerHTML = fused.length
+    ? (standoutHtml + massHtml)
+    : '<div class="empty-note">No entity is carrying a risk signal right now — every score is zero.</div>';
 
   document.getElementById('fuse-board').addEventListener('click', e => {
     const r = e.target.closest('.fz-row');
     if (r && r.dataset.e) { runTrail(r.dataset.e); document.querySelector('#s-trail').scrollIntoView({ behavior: 'smooth' }); }
   });
 
-  const nFloor = fused.filter(f => f.floored).length;
-  const nAgree = fused.filter(f => f.sig.length >= 2).length;
-  const f0 = fused[0];
   document.getElementById('fuse-note').innerHTML = fused.length
-    ? `Each bar is the score, drawn to scale — ${esc(f0.ip)} scores <b>${f0.score}</b> from
-       ${EK.filter(k => f0.c[k]?.points).map(k => `${ENGINE[k].label} <b>+${f0.c[k].points}</b>`).join(' and ')}${
-         f0.floored ? `, lifted to the <b>50</b> anomaly floor` : ''}.
-       The engines run independently, so agreement is evidence: <b>${num(nAgree)}</b> of ${num(fused.length)}
-       flagged entities have two or more agreeing${nAgree ? '' : ' — none yet'}.
-       ${nFloor ? `<b>${num(nFloor)}</b> sit on the <b>anomaly floor</b>: their parts total less than 50, but the model
-       flagged them, so the score is held at 50 rather than letting a thin signal look safe. The grey tail on those
-       bars is that lift — it is the model overruling its own arithmetic, and it is worth knowing which rows it applies to.` : ''}
-       Click any row to trace the entity.`
+    ? `Three detectors — the model, each entity's own 30-day baseline, and threat intel — run independently, so when
+       two or more agree on an entity that is <b>corroboration</b>, not just a louder alert.
+       <b>${num(nStand)}</b> ${nStand === 1 ? 'entity is a corroborated standout' : 'entities are corroborated standouts'}${
+         nMass ? `; <b>${num(nMass)}</b> more fall into <b>mass signatures</b> — many hosts sharing one pattern, collapsed
+         into a single finding each so one environmental change doesn't read as hundreds of incidents` : ''}.
+       Click any standout to trace it.`
     : `Nothing is flagged. Average points per engine across all scored entities:
        ML <b>${aAn}</b>, Baseline <b>${aDev}</b>, Intel <b>${aInt}</b>.`;
   /* ── UEBA (real; honest when identities aren't in the logs) ── */
