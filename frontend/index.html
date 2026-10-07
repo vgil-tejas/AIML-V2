@@ -8285,6 +8285,28 @@ tr:hover td{background:#161b22}</style></head>
       });
     })();
   </script>
+  <script>
+  /* Deep-link hash router — lets the split-out feature pages hand off into the
+     SPA via the URL (e.g. /#incidents, /#trail=1.2.3.4). Does nothing when there
+     is no hash, so the app's normal default boot is untouched. */
+  (function () {
+    function applyHash() {
+      var h = (location.hash || '').replace(/^#/, '');
+      if (!h) return;
+      var eq = h.indexOf('='), page = eq < 0 ? h : h.slice(0, eq);
+      var arg = eq < 0 ? '' : decodeURIComponent(h.slice(eq + 1));
+      if (typeof nav !== 'function' || !document.getElementById('page-' + page)) return;
+      try {
+        if (page === 'trail' && arg && typeof goTrail === 'function') { goTrail(arg); return; }
+        if (page === 'killchain' && arg && typeof goKillChain === 'function') { goKillChain(arg); return; }
+        nav(page);
+      } catch (e) {}
+    }
+    if (document.readyState === 'complete') setTimeout(applyHash, 60);
+    else window.addEventListener('load', function () { setTimeout(applyHash, 60); });
+    window.addEventListener('hashchange', applyHash);
+  })();
+  </script>
 </body>
 
 </html>
