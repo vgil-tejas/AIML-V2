@@ -1646,6 +1646,11 @@ async def get_stats():
     # Serve from cache if fresh (called every 10s from the dashboard)
     if _stats_cache and time.time() - _stats_cache_ts < _STATS_TTL:
         return _stats_cache
+    if cache:                                   # shared L2 (Redis) before recompute
+        shared = cache.get("stats:v")
+        if shared:
+            _stats_cache = shared; _stats_cache_ts = time.time()
+            return shared
 
     # Single-flight: /api/stats is polled every 10s by every open browser, so a
     # bare cache expiry would let N concurrent requests all recompute at once and
@@ -1689,6 +1694,8 @@ async def get_stats():
         if total_logs or not _stats_cache:
             _stats_cache = result
             _stats_cache_ts = time.time()
+            if cache:
+                cache.set("stats:v", result, _STATS_TTL)
         return _stats_cache if _stats_cache else result
 
 
@@ -3356,7 +3363,15 @@ async def detections_catalog(window_hours: int = 24):
     requirement → in-built detector → ATT&CK technique → 'what this attack leads to'."""
     if det is None:
         return {"total": 0, "active": 0, "use_cases": [], "error": "catalog unavailable"}
-    return await _gather_detections(window_hours)
+    rkey = f"detections:{int(window_hours)}"
+    if cache:
+        shared = cache.get(rkey)
+        if shared:
+            return shared
+    res = await _gather_detections(window_hours)
+    if cache and res and res.get("use_cases"):
+        cache.set(rkey, res, 180)
+    return res
 
 
 # -- Incident correlation + triage queue (Phase 4) ------------------------------
@@ -3481,7 +3496,14 @@ async def _gather_incidents(max_ips: int = 15) -> list[dict]:
 @app.get("/api/incidents")
 async def list_incidents(limit: int = 25):
     """Correlated incident triage queue, highest priority first."""
+    if cache:
+        shared = cache.get("incidents:all")
+        if shared is not None:
+            return {"incidents": shared[:limit], "total": len(shared),
+                    "generated_at": datetime.now(timezone.utc).isoformat()}
     incidents = await _gather_incidents()
+    if cache and incidents:
+        cache.set("incidents:all", incidents, _INCIDENTS_TTL)
     return {
         "incidents": incidents[:limit],
         "total": len(incidents),
