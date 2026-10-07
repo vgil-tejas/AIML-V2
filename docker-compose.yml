@@ -113,6 +113,9 @@ services:
       # box (e.g. 16 on the 80-core .23 server). READ_MAX_SECONDS is the kill budget.
       - READ_MAX_THREADS=${READ_MAX_THREADS:-4}
       - READ_MAX_SECONDS=${READ_MAX_SECONDS:-30}
+      # Optional shared cache (Redis). Fail-safe: if Redis is down/absent the
+      # backend silently uses its in-process cache. Set REDIS_URL= to disable.
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
@@ -124,6 +127,8 @@ services:
     depends_on:
       clickhouse:
         condition: service_healthy
+      redis:
+        condition: service_started
     # Give the API a scheduling edge over co-tenant services too, so the dashboard
     # stays responsive under load — but below ClickHouse, which does the real work.
     cpu_shares: ${BACKEND_CPU_SHARES:-2048}
@@ -143,6 +148,24 @@ services:
       timeout: 12s
       retries: 6
       start_period: 40s
+
+  # Shared cache for the hot read payloads (overview-summary, entity-risk). Small,
+  # LRU-capped, no persistence (it's a cache). The backend is fail-safe: if this
+  # is down it falls back to its in-process cache, so Redis is never a hard dep.
+  redis:
+    image: redis:7-alpine
+    container_name: aiml_redis
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 320M
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
 
   ml-engine:
     build: ./ml-engine

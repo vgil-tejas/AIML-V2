@@ -24,6 +24,10 @@ try:
 except Exception:
     inc = None  # type: ignore
 try:
+    import cache                       # optional Redis shared cache (fail-safe)
+except Exception:
+    cache = None  # type: ignore
+try:
     import playbooks as pb             # response playbook definitions + matching
 except Exception:
     pb = None  # type: ignore
@@ -4021,13 +4025,21 @@ async def entity_risk(dim: str = "ip", half_life_hours: int = 72,
         asyncio.create_task(_erisk_refresh(key, dim, half_life_hours, window_days, limit))
         return hit[1]                               # stale: serve now, refresh behind
     # Cold (or very stale): single-flight compute so a burst collapses to one scan.
+    rkey = f"erisk:{dim}:{int(half_life_hours)}:{int(window_days)}:{int(limit)}"
     lock = _erisk_locks.setdefault(key, asyncio.Lock())
     async with lock:
         hit = _erisk_cache.get(key)
         if hit and time.time() - hit[0] < _ERISK_TTL:
             return hit[1]
+        if cache:                                   # shared L2 (Redis), if enabled
+            shared = cache.get(rkey)
+            if shared:
+                _erisk_cache[key] = (time.time(), shared)
+                return shared
         payload = await _entity_risk_build(dim, half_life_hours, window_days, limit)
         _erisk_cache[key] = (time.time(), payload)
+        if cache:
+            cache.set(rkey, payload, _ERISK_TTL)
         if len(_erisk_cache) > 64:                  # bound memory across param combos
             oldest = min(_erisk_cache, key=lambda k: _erisk_cache[k][0])
             _erisk_cache.pop(oldest, None)
@@ -4046,6 +4058,11 @@ async def overview_summary():
     hit = _osum_cache.get("v")
     if hit and now - hit[0] < _OSUM_TTL:
         return hit[1]
+    if cache:                                   # shared L2 (Redis), if enabled
+        shared = cache.get("osum:v")
+        if shared:
+            _osum_cache["v"] = (now, shared)
+            return shared
     stats, incidents, erisk, dets, ato, travel = await asyncio.gather(
         get_stats(), _gather_incidents(), entity_risk(dim="ip", limit=6),
         _gather_detections(72), ueba_account_takeover(), ueba_impossible_travel(),
@@ -4066,6 +4083,8 @@ async def overview_summary():
                  "impossible_travel": len((travel or {}).get("findings", []))},
     }
     _osum_cache["v"] = (now, payload)
+    if cache:
+        cache.set("osum:v", payload, _OSUM_TTL)
     return payload
 
 

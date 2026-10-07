@@ -9,3 +9,4 @@ python-dotenv==1.0.1
 aiofiles==23.2.1
 opensearch-py==2.7.1
 clickhouse-connect==0.7.19
+redis==5.0.4
