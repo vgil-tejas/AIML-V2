@@ -91,6 +91,9 @@ services:
       # Risk-score saturation constant (score = 100*pts/(pts+K)). Unset => 140
       # (conservative, production). A demo box lowers it so a live attack reddens.
       - RISK_SATURATION_POINTS=${RISK_SATURATION_POINTS:-140}
+      # Rank entity-risk from the daily severity rollup (migration 003) instead of
+      # a 30-day raw scan. Enable only after backfilling + validating (see 003).
+      - ENTITY_RISK_ROLLUP=${ENTITY_RISK_ROLLUP:-}
       - AI_API_KEY=${GROQ_API_KEY:-${AI_API_KEY}}
       - AI_MODEL=${GROQ_MODEL:-${AI_MODEL:-openai/gpt-oss-120b}}
       # Every AI feature actually uses the FAST model — forward it so an on-prem /

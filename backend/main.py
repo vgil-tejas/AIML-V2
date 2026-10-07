@@ -239,6 +239,13 @@ _erisk_locks: dict = {}            # key -> asyncio.Lock (single-flight per key)
 _ERISK_TTL = 60                    # seconds fresh
 _ERISK_STALE = 600                 # serve-stale up to 10 min while refreshing
 
+# /api/overview-summary bundles the Overview boot into ONE call (KPIs, incident +
+# detection counts, UEBA counts, top risk queue) gathered from the already-cached
+# endpoints — so a page opens with 1 request instead of ~12. Tiny TTL because its
+# inputs are themselves cached; this just avoids re-gathering on every 10s poll.
+_osum_cache: dict = {}
+_OSUM_TTL = 15
+
 # -- Playbook-recommender inputs cache -----------------------------------------
 # The recommender pulls a multi-query pipeline from ClickHouse (feedback, entity
 # features, recurrence, ML scores). Recommendations change slowly, but the page
@@ -4025,6 +4032,41 @@ async def entity_risk(dim: str = "ip", half_life_hours: int = 72,
             oldest = min(_erisk_cache, key=lambda k: _erisk_cache[k][0])
             _erisk_cache.pop(oldest, None)
         return payload
+
+
+@app.get("/api/overview-summary")
+async def overview_summary():
+    """One cached payload for an Overview page boot — KPIs, incident + detection
+    counts, UEBA counts and the top risk queue — gathered concurrently from the
+    already-cached endpoints, so a page opens with a single request instead of ~12.
+    Consumed by the split-out overview page; the legacy deck keeps its own calls."""
+    if not (osc and STORE_ENABLED):
+        return {"store_enabled": False}
+    now = time.time()
+    hit = _osum_cache.get("v")
+    if hit and now - hit[0] < _OSUM_TTL:
+        return hit[1]
+    stats, incidents, erisk, dets, ato, travel = await asyncio.gather(
+        get_stats(), _gather_incidents(), entity_risk(dim="ip", limit=6),
+        _gather_detections(72), ueba_account_takeover(), ueba_impossible_travel(),
+        return_exceptions=True,
+    )
+    def _ok(x, d): return x if not isinstance(x, Exception) and x is not None else d
+    stats = _ok(stats, {}); incidents = _ok(incidents, []); erisk = _ok(erisk, {})
+    dets = _ok(dets, {}); ato = _ok(ato, {}); travel = _ok(travel, {})
+    active_dets = [u for u in (dets.get("use_cases") or []) if u.get("status") == "active"]
+    payload = {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "stats": stats,
+        "incidents": {"total": len(incidents), "top": incidents[:6]},
+        "entity_risk": {"entities": erisk.get("entities", []), "scoring": erisk.get("scoring")},
+        "detections": {"active": int(dets.get("active") or len(active_dets)),
+                       "total": int(dets.get("total") or 0), "top": active_dets[:8]},
+        "ueba": {"account_takeover": len((ato or {}).get("findings", [])),
+                 "impossible_travel": len((travel or {}).get("findings", []))},
+    }
+    _osum_cache["v"] = (now, payload)
+    return payload
 
 
 # -- Analyst feedback loop (TP/FP) → re-disposition ---------------------------

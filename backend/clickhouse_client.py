@@ -43,6 +43,11 @@ CLICKHOUSE_DB   = os.getenv("CLICKHOUSE_DB", "cybersentinel")
 OPENSEARCH_ENABLED = CLICKHOUSE_ENABLED
 
 LOGS_TABLE = f"{CLICKHOUSE_DB}.logs"
+ENTITY_SEV_ROLLUP = f"{CLICKHOUSE_DB}.agg_entity_sev_daily"   # migration 003
+# Rank /api/entity-risk (dim=ip) from the daily severity rollup instead of a
+# 30-day scan of the raw logs. Default OFF — enable only after the backfill is
+# run and the numbers are validated against the raw path (see migration 003).
+ENTITY_RISK_ROLLUP = os.getenv("ENTITY_RISK_ROLLUP", "").lower() in ("1", "true", "yes", "on")
 AGG_TABLE  = f"{CLICKHOUSE_DB}.agg_ip_daily"
 
 # Half-saturation constant for the entity risk score. The score is
@@ -1736,6 +1741,56 @@ def _entity_verdict(dim: str, ev: int, crit: int, high: int, med: int,
             "tone": "medium" if serious else "low"}
 
 
+def _erisk_rows_from_rollup(hl: int, window_days: int, limit: int) -> list[dict]:
+    """Rank entity risk from the daily severity rollup (migration 003) instead of
+    scanning the raw 190M logs. Decay is applied per DAY (day midpoint) — an
+    approximation of per-event decay, fine for ranking order. The top-N are then
+    enriched with uniq_dsts / max_level / top_threat / last_seen from the raw table
+    (bounded by the small IP list, so cheap). Returns rows shaped exactly like the
+    raw query's, so the caller's output loop is unchanged."""
+    hl = max(1, int(hl))
+    decay = f"exp(-0.6931471805 * dateDiff('hour', toDateTime(day) + INTERVAL 12 HOUR, now()) / {hl})"
+    rank = _q(
+        f"SELECT src_ip AS entity, "
+        f"  sum(events) AS events, "
+        f"  sum(n_critical) AS n_critical, sum(n_high) AS n_high, "
+        f"  sum(n_medium) AS n_medium, sum(n_low) AS n_low, sum(n_failed) AS n_failed, "
+        f"  round(sum((n_critical*10 + n_high*6.5 + n_medium*3.5 + n_low*1 + n_other*0.5) * {decay}), 2) AS risk_points, "
+        f"  round(sum(n_critical*10.0 * {decay}), 2) AS p_critical, "
+        f"  round(sum(n_high*6.5 * {decay}),     2) AS p_high, "
+        f"  round(sum(n_medium*3.5 * {decay}),   2) AS p_medium, "
+        f"  round(sum(n_low*1.0 * {decay}),      2) AS p_low, "
+        f"  sum(if(day >= today(), events, 0)) AS events_24h "
+        f"FROM {ENTITY_SEV_ROLLUP} "
+        f"WHERE day >= today() - {int(window_days)} "
+        f"GROUP BY src_ip "
+        f"ORDER BY risk_points DESC LIMIT {int(limit)}"
+    )
+    if not rank:
+        return []
+    ips = [r["entity"] for r in rank if r.get("entity")]
+    enr: dict[str, dict] = {}
+    if ips:
+        safe = ",".join("'" + str(i).replace("'", "") + "'" for i in ips)
+        for r in _q(
+            f"SELECT src_ip AS entity, max(rule_level) AS max_level, "
+            f"  uniqExact(dst_ip) AS uniq_dsts, "
+            f"  arrayElement(topK(1)(toString(threat_type)), 1) AS top_threat, "
+            f"  max(ts) AS last_seen "
+            f"FROM {LOGS_TABLE} WHERE src_ip IN ({safe}) "
+            f"  AND ts >= now() - INTERVAL {int(window_days)} DAY "
+            f"GROUP BY src_ip"
+        ):
+            enr[r["entity"]] = r
+    for r in rank:
+        e = enr.get(r["entity"], {})
+        r["max_level"]  = e.get("max_level", 0)
+        r["uniq_dsts"]  = e.get("uniq_dsts", 0)
+        r["top_threat"] = e.get("top_threat", "")
+        r["last_seen"]  = e.get("last_seen")
+    return rank
+
+
 def get_entity_risk_ranking(dimension: str = "ip", half_life_hours: int = 72,
                             window_days: int = 30, limit: int = 50) -> list[dict]:
     col = {"ip": "src_ip", "user": "username", "host": "agent"}.get(dimension, "src_ip")
@@ -1751,7 +1806,16 @@ def get_entity_risk_ranking(dimension: str = "ip", half_life_hours: int = 72,
     # Written inline rather than as a SELECT alias: a bare alias over `ts` in a
     # GROUP BY query is not an aggregate and ClickHouse rejects it.
     pts_expr = f"({weight} * {decay})"
-    rows = _q(
+    # Fast path: rank from the daily rollup when enabled (dim=ip only). Any error
+    # falls back to the raw scan below, so a rollup problem never breaks the API.
+    rollup_rows = None
+    if dimension == "ip" and ENTITY_RISK_ROLLUP:
+        try:
+            rollup_rows = _erisk_rows_from_rollup(hl, window_days, limit)
+        except Exception as e:
+            logger.warning(f"entity-risk rollup path failed, using raw scan: {e}")
+            rollup_rows = None
+    rows = rollup_rows if rollup_rows is not None else _q(
         f"SELECT {col} AS entity, "
         f"  count() AS events, "
         f"  round(sum({pts_expr}), 2) AS risk_points, "
