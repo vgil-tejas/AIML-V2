@@ -532,6 +532,32 @@ CATALOG = [
 ]
 
 
+# What the analyst should actually DO when a use-case fires. Keyed by code so a
+# single table covers the whole catalog; the forecast turns each firing into a
+# next action instead of just narrating what it could lead to.
+_RECOMMENDED = {
+    "UC-A": "Confirm whether any targeted account succeeded; if not, block the source at the perimeter and enforce lockout/MFA on the hammered accounts.",
+    "UC-B": "Treat the account as compromised — force a password reset, kill its active sessions, and review everything it touched after the successful login.",
+    "UC-C": "Verify the off-hours activity with the account owner; if unexplained, suspend the session and review what was accessed.",
+    "UC-D": "Isolate the source host, disable the account, and check each reached host for follow-on access.",
+    "UC-E": "Confirm the account is legitimate and provisioned; disable it if it is dormant or unknown.",
+    "UC-F": "Challenge the login (step-up / MFA), reset the credential if it is unexplained, and watch the account for follow-up.",
+    "UC-G": "Review the raw events behind the errors for probing or exploitation; patch or mitigate the underlying service if confirmed.",
+    "UC-H": "Open the entity trail — if the behaviour is unexplained, capture traffic and scope the host for scanning or beaconing.",
+    "UC-I": "Contain the host now (network-isolate), preserve evidence, and raise an incident — these are late-stage signals.",
+    "UC-J": "Isolate and reimage the host, remove the persistence mechanism, and rotate any credentials stored on it.",
+    "UC-K": "Block the external destination, isolate the calling host, and hunt for the same destination across other hosts.",
+    "UC-L": "Engage rate-limiting / upstream scrubbing, confirm customer-facing services are up, and preserve logs for regulator reporting.",
+    "UC-M": "Isolate and reimage the host, remove the persistence, and rotate credentials that lived on it.",
+    "UC-N": "Verify the account's owner and need; disable it and review the hosts it reached if the use is unexplained.",
+    "UC-O": "Treat the workload's cloud credentials as exposed — rotate the instance-role credentials and restrict metadata access (enforce IMDSv2).",
+    "UC-P": "Confirm the elevation was an authorised, change-managed action; if not, revoke the elevated session and review what was done as admin/root.",
+    "UC-Q": "Confirm the RDP logon with the account owner; if unexplained, disable the account and isolate the target host.",
+    "UC-R": "Check whether this is a looping or misconfigured session (e.g. a console left open re-authenticating) rather than a real actor; if benign, dismiss it so it stops ranking.",
+}
+_RECOMMENDED_DEFAULT = "Open the entity trail to confirm, then record a true/false-positive disposition so the model learns."
+
+
 def _sev_rank(s: str) -> int:
     return {"low": 0, "medium": 1, "high": 2, "critical": 3}.get(s, 0)
 
@@ -557,6 +583,7 @@ def run_catalog(osc, window_hours: int = 24) -> dict:
         base = {k: entry[k] for k in
                 ("code", "letter", "name", "category", "techniques", "engine",
                  "looks_for", "attack_could_happen")}
+        base["recommended"] = _RECOMMENDED.get(entry["code"], _RECOMMENDED_DEFAULT)
         if store_off:
             base.update({"status": "monitoring", "count": 0, "top": [], "max_severity": "low"})
             use_cases.append(base)
