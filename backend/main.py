@@ -230,6 +230,15 @@ _incidents_cache: list = []
 _incidents_cache_ts: float = 0.0
 _INCIDENTS_TTL = 60  # seconds
 
+# /api/entity-risk was the hottest UNCACHED read: a 30-day GROUP BY over the raw
+# logs table, hit by both the Overview load and the Incidents page on every open.
+# Cache it per (dim, half-life, window, limit) with single-flight + serve-stale,
+# so the 190M scan runs at most once per TTL regardless of how many browsers poll.
+_erisk_cache: dict = {}            # key -> (ts, payload)
+_erisk_locks: dict = {}            # key -> asyncio.Lock (single-flight per key)
+_ERISK_TTL = 60                    # seconds fresh
+_ERISK_STALE = 600                 # serve-stale up to 10 min while refreshing
+
 # -- Playbook-recommender inputs cache -----------------------------------------
 # The recommender pulls a multi-query pipeline from ClickHouse (feedback, entity
 # features, recurrence, ML scores). Recommendations change slowly, but the page
@@ -3926,15 +3935,9 @@ async def playbook_label_queue(limit: int = 12):
 _RISK_SATURATION = float(os.getenv("RISK_SATURATION_POINTS", "140"))
 
 
-@app.get("/api/entity-risk")
-async def entity_risk(dim: str = "ip", half_life_hours: int = 72,
-                      window_days: int = 30, limit: int = 50):
-    """Ranked watch-list of entities (ip|user|host) by time-decayed risk. Replaces
-    the alert flood with the handful of entities that actually deserve attention."""
-    if not (osc and STORE_ENABLED):
-        return {"entities": [], "dimension": dim}
-    if dim not in ("ip", "user", "host"):
-        dim = "ip"
+async def _entity_risk_build(dim: str, half_life_hours: int, window_days: int, limit: int) -> dict:
+    """Does the real 30-day GROUP BY + disposition annotation. Wrapped by the
+    cached endpoint so this heavy work runs at most once per TTL."""
     ents = await _to_thread(osc.get_entity_risk_ranking, dim,
                             max(1, half_life_hours), max(1, window_days), min(limit, 200))
     # Annotate with any standing analyst disposition (re-disposition in action).
@@ -3975,6 +3978,53 @@ async def entity_risk(dim: str = "ip", half_life_hours: int = 72,
             "bands": {"critical": ">= 80", "high": "55-79", "medium": "30-54", "low": "< 30"},
         },
     }
+
+
+async def _erisk_refresh(key, dim, half_life_hours, window_days, limit):
+    """Recompute one entity-risk key in the background (serve-stale path)."""
+    lock = _erisk_locks.setdefault(key, asyncio.Lock())
+    if lock.locked():
+        return                      # a refresh is already in flight for this key
+    async with lock:
+        try:
+            payload = await _entity_risk_build(dim, half_life_hours, window_days, limit)
+            _erisk_cache[key] = (time.time(), payload)
+        except Exception:
+            pass
+
+
+@app.get("/api/entity-risk")
+async def entity_risk(dim: str = "ip", half_life_hours: int = 72,
+                      window_days: int = 30, limit: int = 50):
+    """Ranked watch-list of entities (ip|user|host) by time-decayed risk. Replaces
+    the alert flood with the handful of entities that actually deserve attention.
+    Cached per (dim, half-life, window, limit): fresh < TTL serves instantly, stale
+    serves immediately and refreshes in the background, cold computes once (single-
+    flight) so concurrent browsers never stack 190M scans."""
+    if not (osc and STORE_ENABLED):
+        return {"entities": [], "dimension": dim}
+    if dim not in ("ip", "user", "host"):
+        dim = "ip"
+    key = (dim, int(half_life_hours), int(window_days), int(limit))
+    now = time.time()
+    hit = _erisk_cache.get(key)
+    if hit and now - hit[0] < _ERISK_TTL:
+        return hit[1]                               # fresh
+    if hit and now - hit[0] < _ERISK_STALE:
+        asyncio.create_task(_erisk_refresh(key, dim, half_life_hours, window_days, limit))
+        return hit[1]                               # stale: serve now, refresh behind
+    # Cold (or very stale): single-flight compute so a burst collapses to one scan.
+    lock = _erisk_locks.setdefault(key, asyncio.Lock())
+    async with lock:
+        hit = _erisk_cache.get(key)
+        if hit and time.time() - hit[0] < _ERISK_TTL:
+            return hit[1]
+        payload = await _entity_risk_build(dim, half_life_hours, window_days, limit)
+        _erisk_cache[key] = (time.time(), payload)
+        if len(_erisk_cache) > 64:                  # bound memory across param combos
+            oldest = min(_erisk_cache, key=lambda k: _erisk_cache[k][0])
+            _erisk_cache.pop(oldest, None)
+        return payload
 
 
 # -- Analyst feedback loop (TP/FP) → re-disposition ---------------------------
