@@ -6657,6 +6657,10 @@ tr:hover td{background:#161b22}</style></head>
     }
     // ── Part 5: case workbench + intel hub ─────────────────────────────────
     const CASE_FLOW = ['new', 'investigating', 'contained', 'closed'];
+    // The real logged-in operator (from the login gate) — every case action is
+    // attributed to them, not a generic "analyst", so the audit trail is real.
+    let OPERATOR = 'analyst';
+    (async () => { try { const r = await fetch(`${API}/auth/me`).then(x => x.ok ? x.json() : null); if (r && r.user) OPERATOR = r.user; } catch (_) {} })();
     async function loadCases() {
       const [r, n] = await Promise.all([get(`${API}/cases`), get(`${API}/feedback/noise-stats`)]);
       const ns = document.getElementById('noise-stat');
@@ -6674,7 +6678,7 @@ tr:hover td{background:#161b22}</style></head>
             ${c.entity ? `<span class="lg-ip" onclick="goTrail('${escapeHTML(c.entity)}')">${escapeHTML(c.entity)}</span>` : ''}
             <span class="badge ${c.severity || 'medium'}">${escapeHTML(c.severity || 'medium')}</span>
             ${closed ? `<span class="badge low">closed · ${escapeHTML((c.disposition || '').replace('_', ' '))}</span>` : ''}
-            <span style="margin-left:auto;font-size:10px;color:var(--faint);font-family:var(--mono)">${escapeHTML(String(c.updated_at).substring(0, 16))}</span>
+            <span style="margin-left:auto;font-size:10px;color:var(--faint);font-family:var(--mono)">${c.created_by ? 'opened by ' + escapeHTML(c.created_by) + ' · ' : ''}${escapeHTML(String(c.updated_at).substring(0, 16))}</span>
           </div>
           ${closed ? '' : `<div class="case-ctl">
             <div class="seg" role="radiogroup" aria-label="Case status">
@@ -6693,7 +6697,7 @@ tr:hover td{background:#161b22}</style></head>
     }
     const _caseCache = {};
     async function caseSet(id, field, value) {
-      const payload = { case_id: id, actor: 'analyst', ..._caseCache[id], [field]: value };
+      const payload = { case_id: id, actor: OPERATOR, ..._caseCache[id], [field]: value };
       if (field === 'status' && value === 'closed') {
         const d = prompt('Closing requires a disposition — type one of:\ntrue_positive / false_positive / benign');
         if (!d || !['true_positive', 'false_positive', 'benign'].includes(d.trim())) {
@@ -6720,12 +6724,18 @@ tr:hover td{background:#161b22}</style></head>
       el.style.display = '';
     }
     async function openCaseFor(incidentId, entity, title) {
+      // Opening a case is a real action: capture why, and attribute it to the
+      // operator who opened it (they also become the default assignee/owner).
+      const note = prompt(`Open a case for ${entity}, assigned to you (${OPERATOR}).\n\nWhat are you investigating / why open this? (opening note)`, '');
+      if (note === null) return;  // cancelled
       const r = await fetch(`${API}/cases/upsert`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title, incident_id: incidentId, entity, status: 'new', actor: 'analyst', severity: 'high' }),
+        body: JSON.stringify({ title, incident_id: incidentId, entity, status: 'new',
+          actor: OPERATOR, assignee: OPERATOR, notes: note, severity: 'high' }),
       }).then(x => x.ok ? x.json() : null).catch(() => null);
-      toast(r ? `Case ${r.case_id} opened for ${entity}` : 'Could not open case', r ? '' : 'warn', r ? '✓' : '⚠');
+      toast(r ? `Case ${r.case_id} opened by ${OPERATOR} for ${entity}` : 'Could not open case', r ? '' : 'warn', r ? '✓' : '⚠');
       loadCases();
+      document.getElementById('cases-body')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     }
     async function intelHub(ip, btn) {
       btn.textContent = 'Querying intel…'; btn.disabled = true;
