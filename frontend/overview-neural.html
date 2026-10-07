@@ -689,7 +689,6 @@ body{font-family:var(--sans);color:var(--text);min-height:100vh;
 <nav class="topnav" id="sbnav">
   <a class="ni active" href="#s-verdict"><span class="nd"></span>Verdict</a>
   <a class="ni" href="#s-fusion"><span class="nd"></span>Why</a>
-  <a class="ni" href="#s-pipeline"><span class="nd"></span>Pipeline</a>
   <a class="ni" href="#s-trail"><span class="nd"></span>Trail</a>
   <a class="ni" href="#s-console"><span class="nd"></span>Console</a>
   <div class="cmdk" id="cmdk-btn">⌘<kbd>Ctrl K</kbd></div>
@@ -808,20 +807,8 @@ body{font-family:var(--sans);color:var(--text);min-height:100vh;
     </div>
   </div>
 
-  <!-- 03 · PIPELINE -->
-  <div class="sec" id="s-pipeline"><span class="no">03</span><span class="nm">Pipeline</span><span class="ln"></span><span class="mod">Architecture · sensor → verdict · click any stage</span></div>
-  <div class="card arch-card">
-    <div class="card-h"><span class="card-t">How an event becomes a verdict</span><span class="card-badge">live pipeline · 8 engines</span>
-      <button class="arch-btn" id="arch-btn" title="Open the stage-by-stage list"><span class="ag">▦</span>Detail</button>
-    </div>
-    <div class="card-b">
-      <div class="archflow" id="archflow"><div class="empty-note">Spinning up the pipeline…</div></div>
-      <div class="topo-hint">An event enters at <b style="color:var(--muted)">SENSENET</b> and leaves as a verdict at <b style="color:var(--muted)">EDGEGATE</b> — click any stage for its live contents</div>
-    </div>
-  </div>
-
-  <!-- 04 · TRAIL -->
-  <div class="sec" id="s-trail"><span class="no">04</span><span class="nm">IP Trail</span><span class="ln"></span><span class="mod">Forensic timeline · every IP click lands here</span></div>
+  <!-- 03 · TRAIL -->
+  <div class="sec" id="s-trail"><span class="no">03</span><span class="nm">IP Trail</span><span class="ln"></span><span class="mod">Forensic timeline · every IP click lands here</span></div>
   <div class="card">
     <div class="card-h"><span class="card-t">Entity Trail</span><span class="card-badge" id="trail-badge">enter an entity to trace</span></div>
     <div class="card-b">
@@ -834,7 +821,7 @@ body{font-family:var(--sans);color:var(--text);min-height:100vh;
   </div>
 
   <!-- 05 · CONSOLE -->
-  <div class="sec" id="s-console"><span class="no">05</span><span class="nm">AI Console</span><span class="ln"></span><span class="mod ai">SOC query + AI investigator</span></div>
+  <div class="sec" id="s-console"><span class="no">04</span><span class="nm">AI Console</span><span class="ln"></span><span class="mod ai">SOC query + AI investigator</span></div>
   <div class="card">
     <div class="card-h"><span class="card-t">Ask the SOC anything</span><span class="card-badge">natural language → VaultQL → answer</span></div>
     <div class="card-b">
@@ -1258,21 +1245,9 @@ function openService(key) {
 function closeModal() { modal.classList.remove('open'); }
 document.getElementById('mod-x').onclick = closeModal;
 
-/* ═══ ARCHITECTURE MODAL — the 8-stage pipeline, on demand ═══
-   The strip used to sit open on the deck. It now lives behind the architecture
-   symbol, and its body scrolls (see .mod-box / .mod-b). Each stage still drills
-   into the same real per-service view as clicking that service's topology node. */
+/* The standalone Pipeline/architecture section was removed as noise. PIPE_HTML is
+   kept declared only so the (now-unused) builder in the sync loop stays valid. */
 let PIPE_HTML = '';
-function openPipeline() {
-  modT.textContent = 'Architecture';
-  modB.innerHTML = `<div style="margin-bottom:12px">Eight services. An event enters at the top and
-    leaves as a verdict at the bottom — every count below is live.</div>`
-    + (PIPE_HTML || `<div class="mod-empty">Still reading service state…</div>`)
-    + `<div class="mod-act"><button class="qa" data-close="1">Close</button></div>`;
-  modB.scrollTop = 0;
-  modal.classList.add('open');
-}
-document.getElementById('arch-btn').onclick = openPipeline;
 
 /* ═══ JUSTIFY — the full case for a queue entity, in place ═══
    Clicking an entity in "Start here" no longer jumps straight to the raw trail.
@@ -1411,9 +1386,8 @@ const pal = document.getElementById('palette'), palIn = document.getElementById(
 const SECTIONS = [
   ['01', 'Verdict — what happened, what to do first', '#s-verdict'],
   ['02', 'Why these entities — signal fusion & trends', '#s-fusion'],
-  ['03', 'Pipeline — how an event becomes a verdict', '#s-pipeline'],
-  ['04', 'IP Trail — forensic timeline', '#s-trail'],
-  ['05', 'AI Console — ask anything', '#s-console'],
+  ['03', 'IP Trail — forensic timeline', '#s-trail'],
+  ['04', 'AI Console — ask anything', '#s-console'],
 ];
 function renderPal(f = '') {
   const q = f.trim().toLowerCase();
