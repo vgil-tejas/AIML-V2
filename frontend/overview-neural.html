@@ -1262,10 +1262,135 @@ function openPipeline() {
 }
 document.getElementById('arch-btn').onclick = openPipeline;
 
+/* ═══ JUSTIFY — the full case for a queue entity, in place ═══
+   Clicking an entity in "Start here" no longer jumps straight to the raw trail.
+   It opens a self-contained case: WHAT it did (the behaviour), WHY it scored what
+   it did (the four parts of the model, as bars), and HOW we solve it (the verdict's
+   recommended action + concrete remediation steps). The raw evidence trail is one
+   click deeper, for the analyst who wants to see the underlying events. */
+const JUSTIFY_REMEDIATION = {
+  'External source · failed-auth flood': [
+    'Confirm the source is not a sanctioned partner or branch; if it is not, block the IP/range at the perimeter firewall.',
+    'Check the trail — confirm that NO account authenticated successfully from it.',
+    'If a real account was targeted, force a password reset and require MFA on it.',
+  ],
+  'Repeated authentication failures': [
+    'Identify the targeted account(s) and whether any attempt actually succeeded.',
+    'Lock or reset the account if the source is not recognised.',
+    'Add the source to the watchlist and watch for follow-up activity.',
+  ],
+  'Concentrated critical activity': [
+    'Open the evidence trail and confirm the critical detections are genuine, not one noisy rule firing repeatedly.',
+    'If confirmed, contain the host or account and raise an incident.',
+    'Attach this entity to the incident so Responder can suggest a playbook.',
+  ],
+  'High volume · low severity': [
+    'Confirm the traffic is an expected service, health-check or backup job.',
+    'If expected, dismiss it as benign below — it stops ranking and the model learns from it.',
+    'Only revisit if the trail later shows a change in behaviour.',
+  ],
+  'Wide destination fan-out': [
+    'Review the destination list in the trail for scanning or lateral-movement shape.',
+    'If internal and expected (e.g. a monitoring host), mark it benign.',
+    'If unexpected, isolate the source and investigate the destinations it reached.',
+  ],
+};
+let _justifyEnt = null;
+function showJustify(en) {
+  if (!en) return;
+  _justifyEnt = en;
+  const v = en.verdict || {};
+  const c = en.components || {};
+  const tone = v.tone || (en.band === 'critical' ? 'critical' : en.band === 'high' ? 'high' : 'medium');
+  const tc = tone === 'critical' ? 'var(--danger)' : tone === 'high' ? 'var(--warn)'
+           : tone === 'low' ? 'var(--muted)' : 'var(--accent)';
+  const nz = x => (x == null ? '—' : num(x));
+  const age = en.age_hours == null ? '—'
+            : en.age_hours < 1 ? '<1h ago'
+            : en.age_hours < 48 ? Math.round(en.age_hours) + 'h ago'
+            : Math.round(en.age_hours / 24) + 'd ago';
+  const bar = (label, val, cap, col) => {
+    val = +val || 0;
+    const pct = Math.max(0, Math.min(100, val / cap * 100));
+    return `<div style="margin:7px 0">
+      <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--muted);margin-bottom:3px">
+        <span>${label}</span><span style="font-family:var(--mono)">${val.toFixed(1)} / ${cap}</span></div>
+      <div style="height:7px;border-radius:4px;background:rgba(255,255,255,.07);overflow:hidden">
+        <div style="height:100%;width:${pct}%;background:${col}"></div></div></div>`;
+  };
+  const parts = [['severity (serious alerts, decayed)', +c.severity || 0],
+                 ['how concentrated the serious events are', +c.concentration || 0],
+                 ['recent activity in the last 24h', +c.recency || 0],
+                 ['how many destinations it touched', +c.spread || 0]];
+  parts.sort((a, b) => b[1] - a[1]);
+  const dom = (parts[0] && parts[0][1] > 0) ? parts[0][0] : 'a mix of weak signals';
+  const stat = (label, val) => `<div style="background:rgba(255,255,255,.03);border:1px solid var(--border);border-radius:8px;padding:8px 10px">
+    <div style="font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:var(--faint)">${label}</div>
+    <div style="font-size:15px;font-weight:600;margin-top:2px">${val}</div></div>`;
+  const steps = JUSTIFY_REMEDIATION[v.label] || [
+    'Open the evidence trail to see the underlying events.',
+    'Decide true- or false-positive and record it, so the model learns from this entity.',
+  ];
+  modT.textContent = `${en.entity} · risk ${en.score}`;
+  modB.innerHTML = `
+    <div style="border-left:3px solid ${tc};padding:8px 0 8px 12px;margin-bottom:16px">
+      <div style="font-size:9px;letter-spacing:.16em;text-transform:uppercase;color:var(--faint)">Verdict</div>
+      <div style="font-size:15px;font-weight:650;color:${tc};margin:2px 0">${esc(v.label || 'Needs review')}</div>
+      <div style="color:var(--muted);font-size:13px">${esc(v.detail || '')}</div>
+    </div>
+    <div style="font-size:9px;letter-spacing:.16em;text-transform:uppercase;color:var(--faint);margin-bottom:7px">What it did</div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(104px,1fr));gap:7px;margin-bottom:18px">
+      ${stat('Events (30d)', nz(en.events))}
+      ${stat('Last 24h', nz(en.events_24h))}
+      ${stat('Last seen', age)}
+      ${stat('Critical', nz(en.critical))}
+      ${stat('High', nz(en.high))}
+      ${stat('Failed auth', nz(en.failed))}
+      ${stat('Destinations', nz(en.uniq_dsts))}
+      ${stat('Source', en.external ? 'External (public)' : 'Internal')}
+    </div>
+    <div style="font-size:9px;letter-spacing:.16em;text-transform:uppercase;color:var(--faint);margin-bottom:7px">Why it scored ${en.score}</div>
+    ${bar('Severity', c.severity, 60, 'var(--danger)')}
+    ${bar('Concentration', c.concentration, 20, 'var(--warn)')}
+    ${bar('Recent activity', c.recency, 12, 'var(--ai)')}
+    ${bar('Spread', c.spread, 8, 'var(--teal)')}
+    <div style="color:var(--muted);font-size:12px;margin:8px 0 18px">
+      Raw volume alone can never exceed 60 — this entity's score is driven mostly by <b style="color:var(--text)">${dom}</b>.
+      ${en.external && ((+en.critical + +en.high) >= 5) ? ' A public (external) source carrying serious activity adds a further +8.' : ''}
+    </div>
+    <div style="font-size:9px;letter-spacing:.16em;text-transform:uppercase;color:var(--faint);margin-bottom:7px">How we solve it</div>
+    <div style="color:var(--accent);font-size:13px;margin-bottom:8px">→ ${esc(v.action || 'Review and record a disposition.')}</div>
+    <ol style="margin:0 0 4px 18px;padding:0;color:var(--muted);font-size:13px;line-height:1.7">
+      ${steps.map(s => `<li>${esc(s)}</li>`).join('')}
+    </ol>
+    <div class="mod-act">
+      <button class="qa go" data-trail="${esc(en.entity)}">Open evidence trail →</button>
+      <button class="qa" data-fp="${esc(en.entity)}">Not a threat — teach the model</button>
+      <button class="qa" data-close="1">Close</button>
+    </div>`;
+  modB.scrollTop = 0;
+  modal.classList.add('open');
+}
+
 modal.addEventListener('click', e => {
   const stage = e.target.closest('.pstage');
   if (stage) return openService(stage.dataset.svc);   // pipeline → per-service drill-in
   if (e.target === modal || e.target.dataset.close) return closeModal();
+  if (e.target.dataset.trail) {   // justify → raw evidence trail, one click deeper
+    closeModal(); runTrail(e.target.dataset.trail);
+    document.querySelector('#s-trail')?.scrollIntoView({ behavior: 'smooth' }); return;
+  }
+  if (e.target.dataset.fp) {      // dismiss as benign — feeds the feedback loop
+    const ent = e.target.dataset.fp;
+    const why = prompt(`Dismiss ${ent} — why? (e.g. "known scanner", "backup job", "pentest box")`);
+    if (why === null) return;
+    fetch(`${API}/feedback`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ entity: ent, disposition: 'false_positive', signature: 'overview', note: why || 'dismissed from Overview' }),
+    }).then(x => x.ok).then(ok => toast(ok ? `${ent} dismissed — the model will learn from it`
+                                           : `Could not save feedback for ${ent}`, ok ? 'ai' : 'warn', ok ? '◈' : '⚠')).catch(() => {});
+    closeModal(); return;
+  }
   if (e.target.dataset.go) { closeModal(); document.querySelector(e.target.dataset.go)?.scrollIntoView({ behavior: 'smooth' }); }
 });
 
@@ -1559,9 +1684,37 @@ addEventListener('resize', () => { initMesh(); if (REDUCED) drawMesh(); });
     j(`${API}/logs/latest?limit=60`), j(`${API}/ueba/account-takeover`), j(`${API}/ueba/impossible-travel`),
   ]);
 
+  /* ── Threat Index — LIVE (not the frozen all-time severity mix) ──
+     The index now tracks the worst entities active right now, from the same
+     priority queue the analyst sees. It moves: when a source turns dangerous
+     it climbs, when the network goes quiet it falls. The all-time mix computed
+     at boot (threatIndexOf) is only the placeholder until this lands. The ring
+     animates to GV every frame, so reassigning GV here is enough. */
+  {
+    const liveEnts = (erR && erR.entities) || [];
+    if (liveEnts.length) {
+      const top1 = Math.max(0, ...liveEnts.map(e => +e.score || 0));
+      const nCrit = liveEnts.filter(e => (+e.score || 0) >= 80).length;
+      const nHigh = liveEnts.filter(e => (+e.score || 0) >= 55 && (+e.score || 0) < 80).length;
+      const live24 = liveEnts.some(e => (+e.events_24h || 0) > 0);
+      let gi = top1 * 0.8 + Math.min(20, nCrit * 8 + nHigh * 3);
+      if (!live24) gi *= 0.7;   // nothing in the last 24h → calmer right now
+      GV = Math.max(0, Math.min(100, Math.round(gi)));
+      const [bt, bc] = bandOf(GV);
+      const be = document.getElementById('core-band');
+      if (be) { be.textContent = bt; be.style.color = bc; }
+      const sn = document.getElementById('sev-note');
+      if (sn) sn.innerHTML =
+        `Threat Index <b>${GV}</b> tracks the worst entities active right now — it climbs when a source turns
+         genuinely dangerous and falls when the network is quiet, so it reflects the live picture, not sheer volume.`;
+    }
+  }
+
   /* ── ML · anomalies (real) ── */
   const anomalies = (anomR && anomR.anomalies) || [];
-  document.getElementById('kpi-anom').textContent = num(anomalies.length);
+  // Real total from the engine (count_ml_anomalies), NOT the 500-row display cap.
+  const anomTotal = (anomR && anomR.total != null) ? anomR.total : anomalies.length;
+  document.getElementById('kpi-anom').textContent = num(anomTotal);
   const avg = k => anomalies.length ? Math.round(anomalies.reduce((s, a) => s + (a.components?.[k]?.points || 0), 0) / anomalies.length) : 0;
   const aAn = avg('anomaly'), aDev = avg('deviation'), aInt = avg('intel');
 
@@ -1680,15 +1833,22 @@ addEventListener('resize', () => { initMesh(); if (REDUCED) drawMesh(); });
   const ents = (erR && erR.entities) || [];
   /* join each queue entity with its fusion arithmetic and live behaviour so
      the row answers "what is it doing and why this score" at a glance */
+  const _qmap = {}; ents.forEach(en => _qmap[en.entity] = en);   // entity → full risk object, for the justify case
   const _fmap = {}; fused.forEach(f => _fmap[f.ip] = f);
   const _hmap = {}; hot.forEach(h => _hmap[h.ip] = h);
   const _doing = en => {
-    const h = _hmap[en.entity], tt = h && h.threat_types;
-    const top = tt && Object.keys(tt).length ? pretty(Object.keys(tt).reduce((a, b) => tt[a] >= tt[b] ? a : b)) : null;
+    // Backend verdict: a plain-English classification + what to do about it,
+    // instead of stitched raw counts. {label, detail, action, tone}
+    const v = en.verdict;
+    if (v && v.detail) {
+      const tc = v.tone === 'critical' ? 'var(--danger)' : v.tone === 'high' ? 'var(--warn)'
+               : v.tone === 'low' ? 'var(--muted)' : 'var(--text)';
+      return `<b style="color:${tc}">${esc(v.label)}.</b> ${esc(v.detail)}
+              <span style="color:var(--accent)">→ ${esc(v.action)}</span>`;
+    }
+    // Fallback only if the backend verdict is missing.
     const dst = num(en.uniq_dsts) + (en.uniq_dsts === 1 ? ' destination' : ' destinations');
-    return top
-      ? `Mostly ${top} — ${num(en.events)} events at ${dst}, ${num(en.critical)} critical.`
-      : `${num(en.events)} events at ${dst}, ${num(en.critical)} critical.`;
+    return `${num(en.events)} events at ${dst}, ${num(en.critical)} critical.`;
   };
   const _minibar = en => {
     const f = _fmap[en.entity];
@@ -1707,7 +1867,7 @@ addEventListener('resize', () => { initMesh(); if (REDUCED) drawMesh(); });
         <div class="q-why">${_doing(en)}</div>
       </div>
       <div class="q-actions">
-        <button class="qa go" data-act="trail" data-e="${esc(en.entity)}" title="Open this entity's full trail">INVESTIGATE</button>
+        <button class="qa go" data-act="justify" data-e="${esc(en.entity)}" title="Full case: what it did, why it scored, how to respond">INVESTIGATE</button>
         <button class="qa" data-act="pb" data-e="${esc(en.entity)}" title="Suggest a response playbook">PLAYBOOK</button>
       </div>
     </div>`;
@@ -1733,13 +1893,15 @@ addEventListener('resize', () => { initMesh(); if (REDUCED) drawMesh(); });
         const name = s && ((s.suggestions || [])[0]?.name);
         toast(name ? `Suggested playbook for ${ent}: “${name}” — run it in Responder`
                    : `${ent} is not in a correlated incident yet — open Responder to pick a playbook manually`, 'ai', '◈');
-      } else if (b.dataset.act === 'trail') {
-        runTrail(ent); document.querySelector('#s-trail').scrollIntoView({ behavior: 'smooth' });
+      } else if (b.dataset.act === 'justify') {
+        showJustify(_qmap[ent]);
       }
       return;
     }
     const it = e.target.closest('.q-item');
-    if (it && it.dataset.e) { runTrail(it.dataset.e); document.querySelector('#s-trail').scrollIntoView({ behavior: 'smooth' }); }
+    // Clicking the row opens the full justification case in place — NOT a jump
+    // to the raw trail (that's one click deeper, inside the case).
+    if (it && it.dataset.e) showJustify(_qmap[it.dataset.e]);
   });
 
   /* ── Responder ledger (real playbook runs) ── */

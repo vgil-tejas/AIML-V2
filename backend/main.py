@@ -3952,21 +3952,25 @@ async def entity_risk(dim: str = "ip", half_life_hours: int = 72,
         # The scoring model, published so the UI can show an analyst WHY an
         # entity scored what it did. A score nobody can defend gets ignored.
         "scoring": {
-            "method": "time-decayed severity sum, mapped to an absolute 0-100 by soft saturation",
+            "method": "threat blend — severity (capped) + concentration + recency + spread, 0-100",
             "weights": {"critical": 10, "high": 6.5, "medium": 3.5, "low": 1, "other": 0.5},
             "half_life_hours": half_life_hours,
             "window_days": window_days,
             "saturation_points": _RISK_SATURATION,
             "steps": [
-                f"Every alert for the {dim} in the last {window_days} days scores points by severity "
-                f"(critical 10, high 6.5, medium 3.5, low 1).",
-                f"Each alert's points decay with age — half-life {half_life_hours}h, so an alert "
-                f"{half_life_hours}h old counts half as much as one right now.",
-                "Those decayed points are summed into the entity's raw risk points.",
-                f"The 0-100 score is absolute: 100 × points ÷ (points + {_RISK_SATURATION:g}). "
-                f"An entity needs {_RISK_SATURATION:g} decayed points to reach 50 and roughly "
-                f"{_RISK_SATURATION*4:g} to reach 80 — so a quiet window genuinely reads low, and "
-                "the score reflects real danger, not just who is busiest.",
+                f"Severity (0-60): every alert for the {dim} in the last {window_days} days scores "
+                f"points by severity (critical 10, high 6.5, medium 3.5, low 1), each decayed by age "
+                f"(half-life {half_life_hours}h). Mapped to at most 60 via 60 × points ÷ (points + "
+                f"{_RISK_SATURATION:g}) — so sheer alert volume alone can never exceed 60.",
+                "Concentration (0-20): the fraction of the entity's events that are critical or high. "
+                "200 events that are mostly serious outrank 3 million events with a handful of serious.",
+                "Recency (0-12): how much of the activity happened in the last 24 hours — a live entity "
+                "outranks one whose score is built from week-old events.",
+                "Spread (0-8): how many distinct destinations it touched — the shape of scanning or "
+                "lateral movement. A public (external) source with real serious activity adds a small bump.",
+                "The four parts sum to the 0-100 score. Only concentration, recency and spread of "
+                "genuinely serious activity can carry an entity into the critical band — a busy internal "
+                "host with no serious events reads 'high' at most, never 100.",
             ],
             "bands": {"critical": ">= 80", "high": "55-79", "medium": "30-54", "low": "< 30"},
         },

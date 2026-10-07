@@ -13,8 +13,10 @@ Synchronous helpers (safe to call from any context), matching the old client.
 """
 import os
 import re
+import math
 import time
 import json
+import ipaddress
 import hashlib
 import logging
 import threading
@@ -1671,6 +1673,69 @@ def get_all_feedback(limit: int = 200) -> list[dict]:
 # entities with sustained/recent bad behaviour float to the top. This turns a
 # flood of alerts into a short ranked watch-list — the alert-fatigue killer.
 
+def _is_public_ip(s: str) -> bool:
+    """True for a routable, non-RFC1918 address — i.e. something that came from
+    outside the bank's own network. External sources with serious activity are
+    treated more harshly than internal hosts, which are usually just noisy."""
+    try:
+        ip = ipaddress.ip_address((s or "").strip())
+        return not (ip.is_private or ip.is_loopback or ip.is_link_local
+                    or ip.is_multicast or ip.is_reserved or ip.is_unspecified)
+    except Exception:
+        return False
+
+
+def _entity_verdict(dim: str, ev: int, crit: int, high: int, med: int,
+                    n_failed: int, dsts: int, ev24: int, external: bool,
+                    top_threat: str) -> dict:
+    """Turn the raw signals into a one-line analyst verdict + recommended action.
+    Replaces "Mostly unknown — N events at M destinations": every row now says
+    what kind of thing it is and what to do about it."""
+    serious = crit + high
+    tt = (top_threat or "").lower().strip()
+    conc = (serious / ev) if ev else 0.0
+
+    def n(x):  # compact thousands, mirrors the UI
+        return f"{int(x):,}"
+
+    # 1) External address throwing failed/denied auth — credential attack shape.
+    if dim == "ip" and external and n_failed >= 20:
+        return {"label": "External source · failed-auth flood",
+                "detail": f"{n(n_failed)} failed/denied attempts from a public address, {n(dsts)} host(s) touched.",
+                "action": "Confirm the source is sanctioned; block at the firewall if it is not.",
+                "tone": "critical"}
+    # 2) Brute-force / repeated auth failure (internal or unclassified).
+    if "brute" in tt or (n_failed >= 20 and serious >= 3):
+        return {"label": "Repeated authentication failures",
+                "detail": f"{n(n_failed)} failed/denied events, {n(crit)} critical.",
+                "action": "Find the account behind the attempts; lock or reset if it is not recognised.",
+                "tone": "high"}
+    # 3) Dense critical/high activity — looks like a live incident, not background.
+    if crit >= 1 and conc >= 0.02:
+        return {"label": "Concentrated critical activity",
+                "detail": f"{n(crit)} critical + {n(high)} high inside {n(ev)} events"
+                          + (f" (top: {top_threat})" if tt and tt != "unknown" else "") + ".",
+                "action": "Open the trail now — this density usually means an active incident.",
+                "tone": "critical" if crit >= 5 else "high"}
+    # 4) Huge volume but almost nothing serious — the classic noisy service.
+    if ev >= 50000 and serious <= max(5, ev * 0.0005):
+        return {"label": "High volume · low severity",
+                "detail": f"{n(ev)} events but only {n(serious)} serious — typical of a busy service or health-check.",
+                "action": "Likely noise — deprioritise unless the trail shows a change in behaviour.",
+                "tone": "low"}
+    # 5) Wide fan-out across destinations — scanning / lateral movement shape.
+    if dsts >= 25:
+        return {"label": "Wide destination fan-out",
+                "detail": f"Reaching {n(dsts)} destinations, {n(crit)} critical.",
+                "action": "Check the destination list in the trail for scanning or lateral movement.",
+                "tone": "high" if crit else "medium"}
+    # 6) Fallback — still concrete, never "unknown".
+    return {"label": "Mixed activity — needs a look",
+            "detail": f"{n(serious)} serious of {n(ev)} events, {n(ev24)} in the last 24h.",
+            "action": "Open the trail to confirm whether this needs action.",
+            "tone": "medium" if serious else "low"}
+
+
 def get_entity_risk_ranking(dimension: str = "ip", half_life_hours: int = 72,
                             window_days: int = 30, limit: int = 50) -> list[dict]:
     col = {"ip": "src_ip", "user": "username", "host": "agent"}.get(dimension, "src_ip")
@@ -1698,6 +1763,8 @@ def get_entity_risk_ranking(dimension: str = "ip", half_life_hours: int = 72,
         f"  countIf(severity='high')     AS n_high, "
         f"  countIf(severity='medium')   AS n_medium, "
         f"  countIf(severity='low')      AS n_low, "
+        f"  countIf(action ILIKE '%deni%' OR action ILIKE '%fail%' OR action ILIKE '%block%' "
+        f"          OR rule ILIKE '%fail%' OR rule ILIKE '%invalid%' OR rule ILIKE '%brute%') AS n_failed, "
         f"  max(rule_level) AS max_level, "
         f"  uniqExact(dst_ip) AS uniq_dsts, "
         f"  arrayElement(topK(1)(toString(threat_type)), 1) AS top_threat, "
@@ -1718,16 +1785,40 @@ def get_entity_risk_ranking(dimension: str = "ip", half_life_hours: int = 72,
     out = []
     for r in rows:
         pts = float(r.get("risk_points") or 0)
-        # ABSOLUTE score via soft saturation: 100 * pts/(pts+K). Monotonic in pts
-        # so the ranking order is unchanged, but the busiest entity is no longer
-        # pinned to 100 — on a quiet day the worst entity scores low, as it should.
-        score = int(round(100 * pts / (pts + RISK_SATURATION_POINTS))) if pts > 0 else 0
+        ev = int(r.get("events") or 0)
+        crit = int(r.get("n_critical") or 0)
+        high = int(r.get("n_high") or 0)
+        med = int(r.get("n_medium") or 0)
+        n_failed = int(r.get("n_failed") or 0)
+        dsts = int(r.get("uniq_dsts") or 0)
+        ev24 = int(r.get("events_24h") or 0)
+        serious = crit + high
+        external = _is_public_ip(r["entity"]) if dimension == "ip" else False
+
+        # ── THREAT SCORE (0-100) — four bounded parts so raw volume can NEVER
+        #    pin an entity to 100. A busy internal host with no serious events
+        #    tops out around "high"; only concentration + recency + spread of
+        #    genuinely serious activity carry a row into the critical band.
+        #    severity 0-60  ·  concentration 0-20  ·  live-24h 0-12  ·  spread 0-8
+        sev_c = 60.0 * pts / (pts + RISK_SATURATION_POINTS) if pts > 0 else 0.0
+        conc = (serious / ev) if ev else 0.0
+        dens_c = 20.0 * min(1.0, conc * 4.0)            # 25% serious already maxes it
+        rec_c = 12.0 * min(1.0, (ev24 / ev) * 2.0) if ev else 0.0   # 50% in 24h maxes
+        spread_c = 8.0 * min(1.0, math.log1p(dsts) / math.log(50)) if dsts > 0 else 0.0
+        score = sev_c + dens_c + rec_c + spread_c
+        # External public source with real serious activity gets a small bump —
+        # an outside attacker matters more than an internal host doing the same.
+        if external and serious >= 5:
+            score += 8.0
+        score = int(max(0, min(100, round(score))))
         # Kept for context ("worst thing on the network right now"): where this
-        # entity sits relative to the busiest, which is a different question from
-        # how dangerous it is in absolute terms.
+        # entity sits relative to the busiest by raw points.
         rel_pct = int(max(0, min(100, round(pts / top * 100))))
         band = ("critical" if score >= 80 else "high" if score >= 55
                 else "medium" if score >= 30 else "low")
+        verdict = _entity_verdict(dimension, ev, crit, high, med, n_failed,
+                                  dsts, ev24, external,
+                                  (r.get("top_threat") or "").strip())
 
         # Which severity buckets actually built this score, biggest first.
         drivers = []
@@ -1765,13 +1856,19 @@ def get_entity_risk_ranking(dimension: str = "ip", half_life_hours: int = 72,
             "rel_pct":     rel_pct,          # where it sits vs the busiest entity
             "band":        band,
             "max_level":   int(r.get("max_level") or 0),
-            "critical":    int(r.get("n_critical") or 0),
-            "uniq_dsts":   int(r.get("uniq_dsts") or 0),
+            "critical":    crit,
+            "high":        high,
+            "failed":      n_failed,
+            "external":    external,
+            "uniq_dsts":   dsts,
             "last_seen":   _iso(r.get("last_seen")),
             # ── why this score (analyst-facing explanation) ──────────────────
             "drivers":     drivers,
+            "components":  {"severity": round(sev_c, 1), "concentration": round(dens_c, 1),
+                            "recency": round(rec_c, 1), "spread": round(spread_c, 1)},
+            "verdict":     verdict,   # {label, detail, action, tone}
             "top_threat":  (r.get("top_threat") or "").strip(),
-            "events_24h":  int(r.get("events_24h") or 0),
+            "events_24h":  ev24,
             "age_hours":   age_h,
             "is_top":      r.get("entity") == top_entity,
         })
