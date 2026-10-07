@@ -1710,23 +1710,25 @@ addEventListener('resize', () => { initMesh(); if (REDUCED) drawMesh(); });
   {
     const liveEnts = (erR && erR.entities) || [];
     if (liveEnts.length) {
-      // Anchored on the worst live entity so the index and the top "Start here"
-      // score agree (an analyst seeing index 91 can click and find the 91). A few
-      // extra hot entities nudge it up a little; a quiet last-24h tempers it.
-      const top1 = Math.max(0, ...liveEnts.map(e => +e.score || 0));
-      const others = liveEnts.filter(e => (+e.score || 0) >= 55).length - 1;  // hot entities beyond the worst
+      // Overall posture: the AVERAGE risk across the entities actually carrying
+      // risk (the watchlist), pulled 40% of the way toward the worst entity so a
+      // single critical actor still lifts the index. Averaging ALL entities would
+      // be meaningless — thousands of idle hosts at ~0 would drown the signal.
+      const scores = liveEnts.map(e => +e.score || 0);
+      const max = Math.max(0, ...scores);
+      const mean = scores.reduce((a, b) => a + b, 0) / scores.length;
       const live24 = liveEnts.some(e => (+e.events_24h || 0) > 0);
-      let gi = top1 + Math.min(8, Math.max(0, others) * 3);   // worst entity, + up to 8 for breadth
-      if (!live24) gi *= 0.8;                                 // nothing in the last 24h → calmer right now
+      let gi = mean + (max - mean) * 0.4;     // average, weighted toward the worst
+      if (!live24) gi *= 0.85;                // nothing in the last 24h → calmer right now
       GV = Math.max(0, Math.min(100, Math.round(gi)));
       const [bt, bc] = bandOf(GV);
       const be = document.getElementById('core-band');
       if (be) { be.textContent = bt; be.style.color = bc; }
       const sn = document.getElementById('sev-note');
       if (sn) sn.innerHTML =
-        `Threat Index <b>${GV}</b> is the risk of the worst entity active right now (the top of <b>Start here</b>),
-         nudged up when several entities are hot. It climbs when a source turns genuinely dangerous and falls when
-         the network is quiet — it is not a count of events.`;
+        `Threat Index <b>${GV}</b> is the average risk across the active watchlist (${scores.length} entities, worst
+         <b>${max}</b>), weighted toward the worst — so it reflects both how many sources are dangerous and how bad the
+         worst one is. It is not a count of events.`;
     } else {
       // Live queue unavailable — fall back to the all-time severity ratio so the
       // ring still shows something defensible rather than staying at 0.
