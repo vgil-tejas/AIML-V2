@@ -6,80 +6,52 @@
   <title>UEBA · CyberSentinel</title>
   <link rel="stylesheet" href="app.css">
   <style>
-    * { box-sizing: border-box; }
-    body { margin: 0; background: var(--bg, #0d1117); color: var(--text, #c9d1d9); font-family: system-ui, sans-serif; }
-    .shell { display: flex; min-height: 100vh; }
-    .side { width: 212px; flex: none; background: var(--bg2, #161b22); border-right: 1px solid var(--border, #263040); padding: 16px 10px; }
-    .side .brand { font-weight: 800; padding: 4px 8px 14px; font-size: 15px; }
-    .side .brand span { color: var(--accent, #5e6ad2); }
-    .side a { display: block; padding: 8px 11px; margin: 2px 0; border-radius: 8px; color: var(--muted, #8a8f98); text-decoration: none; font-size: 13px; }
-    .side a:hover { background: rgba(255,255,255,.04); color: var(--text, #c9d1d9); }
-    .side a.active { background: rgba(94,106,210,.14); color: var(--text, #c9d1d9); }
-    .main { flex: 1; min-width: 0; padding: 18px 22px 60px; }
-    .top { display: flex; align-items: center; gap: 12px; margin-bottom: 18px; }
-    .top h1 { font-size: 19px; margin: 0; }
-    .top .sp { margin-left: auto; display: flex; gap: 8px; align-items: center; }
     .ueba-row { display: flex; gap: 12px; align-items: center; padding: 9px 0; border-bottom: 1px solid var(--border); cursor: pointer; }
     .ueba-ring { width: 40px; height: 40px; border-radius: 50%; flex: none; display: grid; place-items: center; font-weight: 700; font-size: 13px;
       background: conic-gradient(var(--c) calc(var(--p) * 1%), rgba(255,255,255,.08) 0); }
     .ueba-ring span { width: 30px; height: 30px; border-radius: 50%; background: var(--bg2); display: grid; place-items: center; }
-    .kpis { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
-    .kpi2 { background: rgba(255,255,255,.03); border: 1px solid var(--border); border-radius: 9px; padding: 9px 14px; min-width: 96px; }
-    .kpi2 .kl { font-size: 9px; letter-spacing: .14em; text-transform: uppercase; color: var(--faint); }
-    .kpi2 .kv { font-size: 20px; font-weight: 700; margin-top: 2px; }
-    @media (max-width: 760px) { .shell { flex-direction: column; } .side { width: auto; display: flex; flex-wrap: wrap; } .side .brand { width: 100%; } }
+    .ueba-kpis { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
+    .ueba-kpi { background: rgba(255,255,255,.03); border: 1px solid var(--border); border-radius: 9px; padding: 9px 14px; min-width: 96px; }
+    .ueba-kpi .kl { font-size: 9px; letter-spacing: .14em; text-transform: uppercase; color: var(--faint); }
+    .ueba-kpi .kv { font-size: 20px; font-weight: 700; margin-top: 2px; }
   </style>
 </head>
 <body>
-<div class="shell">
-  <nav class="side">
-    <div class="brand">Cyber<span>Sentinel</span></div>
-    <a href="/">Overview</a>
-    <a href="incidents.html">Incident Triage</a>
-    <a href="ueba.html" class="active">UEBA</a>
-    <a href="logs.html">Logs Explorer</a>
-    <a href="/#killchain">ATT&amp;CK Kill Chain</a>
-    <a href="/#ml">ML Anomaly</a>
-    <a href="/#playbooks">Response Playbooks</a>
-    <a href="/#nlquery">SOC Query</a>
-    <a href="/#reports">Reports</a>
-    <a href="/#settings">Settings</a>
-  </nav>
+<div class="shell" id="shell">
   <main class="main">
-    <div class="top">
-      <h1>UEBA — Users &amp; Entities</h1>
-      <span style="font-size:12px;color:var(--muted)">Each identity scored against its OWN 30-day baseline</span>
-      <span class="sp"><span id="op" style="font-size:12px;color:var(--muted)"></span><button class="btn" id="logout">Log out</button></span>
-    </div>
-
-    <div class="kpis">
-      <div class="kpi2"><div class="kl">Critical</div><div class="kv" id="k-crit" style="color:var(--danger)">—</div></div>
-      <div class="kpi2"><div class="kl">High</div><div class="kv" id="k-high" style="color:var(--warn)">—</div></div>
-      <div class="kpi2"><div class="kl">Medium</div><div class="kv" id="k-med">—</div></div>
-      <div class="kpi2"><div class="kl">Profiled</div><div class="kv" id="k-pop">—</div></div>
-    </div>
-
-    <div class="card" style="margin-bottom:16px">
-      <div class="ch"><span class="ct">Identity risk <span style="font-size:11px;color:var(--muted);font-weight:400">— ranked by deviation from each user's own baseline</span></span>
-        <span id="updated" style="font-size:11px;color:var(--muted)"></span></div>
-      <div class="cb"><div id="risk-body" class="empty">Loading…</div></div>
-    </div>
-
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px">
-      <div class="card"><div class="ch"><span class="ct">Account takeover</span><span id="ato-count" style="font-size:11px;color:var(--muted)"></span></div><div class="cb"><div id="ato-body" class="empty">Loading…</div></div></div>
-      <div class="card"><div class="ch"><span class="ct">Impossible travel</span><span id="travel-count" style="font-size:11px;color:var(--muted)"></span></div><div class="cb"><div id="travel-body" class="empty">Loading…</div></div></div>
-      <div class="card"><div class="ch"><span class="ct">Peer outliers</span><span id="peer-count" style="font-size:11px;color:var(--muted)"></span></div><div class="cb"><div id="peer-body" class="empty">Loading…</div></div></div>
+    <div class="topbar" id="topbar"></div>
+    <div class="page active" style="padding:18px 22px 60px">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px;flex-wrap:wrap">
+        <span style="font-size:12px;color:var(--muted)">Each identity scored against its OWN 30-day baseline</span>
+        <span id="updated" style="margin-left:auto;font-size:11px;color:var(--muted)"></span>
+      </div>
+      <div class="ueba-kpis">
+        <div class="ueba-kpi"><div class="kl">Critical</div><div class="kv" id="k-crit" style="color:var(--danger)">—</div></div>
+        <div class="ueba-kpi"><div class="kl">High</div><div class="kv" id="k-high" style="color:var(--warn)">—</div></div>
+        <div class="ueba-kpi"><div class="kl">Medium</div><div class="kv" id="k-med">—</div></div>
+        <div class="ueba-kpi"><div class="kl">Profiled</div><div class="kv" id="k-pop">—</div></div>
+      </div>
+      <div class="card" style="margin-bottom:16px">
+        <div class="ch"><span class="ct">Identity risk <span style="font-size:11px;color:var(--muted);font-weight:400">— ranked by deviation from each user's own baseline</span></span></div>
+        <div class="cb"><div id="risk-body" class="empty">Loading…</div></div>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px">
+        <div class="card"><div class="ch"><span class="ct">Account takeover</span><span id="ato-count" style="font-size:11px;color:var(--muted)"></span></div><div class="cb"><div id="ato-body" class="empty">Loading…</div></div></div>
+        <div class="card"><div class="ch"><span class="ct">Impossible travel</span><span id="travel-count" style="font-size:11px;color:var(--muted)"></span></div><div class="cb"><div id="travel-body" class="empty">Loading…</div></div></div>
+        <div class="card"><div class="ch"><span class="ct">Peer outliers</span><span id="peer-count" style="font-size:11px;color:var(--muted)"></span></div><div class="cb"><div id="peer-body" class="empty">Loading…</div></div></div>
+      </div>
     </div>
   </main>
 </div>
 <div id="toast-wrap" style="position:fixed;bottom:18px;right:18px;z-index:120;display:flex;flex-direction:column;gap:8px"></div>
 
+<script>window.PAGE = 'ueba'; window.PAGE_TITLE = 'UEBA — Users & Entities';</script>
+<script src="shell.js"></script>
 <script>
 const API = '/api';
 const esc = v => String(v == null ? '' : v).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const num = v => Number(v || 0).toLocaleString();
 async function get(u) { try { const r = await fetch(API + u, { credentials: 'same-origin' }); return r.ok ? await r.json() : null; } catch (_) { return null; } }
-function toast(m, t) { const w = document.getElementById('toast-wrap'); const e = document.createElement('div'); e.textContent = m; e.style.cssText = 'background:var(--bg2);border:1px solid var(--border);border-left:3px solid ' + (t === 'warn' ? 'var(--warn)' : 'var(--accent)') + ';padding:10px 14px;border-radius:8px;font-size:13px'; w.appendChild(e); setTimeout(() => e.remove(), 4000); }
 function goTrail(v) { location.href = '/#trail=' + encodeURIComponent(v); }
 const RISK_COLORS = { critical: '#eb5757', high: '#f2994a', medium: '#f2c94c', low: '#4cb782' };
 function toIST(ts) { try { return new Date(ts).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', hour12: false }); } catch (_) { return String(ts || ''); } }
@@ -99,9 +71,7 @@ function renderRisk(d) {
     return `<div class="ueba-row" onclick="goTrail('${esc(u.user)}')" title="Trail this identity">
       <div class="ueba-ring" style="--p:${u.score};--c:${col}"><span>${u.score}</span></div>
       <div style="flex:1;min-width:0">
-        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><b style="font-size:14px">${esc(u.user)}</b>
-          <span class="badge ${esc(u.level)}">${esc(u.level)}</span>
-          ${u.baseline_mature ? '' : '<span style="font-size:10px;color:var(--muted)">young baseline</span>'}</div>
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><b style="font-size:14px">${esc(u.user)}</b><span class="badge ${esc(u.level)}">${esc(u.level)}</span>${u.baseline_mature ? '' : '<span style="font-size:10px;color:var(--muted)">young baseline</span>'}</div>
         ${drivers ? `<div style="margin-top:4px">${drivers}</div>` : ''}
       </div></div>`;
   }).join('');
@@ -116,20 +86,16 @@ async function load() {
   if (ato) card('ato-count', 'ato-body', ato.findings || [], f => `<div style="background:rgba(255,255,255,.03);border-radius:6px;padding:10px 13px;margin-bottom:8px;border-left:3px solid ${f.severity === 'high' ? 'var(--danger)' : 'var(--warn)'}">
       <div style="display:flex;justify-content:space-between"><b>${esc(f.username)}</b><span class="badge ${esc(f.severity)}">${esc(f.severity)}</span></div>
       <div style="font-size:12px;color:var(--muted);margin:4px 0">${esc(f.message)}</div>
-      <div style="font-size:11px;font-family:var(--mono)">IP <span style="color:var(--accent);cursor:pointer" onclick="goTrail('${esc(f.src_ip)}')">${esc(f.src_ip)}</span> · ${esc(f.country || '')} · ${esc(toIST(f.ts))}</div></div>`,
-    'No account-takeover patterns detected');
+      <div style="font-size:11px;font-family:var(--mono)">IP <span style="color:var(--accent);cursor:pointer" onclick="goTrail('${esc(f.src_ip)}')">${esc(f.src_ip)}</span> · ${esc(f.country || '')} · ${esc(toIST(f.ts))}</div></div>`, 'No account-takeover patterns detected');
   if (travel) card('travel-count', 'travel-body', travel.findings || [], f => `<div style="background:rgba(255,255,255,.03);border-radius:6px;padding:10px 13px;margin-bottom:8px;border-left:3px solid var(--danger)">
       <div style="display:flex;justify-content:space-between"><b>${esc(f.username)}</b><span class="badge high">impossible travel</span></div>
       <div style="font-size:12px;color:var(--muted);margin:4px 0">${esc(f.message || '')}</div>
-      <div style="font-size:11px;font-family:var(--mono)">${esc(f.from?.country || '')} → ${esc(f.to?.country || '')} · ${num(Math.round(f.evidence?.distance_km || 0))} km · ${num(Math.round(f.evidence?.speed_kmh || 0))} km/h</div></div>`,
-    'No impossible travel detected');
+      <div style="font-size:11px;font-family:var(--mono)">${esc(f.from?.country || '')} → ${esc(f.to?.country || '')} · ${num(Math.round(f.evidence?.distance_km || 0))} km · ${num(Math.round(f.evidence?.speed_kmh || 0))} km/h</div></div>`, 'No impossible travel detected');
   if (peers) card('peer-count', 'peer-body', peers.outliers || [], o => `<div style="background:rgba(255,255,255,.03);border-radius:6px;padding:10px 13px;margin-bottom:8px;border-left:3px solid var(--warn)">
       <div style="display:flex;justify-content:space-between"><b>${esc(o.entity || o.user || '')}</b><span class="badge medium">peer outlier</span></div>
-      <div style="font-size:12px;color:var(--muted);margin-top:4px">${esc(o.message || o.reason || '')}</div></div>`,
-    'No peer outliers');
+      <div style="font-size:12px;color:var(--muted);margin-top:4px">${esc(o.message || o.reason || '')}</div></div>`, 'No peer outliers');
 }
-document.getElementById('logout').onclick = () => fetch('/api/auth/logout', { method: 'POST', credentials: 'same-origin' }).catch(() => {}).then(() => location.replace('/login.html'));
-(async () => { try { const r = await get('/auth/me'); if (r && r.user) document.getElementById('op').textContent = 'operator: ' + r.user; } catch (_) {} load(); })();
+load();
 </script>
 </body>
 </html>

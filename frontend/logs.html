@@ -6,60 +6,30 @@
   <title>Logs Explorer · CyberSentinel</title>
   <link rel="stylesheet" href="app.css">
   <style>
-    * { box-sizing: border-box; }
-    body { margin: 0; background: var(--bg, #0d1117); color: var(--text, #c9d1d9); font-family: system-ui, sans-serif; }
-    .shell { display: flex; min-height: 100vh; }
-    .side { width: 212px; flex: none; background: var(--bg2, #161b22); border-right: 1px solid var(--border, #263040); padding: 16px 10px; }
-    .side .brand { font-weight: 800; padding: 4px 8px 14px; font-size: 15px; }
-    .side .brand span { color: var(--accent, #5e6ad2); }
-    .side a { display: block; padding: 8px 11px; margin: 2px 0; border-radius: 8px; color: var(--muted, #8a8f98); text-decoration: none; font-size: 13px; }
-    .side a:hover { background: rgba(255,255,255,.04); color: var(--text, #c9d1d9); }
-    .side a.active { background: rgba(94,106,210,.14); color: var(--text, #c9d1d9); }
-    .main { flex: 1; min-width: 0; padding: 18px 22px 60px; }
-    .top { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
-    .top h1 { font-size: 19px; margin: 0; }
-    .top .sp { margin-left: auto; display: flex; gap: 8px; align-items: center; }
-    .bar { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; align-items: center; }
-    .bar input { background: rgba(8,13,23,.8); border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; color: var(--text); font-family: var(--mono); font-size: 12px; outline: none; min-width: 220px; }
-    .chip { font-size: 11px; padding: 5px 11px; border-radius: 7px; border: 1px solid var(--border); background: transparent; color: var(--muted); cursor: pointer; }
-    .chip.on { background: rgba(94,106,210,.16); color: var(--text); border-color: var(--accent); }
-    table { width: 100%; border-collapse: collapse; font-size: 12px; }
-    th { text-align: left; font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: var(--faint); padding: 8px 10px; border-bottom: 1px solid var(--border); position: sticky; top: 0; background: var(--bg); }
-    td { padding: 7px 10px; border-bottom: 1px solid var(--border); white-space: nowrap; }
-    td.wrap { white-space: normal; max-width: 320px; }
-    tr:hover td { background: rgba(255,255,255,.03); }
-    .sev { font-weight: 700; }
-    @media (max-width: 760px) { .shell { flex-direction: column; } .side { width: auto; display: flex; flex-wrap: wrap; } .side .brand { width: 100%; } }
+    .lbar { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; align-items: center; }
+    .lbar input { background: rgba(8,13,23,.8); border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; color: var(--text); font-family: var(--mono); font-size: 12px; outline: none; min-width: 220px; }
+    .lchip { font-size: 11px; padding: 5px 11px; border-radius: 7px; border: 1px solid var(--border); background: transparent; color: var(--muted); cursor: pointer; }
+    .lchip.on { background: rgba(94,106,210,.16); color: var(--text); border-color: var(--accent); }
+    table.logtbl { width: 100%; border-collapse: collapse; font-size: 12px; }
+    table.logtbl th { text-align: left; font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: var(--faint); padding: 8px 10px; border-bottom: 1px solid var(--border); position: sticky; top: 0; background: var(--bg2); }
+    table.logtbl td { padding: 7px 10px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+    table.logtbl td.wrap { white-space: normal; max-width: 320px; }
+    table.logtbl tr:hover td { background: rgba(255,255,255,.03); }
   </style>
 </head>
 <body>
-<div class="shell">
-  <nav class="side">
-    <div class="brand">Cyber<span>Sentinel</span></div>
-    <a href="/">Overview</a>
-    <a href="incidents.html">Incident Triage</a>
-    <a href="ueba.html">UEBA</a>
-    <a href="logs.html" class="active">Logs Explorer</a>
-    <a href="/#killchain">ATT&amp;CK Kill Chain</a>
-    <a href="/#ml">ML Anomaly</a>
-    <a href="/#playbooks">Response Playbooks</a>
-    <a href="/#nlquery">SOC Query</a>
-    <a href="/#reports">Reports</a>
-    <a href="/#settings">Settings</a>
-  </nav>
+<div class="shell" id="shell">
   <main class="main">
-    <div class="top">
-      <h1>Logs Explorer</h1>
-      <span style="font-size:12px;color:var(--muted)">Most recent events — newest first</span>
-      <span class="sp"><span id="op" style="font-size:12px;color:var(--muted)"></span><button class="btn" id="logout">Log out</button></span>
+    <div class="topbar" id="topbar"></div>
+    <div class="page active" style="padding:18px 22px 60px">
+      <div class="lbar">
+        <input id="q" placeholder="Filter by IP, rule, user, agent, country…">
+        <span id="sevchips"></span>
+        <button class="btn" id="refresh">↻ Refresh</button>
+        <span id="count" style="margin-left:auto;font-size:11px;color:var(--muted)"></span>
+      </div>
+      <div class="card"><div class="cb" style="overflow-x:auto"><table class="logtbl" id="tbl"><tbody id="tb"><tr><td class="empty">Loading…</td></tr></tbody></table></div></div>
     </div>
-    <div class="bar">
-      <input id="q" placeholder="Filter by IP, rule, user, agent, country…">
-      <span id="sevchips"></span>
-      <button class="btn" id="refresh">↻ Refresh</button>
-      <span id="count" style="margin-left:auto;font-size:11px;color:var(--muted)"></span>
-    </div>
-    <div class="card"><div class="cb" style="overflow-x:auto"><table id="tbl"><tbody id="tb"><tr><td class="empty">Loading…</td></tr></tbody></table></div></div>
   </main>
 </div>
 <div id="rawmodal" style="display:none;position:fixed;inset:0;z-index:90;background:rgba(2,4,10,.7);padding:24px;overflow:auto" onclick="if(event.target===this)this.style.display='none'">
@@ -70,6 +40,8 @@
 </div>
 <div id="toast-wrap" style="position:fixed;bottom:18px;right:18px;z-index:120;display:flex;flex-direction:column;gap:8px"></div>
 
+<script>window.PAGE = 'logs'; window.PAGE_TITLE = 'Logs Explorer';</script>
+<script src="shell.js"></script>
 <script>
 const API = '/api';
 const esc = v => String(v == null ? '' : v).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -82,8 +54,8 @@ const SEVCOL = { critical: '#eb5757', high: '#f2994a', medium: '#f2c94c', low: '
 let LOGS = [], sevFilter = 'all';
 
 ['all', 'critical', 'high', 'medium', 'low'].forEach((s, i) => {
-  const b = document.createElement('button'); b.className = 'chip' + (i === 0 ? ' on' : ''); b.textContent = s; b.dataset.sev = s;
-  b.onclick = () => { document.querySelectorAll('#sevchips .chip').forEach(c => c.classList.remove('on')); b.classList.add('on'); sevFilter = s; render(); };
+  const b = document.createElement('button'); b.className = 'lchip' + (i === 0 ? ' on' : ''); b.textContent = s; b.dataset.sev = s;
+  b.onclick = () => { document.querySelectorAll('#sevchips .lchip').forEach(c => c.classList.remove('on')); b.classList.add('on'); sevFilter = s; render(); };
   document.getElementById('sevchips').appendChild(b);
 });
 document.getElementById('q').addEventListener('input', render);
@@ -103,7 +75,7 @@ function render() {
     const sev = (e.severity || 'low').toLowerCase();
     return `<tr>
       <td style="color:var(--muted)">${esc(toIST(e['@timestamp'] || e.ts))}</td>
-      <td><span class="sev" style="color:${SEVCOL[sev] || 'var(--muted)'}">${esc(sev)}</span></td>
+      <td><span style="font-weight:700;color:${SEVCOL[sev] || 'var(--muted)'}">${esc(sev)}</span></td>
       <td style="color:var(--accent);cursor:pointer" onclick="goTrail('${esc(e.src_ip)}')">${esc(e.src_ip || '')}</td>
       <td>${esc(e.dst_ip || '')}${e.dst_port ? ':' + esc(e.dst_port) : ''}</td>
       <td class="wrap">${esc(e.rule || TT(e.threat_label) || TT(e.threat_type) || '—')}</td>
@@ -121,10 +93,7 @@ async function showRaw(ip) {
   document.getElementById('raw-b').textContent = 'Loading…'; m.style.display = 'block';
   const r = await get(`/raw-logs?field=ip&value=${encodeURIComponent(ip)}&limit=25`);
   const evs = (r && r.events) || [];
-  document.getElementById('raw-b').innerHTML = evs.length ? evs.map(e => `<div style="border-bottom:1px solid var(--border);padding:7px 0">
-      <span style="color:var(--accent)">${esc(String(e.ts).substring(0, 19))}</span> · ${esc(e.severity || '')} · ${esc(e.rule || '')}
-      <div style="color:var(--text);margin-top:3px">${esc(e.full_log || e.raw || '(no raw line stored)')}</div></div>`).join('')
-    : '<span style="color:var(--muted)">No raw logs found.</span>';
+  document.getElementById('raw-b').innerHTML = evs.length ? evs.map(e => `<div style="border-bottom:1px solid var(--border);padding:7px 0"><span style="color:var(--accent)">${esc(String(e.ts).substring(0, 19))}</span> · ${esc(e.severity || '')} · ${esc(e.rule || '')}<div style="color:var(--text);margin-top:3px">${esc(e.full_log || e.raw || '(no raw line stored)')}</div></div>`).join('') : '<span style="color:var(--muted)">No raw logs found.</span>';
 }
 async function load() {
   document.getElementById('tb').innerHTML = '<tr><td class="empty" style="padding:16px">Loading…</td></tr>';
@@ -134,8 +103,7 @@ async function load() {
   if (!head.tHead) { const th = head.createTHead(); th.innerHTML = '<tr><th>Time (IST)</th><th>Sev</th><th>Source</th><th>Destination</th><th>Rule</th><th>Threat</th><th>User</th><th>Agent</th><th>Country</th><th></th></tr>'; }
   render();
 }
-document.getElementById('logout').onclick = () => fetch('/api/auth/logout', { method: 'POST', credentials: 'same-origin' }).catch(() => {}).then(() => location.replace('/login.html'));
-(async () => { try { const r = await get('/auth/me'); if (r && r.user) document.getElementById('op').textContent = 'operator: ' + r.user; } catch (_) {} load(); })();
+load();
 </script>
 </body>
 </html>

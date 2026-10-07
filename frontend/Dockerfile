@@ -2,8 +2,9 @@ FROM nginx:1.25-alpine
 COPY index.html /usr/share/nginx/html/index.html
 COPY login.html /usr/share/nginx/html/login.html
 COPY overview-neural.html /usr/share/nginx/html/overview-neural.html
-# Split-out per-feature pages + their shared stylesheet (multi-page dashboard)
+# Split-out per-feature pages + their shared stylesheet & chrome (multi-page dash)
 COPY app.css /usr/share/nginx/html/app.css
+COPY shell.js /usr/share/nginx/html/shell.js
 COPY incidents.html /usr/share/nginx/html/incidents.html
 COPY ueba.html /usr/share/nginx/html/ueba.html
 COPY logs.html /usr/share/nginx/html/logs.html

@@ -5,86 +5,47 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Incident Triage · CyberSentinel</title>
   <link rel="stylesheet" href="app.css">
-  <style>
-    /* Minimal page shell (cards come from the shared app.css). */
-    * { box-sizing: border-box; }
-    body { margin: 0; background: var(--bg, #0d1117); color: var(--text, #c9d1d9); font-family: system-ui, sans-serif; }
-    .shell { display: flex; min-height: 100vh; }
-    .side { width: 212px; flex: none; background: var(--bg2, #161b22); border-right: 1px solid var(--border, #263040); padding: 16px 10px; }
-    .side .brand { font-weight: 800; letter-spacing: .02em; padding: 4px 8px 14px; font-size: 15px; }
-    .side .brand span { color: var(--accent, #5e6ad2); }
-    .side a { display: block; padding: 8px 11px; margin: 2px 0; border-radius: 8px; color: var(--muted, #8a8f98);
-      text-decoration: none; font-size: 13px; }
-    .side a:hover { background: rgba(255,255,255,.04); color: var(--text, #c9d1d9); }
-    .side a.active { background: rgba(94,106,210,.14); color: var(--text, #c9d1d9); }
-    .main { flex: 1; min-width: 0; padding: 18px 22px 60px; }
-    .top { display: flex; align-items: center; gap: 12px; margin-bottom: 18px; }
-    .top h1 { font-size: 19px; margin: 0; }
-    .top .sp { margin-left: auto; display: flex; gap: 8px; }
-    @media (max-width: 760px) { .shell { flex-direction: column; } .side { width: auto; display: flex; flex-wrap: wrap; gap: 4px; } .side .brand { width: 100%; } }
-  </style>
 </head>
 <body>
-<div class="shell">
-  <nav class="side">
-    <div class="brand">Cyber<span>Sentinel</span></div>
-    <a href="/">Overview</a>
-    <a href="incidents.html" class="active">Incident Triage</a>
-    <a href="ueba.html">UEBA</a>
-    <a href="logs.html">Logs Explorer</a>
-    <a href="/#killchain">ATT&amp;CK Kill Chain</a>
-    <a href="/#ml">ML Anomaly</a>
-    <a href="/#playbooks">Response Playbooks</a>
-    <a href="/#nlquery">SOC Query</a>
-    <a href="/#reports">Reports</a>
-    <a href="/#settings">Settings</a>
-  </nav>
+<div class="shell" id="shell">
   <main class="main">
-    <div class="top">
-      <h1>Incident Triage</h1>
-      <span style="font-size:12px;color:var(--muted)">Correlated campaigns &amp; host incidents — priority is fused entity risk, not raw rule level</span>
-      <span class="sp">
-        <span id="op" style="font-size:12px;color:var(--muted);align-self:center"></span>
-        <button class="btn" id="logout">Log out</button>
-      </span>
-    </div>
-
-    <!-- 1 · risk watch-list -->
-    <div class="card" style="margin-bottom:16px">
-      <div class="ch">
-        <span class="ct">⚖ Risk watch-list <span style="font-size:11px;color:var(--muted);font-weight:400">— time-decayed risk; stale activity fades</span></span>
-        <span style="display:flex;gap:6px;align-items:center">
-          <div class="seg seg-sm" id="dim-seg">
-            <button type="button" class="seg-btn active" data-val="ip">Source IP</button>
-            <button type="button" class="seg-btn" data-val="user">User</button>
-            <button type="button" class="seg-btn" data-val="host">Host</button>
-          </div>
-          <button class="btn" style="font-size:11px" onclick="loadEntityRisk()">↻</button>
-        </span>
+    <div class="topbar" id="topbar"></div>
+    <div class="page active" style="padding:18px 22px 60px">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px;flex-wrap:wrap">
+        <span style="font-size:12px;color:var(--muted)">Correlated campaigns &amp; host incidents — priority is fused entity risk, not raw rule level</span>
+        <span id="noise-stat" style="margin-left:auto;font-size:11px;color:var(--ok)"></span>
       </div>
-      <div class="cb"><div id="rba-body" class="empty">Loading…</div></div>
-    </div>
 
-    <!-- 2 · ATT&CK coverage -->
-    <div class="card" style="margin-bottom:16px">
-      <div class="ch">
-        <span class="ct">🎯 ATT&amp;CK coverage <span style="font-size:11px;color:var(--muted);font-weight:400">— what we detect vs the gaps</span></span>
-        <span id="cov-summary" style="font-size:12px;color:var(--muted)"></span>
+      <div class="card" style="margin-bottom:16px">
+        <div class="ch">
+          <span class="ct">⚖ Risk watch-list <span style="font-size:11px;color:var(--muted);font-weight:400">— time-decayed risk; stale activity fades</span></span>
+          <span style="display:flex;gap:6px;align-items:center">
+            <div class="seg seg-sm" id="dim-seg">
+              <button type="button" class="seg-btn active" data-val="ip">Source IP</button>
+              <button type="button" class="seg-btn" data-val="user">User</button>
+              <button type="button" class="seg-btn" data-val="host">Host</button>
+            </div>
+            <button class="btn" style="font-size:11px" onclick="loadEntityRisk()">↻</button>
+          </span>
+        </div>
+        <div class="cb"><div id="rba-body" class="empty">Loading…</div></div>
       </div>
-      <div class="cb"><div id="cov-body" class="empty">Loading…</div></div>
-    </div>
 
-    <!-- 3 · triage queue -->
-    <div style="display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap;align-items:center">
-      <button class="btn pri" onclick="loadIncidents()">↻ Refresh triage queue</button>
-      <span id="noise-stat" style="margin-left:auto;font-size:11px;color:var(--ok)"></span>
-    </div>
-    <div id="incidents-body"><div class="card"><div class="cb empty">Loading…</div></div></div>
+      <div class="card" style="margin-bottom:16px">
+        <div class="ch"><span class="ct">🎯 ATT&amp;CK coverage <span style="font-size:11px;color:var(--muted);font-weight:400">— what we detect vs the gaps</span></span>
+          <span id="cov-summary" style="font-size:12px;color:var(--muted)"></span></div>
+        <div class="cb"><div id="cov-body" class="empty">Loading…</div></div>
+      </div>
 
-    <!-- 4 · case workbench -->
-    <div class="card" style="margin-top:16px">
-      <div class="ch"><span class="ct">Case workbench</span></div>
-      <div class="cb"><div id="cases-body" class="empty">Loading…</div></div>
+      <div style="display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap;align-items:center">
+        <button class="btn pri" onclick="loadIncidents()">↻ Refresh triage queue</button>
+      </div>
+      <div id="incidents-body"><div class="card"><div class="cb empty">Loading…</div></div></div>
+
+      <div class="card" style="margin-top:16px">
+        <div class="ch"><span class="ct">Case workbench</span></div>
+        <div class="cb"><div id="cases-body" class="empty">Loading…</div></div>
+      </div>
     </div>
   </main>
 </div>
@@ -98,17 +59,17 @@
 </div>
 <div id="toast-wrap" style="position:fixed;bottom:18px;right:18px;z-index:120;display:flex;flex-direction:column;gap:8px"></div>
 
+<script>window.PAGE = 'incidents'; window.PAGE_TITLE = 'Incident Triage';</script>
+<script src="shell.js"></script>
 <script>
 const API = '/api';
 let OPERATOR = 'analyst';
 const esc = v => String(v == null ? '' : v).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-const escapeHTML = esc;
 const num = v => Number(v || 0).toLocaleString();
 const TT = v => { const s = String(v == null ? '' : v).replace(/_/g, ' ').trim(); return (!s || s.toLowerCase() === 'unknown') ? '' : s; };
 async function get(u) { try { const r = await fetch(API + u, { credentials: 'same-origin' }); return r.ok ? await r.json() : null; } catch (_) { return null; } }
 async function post(u, body) { try { const r = await fetch(API + u, { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin', body: JSON.stringify(body) }); return r.ok ? await r.json() : null; } catch (_) { return null; } }
-function toast(msg, type) { const w = document.getElementById('toast-wrap'); const el = document.createElement('div'); el.className = 'toast ' + (type || 'ok'); el.textContent = msg; el.style.cssText = 'background:var(--bg2);border:1px solid var(--border);border-left:3px solid ' + (type === 'warn' ? 'var(--warn)' : 'var(--accent)') + ';padding:10px 14px;border-radius:8px;font-size:13px;max-width:360px;box-shadow:0 8px 24px rgba(0,0,0,.4)'; w.appendChild(el); setTimeout(() => el.remove(), 4200); }
-// Hand off to the SPA via the hash router (trail/kill-chain live there until split).
+function toast(msg, type) { const w = document.getElementById('toast-wrap'); const el = document.createElement('div'); el.textContent = msg; el.style.cssText = 'background:var(--bg2);border:1px solid var(--border);border-left:3px solid ' + (type === 'warn' ? 'var(--warn)' : 'var(--accent)') + ';padding:10px 14px;border-radius:8px;font-size:13px;max-width:360px'; w.appendChild(el); setTimeout(() => el.remove(), 4200); }
 function goTrail(ip) { location.href = '/#trail=' + encodeURIComponent(ip); }
 function goKillChain(ip) { location.href = '/#killchain=' + encodeURIComponent(ip); }
 function riskAINarrative(ip) { goKillChain(ip); }
@@ -119,13 +80,10 @@ async function showRawLogs(field, value) {
   const r = await get(`/raw-logs?field=${field}&value=${encodeURIComponent(value)}&limit=25`);
   const evs = (r && r.events) || [];
   document.getElementById('raw-b').innerHTML = evs.length
-    ? evs.map(e => `<div style="border-bottom:1px solid var(--border);padding:7px 0">
-        <span style="color:var(--accent)">${esc(String(e.ts).substring(0, 19))}</span> · ${esc(e.severity || '')} · ${esc(e.rule || '')}
-        <div style="color:var(--text);margin-top:3px">${esc(e.full_log || e.raw || '(no raw line stored)')}</div></div>`).join('')
+    ? evs.map(e => `<div style="border-bottom:1px solid var(--border);padding:7px 0"><span style="color:var(--accent)">${esc(String(e.ts).substring(0, 19))}</span> · ${esc(e.severity || '')} · ${esc(e.rule || '')}<div style="color:var(--text);margin-top:3px">${esc(e.full_log || e.raw || '(no raw line stored)')}</div></div>`).join('')
     : '<span style="color:var(--muted)">No raw logs found for this entity.</span>';
 }
 
-/* ── 1 · risk watch-list ───────────────────────────────────────────── */
 let RBA_SCORING = null, RBA_ENTITIES = {}, DIM = 'ip';
 async function loadEntityRisk() {
   const r = await get(`/entity-risk?dim=${DIM}&limit=12`);
@@ -134,8 +92,7 @@ async function loadEntityRisk() {
   RBA_SCORING = r.scoring || null; RBA_ENTITIES = {};
   const rows = r.entities.map((e, i) => {
     const c = e.band === 'critical' ? 'var(--danger)' : e.band === 'high' ? 'var(--warn)' : e.band === 'medium' ? '#facc15' : 'var(--ok)';
-    const clickable = DIM === 'ip'; const key = 'rba' + i; RBA_ENTITIES[key] = e;
-    const v = e.verdict || {};
+    const clickable = DIM === 'ip'; const key = 'rba' + i; RBA_ENTITIES[key] = e; const v = e.verdict || {};
     return `<div style="padding:6px 0;border-bottom:1px solid var(--border)">
       <div style="display:flex;align-items:center;gap:10px">
         <span title="Click for the score breakdown" onclick="toggleRiskWhy('${key}')" style="font-weight:700;color:${c};min-width:34px;text-align:right;cursor:pointer">${e.score}</span>
@@ -165,18 +122,12 @@ function toggleRiskWhy(key) {
   const v = e.verdict || {};
   el.innerHTML = `<div style="margin:8px 0 4px 44px;padding:11px 13px;background:var(--bg3);border:1px solid var(--border);border-left:3px solid var(--accent);border-radius:7px">
     <div style="font-size:11.5px;margin-bottom:8px"><b>${esc(v.label || 'Needs review')}.</b> ${esc(v.detail || '')} <span style="color:var(--accent)">→ ${esc(v.action || '')}</span></div>
-    ${bar('Severity', comp.severity, 60, 'var(--danger)')}
-    ${bar('Concentration', comp.concentration, 20, 'var(--warn)')}
-    ${bar('Recent (24h)', comp.recency, 12, '#a78bfa')}
-    ${bar('Spread', comp.spread, 8, 'var(--ok)')}
+    ${bar('Severity', comp.severity, 60, 'var(--danger)')}${bar('Concentration', comp.concentration, 20, 'var(--warn)')}${bar('Recent (24h)', comp.recency, 12, '#a78bfa')}${bar('Spread', comp.spread, 8, 'var(--ok)')}
     <div style="font-size:11px;color:var(--muted);margin-top:7px">Raw volume alone caps at 60 — only concentration, recency and spread of serious activity reach the critical band.</div>
-    ${DIM === 'ip' ? `<div style="margin-top:9px;display:flex;gap:6px"><button class="btn" style="font-size:10px;padding:3px 9px" onclick="goTrail('${e.entity}')">Full trail</button>
-      <button class="btn" style="font-size:10px;padding:3px 9px" onclick="goKillChain('${e.entity}')">Kill chain</button></div>` : ''}
+    ${DIM === 'ip' ? `<div style="margin-top:9px;display:flex;gap:6px"><button class="btn" style="font-size:10px;padding:3px 9px" onclick="goTrail('${e.entity}')">Full trail</button><button class="btn" style="font-size:10px;padding:3px 9px" onclick="goKillChain('${e.entity}')">Kill chain</button></div>` : ''}
   </div>`;
   el.style.display = 'block';
 }
-
-/* ── 2 · ATT&CK coverage ───────────────────────────────────────────── */
 async function loadAttackCoverage() {
   const r = await get('/attack-coverage'); const body = document.getElementById('cov-body');
   if (!r || !r.tactics) { body.innerHTML = '<span style="color:var(--muted)">Coverage unavailable</span>'; return; }
@@ -191,15 +142,11 @@ async function loadAttackCoverage() {
     }).join('');
     return `<div style="min-width:118px;flex:1"><div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin-bottom:5px;min-height:24px">${esc(t.tactic)}</div>${tiles}</div>`;
   }).join('');
-  body.innerHTML = `<div style="display:flex;gap:8px;overflow-x:auto;padding-bottom:4px">${cols}</div>
-    <div style="font-size:11px;color:var(--muted);margin-top:8px">Solid = active detection (colour = event volume) · dashed = coverage gap.</div>`;
+  body.innerHTML = `<div style="display:flex;gap:8px;overflow-x:auto;padding-bottom:4px">${cols}</div><div style="font-size:11px;color:var(--muted);margin-top:8px">Solid = active detection (colour = event volume) · dashed = coverage gap.</div>`;
 }
-
-/* ── 3 · triage queue ──────────────────────────────────────────────── */
 async function loadIncidents() {
   const r = await get('/incidents'); if (!r) return;
-  const inc = r.incidents || [];
-  const el = document.getElementById('incidents-body');
+  const inc = r.incidents || []; const el = document.getElementById('incidents-body');
   if (!inc.length) { el.innerHTML = '<div class="card"><div class="cb empty">No active incidents — keep monitoring</div></div>'; return; }
   el.innerHTML = inc.map(i => {
     const pc = i.priority > 70 ? 'var(--danger)' : i.priority > 40 ? 'var(--warn)' : 'var(--ok)';
@@ -212,8 +159,7 @@ async function loadIncidents() {
     const lead = (i.entities && i.entities.ips && i.entities.ips[0]) || '';
     const title = (i.type === 'campaign' ? 'Campaign ' + (i.subnet || lead) : 'Host ' + lead).replace(/'/g, '');
     return `<div class="card" style="margin-bottom:12px;border-left:3px solid ${pc}">
-      <div class="ch"><span class="ct" style="color:${pc}">${i.type === 'campaign' ? 'Campaign' : 'Host'}: ${esc(i.subnet || lead)}</span>
-        <span style="font-size:24px;font-weight:700;color:${pc}">${i.priority}</span></div>
+      <div class="ch"><span class="ct" style="color:${pc}">${i.type === 'campaign' ? 'Campaign' : 'Host'}: ${esc(i.subnet || lead)}</span><span style="font-size:24px;font-weight:700;color:${pc}">${i.priority}</span></div>
       <div class="cb">
         ${chips ? `<div style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:10px">${chips}</div>` : ''}
         ${techs ? `<div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:10px">${techs}</div>` : ''}
@@ -246,8 +192,6 @@ async function intelHub(ip, btn) {
   box.innerHTML = `<div style="font-size:12px;margin-bottom:6px">External intel for <b>${esc(ip)}</b>${r.fused_score != null ? ` · fused <b>${r.fused_score}</b>` : ''}</div>` +
     Object.values(r.sources || {}).map(s => `<div style="font-size:11px;color:var(--muted);padding:3px 0"><b>${esc(s.label)}</b>: ${esc(s.verdict)} — ${esc(s.evidence)}</div>`).join('');
 }
-
-/* ── 4 · case workbench (operator-aware, real audit) ───────────────── */
 const CASE_FLOW = ['new', 'investigating', 'contained', 'closed'];
 const _caseCache = {};
 async function openCaseFor(incidentId, entity, title) {
@@ -301,16 +245,13 @@ async function caseAudit(id, btn) {
   el.innerHTML = ((r && r.audit) || []).map(a => `<div style="padding:2px 0"><span style="color:var(--accent)">${esc(String(a.ts).substring(0, 19))}</span> <b>${esc(a.actor)}</b> ${esc(a.action)}${a.detail ? ' — ' + esc(a.detail) : ''}</div>`).join('') || '<div>No audit entries</div>';
   el.style.display = '';
 }
-
-/* ── boot ──────────────────────────────────────────────────────────── */
-document.getElementById('logout').onclick = () => fetch('/api/auth/logout', { method: 'POST', credentials: 'same-origin' }).catch(() => {}).then(() => location.replace('/login.html'));
 document.getElementById('dim-seg').addEventListener('click', e => {
   const b = e.target.closest('.seg-btn'); if (!b) return;
   document.querySelectorAll('#dim-seg .seg-btn').forEach(x => x.classList.remove('active'));
   b.classList.add('active'); DIM = b.dataset.val; loadEntityRisk();
 });
 (async () => {
-  try { const r = await fetch(`${API}/auth/me`, { credentials: 'same-origin' }).then(x => x.ok ? x.json() : null); if (r && r.user) { OPERATOR = r.user; document.getElementById('op').textContent = 'operator: ' + r.user; } } catch (_) {}
+  try { const r = await get('/auth/me'); if (r && r.user) OPERATOR = r.user; } catch (_) {}
   loadEntityRisk(); loadAttackCoverage(); loadIncidents(); loadCases();
 })();
 </script>
