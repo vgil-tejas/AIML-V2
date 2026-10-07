@@ -1607,11 +1607,15 @@ addEventListener('resize', () => { initMesh(); if (REDUCED) drawMesh(); });
   const hotCount = (stats.hot_ips || []).length;
   const critCount = (stats.critical_ips || []).length;
 
-  /* ── Threat Index (real weighted severity mix) ── */
-  GV = threatIndexOf(sev);
-  const [bandTxt, bandCol] = bandOf(GV);
+  /* ── Threat Index ── placeholder only.
+     The REAL index is computed from the live priority queue below ("Threat Index
+     — LIVE"). We deliberately do NOT paint the all-time severity ratio here: it
+     reads ~19 at any scale, then snapping 19→live looks like a glitch. GV stays 0
+     (the ring fills from empty) and animates once, straight to the live value.
+     _allTimeIndex is kept only as a fallback if the live queue is unavailable. */
+  const _allTimeIndex = threatIndexOf(sev);
   const bandEl = document.getElementById('core-band');
-  bandEl.textContent = bandTxt; bandEl.style.color = bandCol;
+  bandEl.textContent = 'ANALYSING'; bandEl.style.color = 'var(--muted)';
 
   /* ── Verdict — written by the backend from real fused scores (never a
         static string). Falls back to client-side composition if the endpoint
@@ -1684,9 +1688,10 @@ addEventListener('resize', () => { initMesh(); if (REDUCED) drawMesh(); });
     document.querySelectorAll('.sev-seg').forEach(f => f.style.width = f.dataset.w + '%');
   }, 300);
   const critPct = sevTotal ? Math.round((+sev.critical || 0) / sevTotal * 100) : 0;
+  // Note GV is intentionally NOT referenced here — it is still the placeholder at
+  // this point; the live block below rewrites this note with the real index.
   document.getElementById('sev-note').innerHTML =
-    `<b>${critPct}%</b> of retained events are critical. Threat Index <b>${GV}</b> is the severity-weighted
-     mix of all ${num(sevTotal)} events — it rises only when traffic is genuinely dangerous, not merely busy.`;
+    `<b>${critPct}%</b> of all ${num(sevTotal)} retained events are critical. Computing the live Threat Index…`;
 
   /* ── Everything else, in parallel ── */
   const [anomR, uebaR, teleR, incR, recsR, lqR, runsR, erR, trendR, logsR, atoR, travelR] = await Promise.all([
@@ -1705,20 +1710,30 @@ addEventListener('resize', () => { initMesh(); if (REDUCED) drawMesh(); });
   {
     const liveEnts = (erR && erR.entities) || [];
     if (liveEnts.length) {
+      // Anchored on the worst live entity so the index and the top "Start here"
+      // score agree (an analyst seeing index 91 can click and find the 91). A few
+      // extra hot entities nudge it up a little; a quiet last-24h tempers it.
       const top1 = Math.max(0, ...liveEnts.map(e => +e.score || 0));
-      const nCrit = liveEnts.filter(e => (+e.score || 0) >= 80).length;
-      const nHigh = liveEnts.filter(e => (+e.score || 0) >= 55 && (+e.score || 0) < 80).length;
+      const others = liveEnts.filter(e => (+e.score || 0) >= 55).length - 1;  // hot entities beyond the worst
       const live24 = liveEnts.some(e => (+e.events_24h || 0) > 0);
-      let gi = top1 * 0.8 + Math.min(20, nCrit * 8 + nHigh * 3);
-      if (!live24) gi *= 0.7;   // nothing in the last 24h → calmer right now
+      let gi = top1 + Math.min(8, Math.max(0, others) * 3);   // worst entity, + up to 8 for breadth
+      if (!live24) gi *= 0.8;                                 // nothing in the last 24h → calmer right now
       GV = Math.max(0, Math.min(100, Math.round(gi)));
       const [bt, bc] = bandOf(GV);
       const be = document.getElementById('core-band');
       if (be) { be.textContent = bt; be.style.color = bc; }
       const sn = document.getElementById('sev-note');
       if (sn) sn.innerHTML =
-        `Threat Index <b>${GV}</b> tracks the worst entities active right now — it climbs when a source turns
-         genuinely dangerous and falls when the network is quiet, so it reflects the live picture, not sheer volume.`;
+        `Threat Index <b>${GV}</b> is the risk of the worst entity active right now (the top of <b>Start here</b>),
+         nudged up when several entities are hot. It climbs when a source turns genuinely dangerous and falls when
+         the network is quiet — it is not a count of events.`;
+    } else {
+      // Live queue unavailable — fall back to the all-time severity ratio so the
+      // ring still shows something defensible rather than staying at 0.
+      GV = _allTimeIndex;
+      const [bt, bc] = bandOf(GV);
+      const be = document.getElementById('core-band');
+      if (be) { be.textContent = bt; be.style.color = bc; }
     }
   }
 
