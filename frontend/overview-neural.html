@@ -296,6 +296,23 @@ body{font-family:var(--sans);color:var(--text);min-height:100vh;
 .trail-head input{flex:1;min-width:220px;background:rgba(8,13,23,.8);border:1px solid var(--border);border-radius:9px;
   padding:10px 14px;color:var(--text);font-family:var(--mono);font-size:12px;outline:none;transition:border-color .2s}
 .trail-head input:focus{border-color:var(--border-hi)}
+/* trail summary — the correlated "what happened / who / where" view, all real aggregates */
+.trail-sum{margin-bottom:18px}
+.trail-sum.empty{display:none}
+.ts-verdict{font-size:12.5px;color:var(--muted);line-height:1.55;margin-bottom:12px;
+  background:rgba(94,106,210,.07);border-left:2px solid var(--accent);border-radius:6px;padding:9px 12px}
+.ts-verdict b{color:var(--text)}
+.ts-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(215px,1fr));gap:12px}
+.ts-col{background:rgba(255,255,255,.025);border:1px solid var(--border);border-radius:9px;padding:11px 13px}
+.ts-h{font-family:var(--mono);font-size:8.5px;letter-spacing:.18em;text-transform:uppercase;color:var(--faint);margin-bottom:9px}
+.ts-row{display:flex;align-items:center;gap:8px;margin:5px 0;font-size:12px}
+.ts-row .ts-k{color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0}
+.ts-row .ts-c{font-family:var(--mono);color:var(--muted);font-variant-numeric:tabular-nums}
+.ts-row .ts-mini{height:4px;border-radius:2px;background:var(--accent);min-width:3px}
+.ts-row.link .ts-k{cursor:pointer;color:var(--accent)}
+.ts-row.link .ts-k:hover{text-decoration:underline}
+.ts-sev{display:inline-flex;gap:3px;height:8px;border-radius:4px;overflow:hidden;width:100%;margin-top:2px}
+.ts-sev span{display:block}
 .timeline{position:relative;padding-left:26px}
 .timeline::before{content:'';position:absolute;left:8px;top:6px;bottom:6px;width:1.5px;
   background:linear-gradient(180deg,var(--danger),var(--warn),var(--accent))}
@@ -816,6 +833,7 @@ body{font-family:var(--sans);color:var(--text);min-height:100vh;
         <input id="trail-input" placeholder="Enter an IP, username or host to trace">
         <button class="qa go" id="trail-go" style="padding:10px 16px;font-size:10px">TRACE</button>
       </div>
+      <div class="trail-sum" id="trail-sum"></div>
       <div class="timeline" id="timeline"></div>
     </div>
   </div>
@@ -1438,41 +1456,121 @@ function renderArchFlow(PIPE) {
 }
 
 /* ═══ IP TRAIL — real /api/trail/{entity} ═══ */
-async function runTrail(entity, reveal = true) {
+async function runTrail(entity, reveal = true, fieldHint = '') {
   const e = String(entity || '').trim();
   if (!e) return;
   if (reveal) expandSection('s-trail');   // a user-initiated trace reveals the section
   document.getElementById('trail-input').value = e;
   const badge = document.getElementById('trail-badge'), tl = document.getElementById('timeline');
+  const sum = document.getElementById('trail-sum');
   badge.textContent = e + ' · tracing…';
-  tl.innerHTML = '<div class="empty-note">Reconstructing timeline…</div>';
-  const r = await j(`${API}/trail/${encodeURIComponent(e)}`);
-  const evs = (r && r.events) || [];
-  if (!evs.length) {
+  sum.className = 'trail-sum empty'; sum.innerHTML = '';
+  tl.innerHTML = '<div class="empty-note">Correlating events…</div>';
+
+  // Resolve the entity to ip | username | host. Usernames/hosts are stable
+  // identities, so for a non-IP we try those first; an IP is a DHCP location.
+  const isIp = /^(\d{1,3}\.){3}\d{1,3}$/.test(e) || (e.split(':').length > 2 && /[0-9a-f]/i.test(e));
+  const order = fieldHint ? [fieldHint] : (isIp ? ['ip'] : ['username', 'host', 'ip']);
+  let r = null;
+  for (const f of order) {
+    const resp = await j(`${API}/entity-trail?field=${f}&value=${encodeURIComponent(e)}`);
+    if (resp && resp.found) { r = resp; break; }
+  }
+  if (!r) {
     badge.textContent = e + ' · no events found';
-    tl.innerHTML = `<div class="empty-note"><b>${esc(e)}</b> has no events in the store. It may be an internal
-      address that never triggered a rule, or the identity isn't captured on these logs.</div>`;
+    tl.innerHTML = `<div class="empty-note"><b>${esc(e)}</b> has no events in the store — it may be an internal
+      address that never triggered a rule, or an identity not captured on these logs.</div>`;
     return;
   }
-  badge.textContent = `${e} · ${num(evs.length)} events reconstructed`;
+
+  renderTrailSummary(r);   // the correlated "what happened / who / where" view (real aggregates)
+
+  const evs = r.events || [];
+  const fl = { ip: 'source IP', username: 'user', host: 'host/agent' }[r.field] || 'entity';
+  badge.textContent = `${esc(r.value)} · ${fl} · ${num(r.total)} events`;
   const shown = evs.slice(0, 14);
   tl.innerHTML = shown.map(ev => {
     const sev = (ev.severity || 'low').toLowerCase();
     const cls = sev === 'critical' ? 'crit' : (sev === 'high' ? 'warn' : '');
-    const ts = toIST(ev['@timestamp']);
-    const tags = [ev.threat_type, ev.country, ev.dst_port ? 'port ' + ev.dst_port : '', ev.agent]
+    const ts = toIST(ev['@timestamp'] || ev.ts);
+    const tags = [ev.threat_type, ev.username, ev.country, ev.dst_port ? 'port ' + ev.dst_port : '', ev.agent]
       .filter(Boolean).map(t => pretty(t).toUpperCase());
     return `<div class="tl-item ${cls}">
       <div class="tl-time">${esc(ts)} IST</div>
       <div class="tl-tx">${esc(ev.rule || pretty(ev.threat_type) || 'event')}
+        ${ev.src_ip && r.field !== 'ip' ? ' from <b>' + esc(ev.src_ip) + '</b>' : ''}
         ${ev.dst_ip ? ' → <b>' + esc(ev.dst_ip) + '</b>' : ''}</div>
       <div class="tl-tags">${tags.map(t => `<span class="pill ${cls === 'crit' ? 'crit' : cls === 'warn' ? 'high' : 'tech'}">${esc(t)}</span>`).join('')}</div>
     </div>`;
-  }).join('') + (evs.length > shown.length
-    ? `<div class="empty-note">+ ${num(evs.length - shown.length)} more events — open <b>IP Trail</b> in the sidebar for the full history.</div>` : '');
+  }).join('') + (r.total > shown.length
+    ? `<div class="empty-note">Showing the ${num(shown.length)} most recent events — the summary above covers all ${num(r.total)}.</div>` : '');
 }
+
+/* The correlated summary: exact aggregates over ALL the entity's events (not a
+   sample, no synthetic rows) — what happened, which agents/hosts, which accounts,
+   which source IPs — so the analyst sees the whole picture, then the timeline. */
+function renderTrailSummary(r) {
+  const sum = document.getElementById('trail-sum');
+  const sev = r.severities || {};
+  const SEV = [['critical', '#eb5757'], ['high', '#f2c94c'], ['medium', '#5e6ad2'], ['low', '#62666d']];
+  const sevBar = SEV.filter(([k]) => +sev[k] > 0)
+    .map(([k, c]) => `<span style="flex:${+sev[k]};background:${c}" title="${k}: ${num(+sev[k])}"></span>`).join('');
+  const nCrit = +sev.critical || 0, nHigh = +sev.high || 0;
+  const span = (r.first_seen && r.last_seen) ? `${toIST(r.first_seen)} → ${toIST(r.last_seen)} IST` : '—';
+  const fl = { ip: 'source IP', username: 'user', host: 'host/agent' }[r.field] || 'entity';
+
+  const col = (title, rows, pivot) => {
+    if (!rows || !rows.length) return '';
+    const max = Math.max(...rows.map(x => x.c), 1);
+    const body = rows.slice(0, 6).map(x => {
+      const w = Math.max(3, Math.round(x.c / max * 54));
+      const k = pivot
+        ? `<span class="ts-k" data-pivot="${pivot}" data-v="${esc(x.k)}" title="Trace ${esc(x.k)}">${esc(x.k)}</span>`
+        : `<span class="ts-k" title="${esc(x.k)}">${esc(x.k)}</span>`;
+      return `<div class="ts-row${pivot ? ' link' : ''}">${k}<span class="ts-mini" style="width:${w}px"></span><span class="ts-c">${num(x.c)}</span></div>`;
+    }).join('');
+    const more = rows.length > 6 ? `<div class="ts-row" style="color:var(--faint);font-size:11px">+${num(rows.length - 6)} more</div>` : '';
+    return `<div class="ts-col"><div class="ts-h">${esc(title)}</div>${body}${more}</div>`;
+  };
+
+  const eventTypes = (r.event_types || []).map(x => ({ k: x.rule, c: x.events }));
+  const threats = Object.entries(r.threat_types || {}).filter(([k]) => k && k !== 'unknown')
+    .map(([k, c]) => ({ k: pretty(k), c })).sort((a, b) => b.c - a.c);
+  const agents = (r.agents || []).map(x => ({ k: x.agent, c: x.events }));
+  const users = (r.users || []).map(x => ({ k: x.name, c: x.events }));
+  const srcIps = (r.src_ips || []).map(x => ({ k: x.ip, c: x.events }));
+
+  // The "who / where" columns always show the OTHER dimensions from the entity.
+  let whoWhere = '';
+  if (r.field === 'ip') whoWhere = col('Seen by (hosts/agents)', agents, 'host') + col('Accounts involved', users, 'username');
+  else if (r.field === 'username') whoWhere = col('Source IPs used', srcIps, 'ip') + col('Hosts / agents', agents, 'host');
+  else whoWhere = col('Accounts involved', users, 'username') + col('Source IPs', srcIps, 'ip');
+
+  const corr = [`<b>${num(agents.length)}</b> host(s)`, `<b>${num(users.length)}</b> account(s)`];
+  if (r.field !== 'ip') corr.push(`<b>${num(srcIps.length)}</b> source IP(s)`);
+
+  sum.className = 'trail-sum';
+  sum.innerHTML =
+    `<div class="ts-verdict">
+       <b>${esc(r.value)}</b> (${fl}) — <b>${num(r.total)}</b> events, ${span}.
+       ${nCrit ? `<b style="color:var(--danger)">${num(nCrit)} critical</b>` : ''}${nCrit && nHigh ? ', ' : ''}${nHigh ? `<b style="color:var(--warn)">${num(nHigh)} high</b>` : ''}${(nCrit || nHigh) ? '. ' : ' '}
+       Correlated across ${corr.join(', ')}.
+       <div class="ts-sev" title="severity mix">${sevBar}</div>
+     </div>
+     <div class="ts-grid">
+       ${col('What happened (event types)', eventTypes)}
+       ${threats.length ? col('Threat categories', threats) : ''}
+       ${whoWhere}
+     </div>`;
+}
+
 document.getElementById('trail-go').onclick = () => runTrail(document.getElementById('trail-input').value);
 document.getElementById('trail-input').addEventListener('keydown', e => { if (e.key === 'Enter') runTrail(e.target.value); });
+// Pivot: click a related host / account / source IP in the summary to trace it.
+document.getElementById('trail-sum').addEventListener('click', e => {
+  const k = e.target.closest('[data-pivot]');
+  if (k && k.dataset.v) runTrail(k.dataset.v, true, k.dataset.pivot);
+});
 
 /* ═══ LOGS EXPLORER — real /api/logs ═══ */
 let LOGS = [];
