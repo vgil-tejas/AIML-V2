@@ -13,6 +13,7 @@ COPY . .
 
 EXPOSE 8000
 
-# Production: NO --reload. (--reload restarts the worker on file changes or
-# crashes the worker on a code error -> intermittent 502s.) Stable single worker.
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Production: NO --reload. Worker count is env-driven (WORKERS, default 1) so a
+# big box can run several (they share the Redis cache) without a code change.
+# `exec` so uvicorn is PID 1 and receives SIGTERM for a clean shutdown.
+CMD ["/bin/sh", "-c", "exec uvicorn main:app --host 0.0.0.0 --port 8000 --workers ${WORKERS:-1}"]

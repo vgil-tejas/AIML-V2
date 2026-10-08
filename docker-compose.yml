@@ -116,6 +116,10 @@ services:
       # Optional shared cache (Redis). Fail-safe: if Redis is down/absent the
       # backend silently uses its in-process cache. Set REDIS_URL= to disable.
       - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
+      # Uvicorn worker processes. Default 1 (small VM). On a many-core box set
+      # WORKERS=3 in .env — the workers share the Redis cache and use more cores.
+      # Each worker keeps its own ClickHouse pool, so stay modest (2-4).
+      - WORKERS=${WORKERS:-1}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
@@ -135,7 +139,9 @@ services:
     deploy:
       resources:
         limits:
-          memory: 1536M
+          # Headroom for multiple workers (WORKERS=3). A single worker uses far
+          # less; this is a cap, not a reservation, so a small box is unaffected.
+          memory: ${BACKEND_MEM_LIMIT:-3072M}
         reservations:
           memory: 256M
     restart: unless-stopped
