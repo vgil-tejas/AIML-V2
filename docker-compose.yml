@@ -65,6 +65,11 @@ services:
   backend:
     build: ./backend
     container_name: aiml_backend
+    # Run command set here (not only in the Dockerfile) so the worker count can
+    # change with just `up -d` — no image rebuild, no base-image pull (important
+    # on boxes where the registry is behind a TLS-intercepting proxy). Compose
+    # substitutes ${WORKERS} from .env at parse time.
+    command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "${WORKERS:-1}"]
     # Bound to localhost: nginx is the ONLY external door (it enforces the login
     # gate). The API is still reachable on the server itself and over the Docker
     # network, just not from the LAN — so the gate cannot be bypassed via :18110.
