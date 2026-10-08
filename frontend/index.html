@@ -8299,6 +8299,49 @@ tr:hover td{background:#161b22}</style></head>
     window.addEventListener('hashchange', applyHash);
   })();
   </script>
+  <script>
+  /* Background pre-warm — Overview gets the bandwidth first; once the page has
+     settled we quietly (a) prefetch the other feature pages' files so navigating
+     to them is instant, and (b) warm their backend caches (shared via Redis) so
+     their data is already computed before the user ever clicks. Low-priority,
+     staggered, fire-and-forget — it never blocks or slows the current page. */
+  (function () {
+    var done = false;
+    function prewarm() {
+      if (done) return; done = true;
+      // (a) prefetch the split pages' static files into the browser cache
+      ['app.css', 'shell.js', 'incidents.html', 'ueba.html', 'logs.html'].forEach(function (h) {
+        try { var l = document.createElement('link'); l.rel = 'prefetch'; l.href = h; document.head.appendChild(l); } catch (e) {}
+      });
+      // (b) warm the backend caches for the other features/microservices, one at a
+      //     time so we never spike the pool — each cold value is computed once and
+      //     the workers share it via Redis.
+      var urls = [
+        '/api/overview-summary',
+        '/api/entity-risk?dim=ip&limit=12',
+        '/api/incidents?limit=12',
+        '/api/detections?window_hours=72',
+        '/api/ueba/risk',
+        '/api/ueba/account-takeover',
+        '/api/ueba/impossible-travel',
+        '/api/ueba/peer-outliers',
+        '/api/attack-coverage',
+        '/api/logs/latest?limit=400',
+        '/api/ml/anomalies'
+      ];
+      var i = 0;
+      (function next() {
+        if (i >= urls.length) return;
+        var u = urls[i++];
+        try { fetch(u, { credentials: 'same-origin', priority: 'low' }).catch(function () {}); } catch (e) {}
+        setTimeout(next, 700);   // stagger: let Overview + the box breathe
+      })();
+    }
+    // Wait until the page has settled so Overview wins first.
+    if (document.readyState === 'complete') setTimeout(prewarm, 3500);
+    else window.addEventListener('load', function () { setTimeout(prewarm, 3500); });
+  })();
+  </script>
 </body>
 
 </html>
