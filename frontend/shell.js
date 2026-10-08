@@ -33,7 +33,6 @@
     ['Operate', [
       ['playbooks', 'Responder', '13', '#5e6ad2', '/#playbooks'],
       ['reports', 'Reports', '14', '#8a8f98', '/#reports'],
-      ['settings', 'Settings', '15', '#8a8f98', '/#settings'],
     ]],
   ];
   var esc = function (s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;'); };
