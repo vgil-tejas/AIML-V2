@@ -19,7 +19,13 @@ services:
       # host; raise on a bigger box. Same query results, fewer CPU threads.
       - CH_MAX_THREADS=${CH_MAX_THREADS:-4}
       - CH_BACKGROUND_POOL_SIZE=${CH_BACKGROUND_POOL_SIZE:-8}
-      - CH_MAX_CONCURRENT_QUERIES=${CH_MAX_CONCURRENT_QUERIES:-16}
+      # Max queries ClickHouse runs at once. 16 was far too low: /api/stats alone
+      # fires 8 parallel queries, so a couple of concurrent cold requests (×N
+      # workers) hit the cap and ClickHouse REJECTS queries (code 202) — the app
+      # then silently gets empty results and the dashboard looks slow/blank.
+      # Per-query CPU is still capped by READ_MAX_THREADS, so a higher ceiling is
+      # safe. 100 is ClickHouse's own default; a big box can set 200 in .env.
+      - CH_MAX_CONCURRENT_QUERIES=${CH_MAX_CONCURRENT_QUERIES:-100}
     ports:
       - "127.0.0.1:${CLICKHOUSE_HTTP_PORT:-18123}:8123"
       - "127.0.0.1:${CLICKHOUSE_NATIVE_PORT:-19000}:9000"
