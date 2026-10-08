@@ -1950,6 +1950,13 @@ def get_entity_risk_ranking(dimension: str = "ip", half_life_hours: int = 72,
             "age_hours":   age_h,
             "is_top":      r.get("entity") == top_entity,
         })
+    # Order by the FINAL blended score, not the raw severity-point sum the SQL
+    # ranked by. This is what makes the answer to "same points — which is more
+    # critical?" correct: the concentration component lifts the genuinely-critical
+    # entity above an equal-points high-volume/low-severity one. Ties then favour
+    # real critical severity, then high, then live (24h) activity.
+    out.sort(key=lambda e: (e["score"], e["critical"], e["high"], e["risk_points"], e["events_24h"]),
+             reverse=True)
     return out
 
 
