@@ -1750,11 +1750,15 @@ def _erisk_rows_from_rollup(hl: int, window_days: int, limit: int) -> list[dict]
     raw query's, so the caller's output loop is unchanged."""
     hl = max(1, int(hl))
     decay = f"exp(-0.6931471805 * dateDiff('hour', toDateTime(day) + INTERVAL 12 HOUR, now()) / {hl})"
+    # NOTE: the count-sum aliases must NOT reuse the column names (events,
+    # n_critical, …). If they did, ClickHouse resolves the inner column refs in the
+    # points expressions to those aggregate aliases → "aggregate inside aggregate"
+    # → the whole query errors and _q returns [] (which looked like "no entities").
     rank = _q(
         f"SELECT src_ip AS entity, "
-        f"  sum(events) AS events, "
-        f"  sum(n_critical) AS n_critical, sum(n_high) AS n_high, "
-        f"  sum(n_medium) AS n_medium, sum(n_low) AS n_low, sum(n_failed) AS n_failed, "
+        f"  sum(events) AS ev_sum, "
+        f"  sum(n_critical) AS crit_sum, sum(n_high) AS high_sum, "
+        f"  sum(n_medium) AS med_sum, sum(n_low) AS low_sum, sum(n_failed) AS failed_sum, "
         f"  round(sum((n_critical*10 + n_high*6.5 + n_medium*3.5 + n_low*1 + n_other*0.5) * {decay}), 2) AS risk_points, "
         f"  round(sum(n_critical*10.0 * {decay}), 2) AS p_critical, "
         f"  round(sum(n_high*6.5 * {decay}),     2) AS p_high, "
@@ -1768,6 +1772,14 @@ def _erisk_rows_from_rollup(hl: int, window_days: int, limit: int) -> list[dict]
     )
     if not rank:
         return []
+    # Map the non-colliding sum aliases back to the keys the output loop expects.
+    for r in rank:
+        r["events"]     = int(r.pop("ev_sum", 0) or 0)
+        r["n_critical"] = int(r.pop("crit_sum", 0) or 0)
+        r["n_high"]     = int(r.pop("high_sum", 0) or 0)
+        r["n_medium"]   = int(r.pop("med_sum", 0) or 0)
+        r["n_low"]      = int(r.pop("low_sum", 0) or 0)
+        r["n_failed"]   = int(r.pop("failed_sum", 0) or 0)
     ips = [r["entity"] for r in rank if r.get("entity")]
     enr: dict[str, dict] = {}
     if ips:
@@ -1815,7 +1827,9 @@ def get_entity_risk_ranking(dimension: str = "ip", half_life_hours: int = 72,
         except Exception as e:
             logger.warning(f"entity-risk rollup path failed, using raw scan: {e}")
             rollup_rows = None
-    rows = rollup_rows if rollup_rows is not None else _q(
+    # Use the rollup only if it actually produced rows; an empty/failed rollup
+    # falls through to the raw scan so entity-risk is never silently blank.
+    rows = rollup_rows if rollup_rows else _q(
         f"SELECT {col} AS entity, "
         f"  count() AS events, "
         f"  round(sum({pts_expr}), 2) AS risk_points, "
