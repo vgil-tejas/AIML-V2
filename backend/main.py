@@ -221,18 +221,22 @@ BASELINE_CONCURRENCY  = int(os.getenv("BASELINE_CONCURRENCY", "4"))
 _stats_cache: dict = {}
 _stats_cache_ts: float = 0.0
 _stats_sf_lock = asyncio.Lock()   # single-flight: collapse concurrent recomputes
-_STATS_TTL = 60  # seconds - cache for 60s; hot-ips call refreshes independently
+# TTLs are env-tunable (no rebuild needed). Defaults raised well above 60s: at
+# 190M events the underlying numbers move slowly, so holding a warm result for a
+# few minutes — and serving stale while refreshing in the background — means a
+# user almost never waits for a cold ClickHouse scan.
+_STATS_TTL = int(os.getenv("STATS_TTL", "180"))
 _hot_ips_cache: list = []
 _hot_ips_cache_ts: float = 0.0
 
 # -- Kill-chain cache (shared by incidents + AI investigator) ------------------
 _kc_cache: dict[str, tuple[float, dict]] = {}
-_KC_TTL = 60  # seconds - kill chain rarely changes in under a minute
+_KC_TTL = int(os.getenv("KC_TTL", "180"))
 
 # -- Incidents cache -----------------------------------------------------------
 _incidents_cache: list = []
 _incidents_cache_ts: float = 0.0
-_INCIDENTS_TTL = 60  # seconds
+_INCIDENTS_TTL = int(os.getenv("INCIDENTS_TTL", "300"))
 
 # /api/entity-risk was the hottest UNCACHED read: a 30-day GROUP BY over the raw
 # logs table, hit by both the Overview load and the Incidents page on every open.
@@ -240,15 +244,15 @@ _INCIDENTS_TTL = 60  # seconds
 # so the 190M scan runs at most once per TTL regardless of how many browsers poll.
 _erisk_cache: dict = {}            # key -> (ts, payload)
 _erisk_locks: dict = {}            # key -> asyncio.Lock (single-flight per key)
-_ERISK_TTL = 60                    # seconds fresh
-_ERISK_STALE = 600                 # serve-stale up to 10 min while refreshing
+_ERISK_TTL = int(os.getenv("ERISK_TTL", "300"))      # seconds fresh
+_ERISK_STALE = int(os.getenv("ERISK_STALE", "1800")) # serve-stale while refreshing (30 min)
 
 # /api/overview-summary bundles the Overview boot into ONE call (KPIs, incident +
 # detection counts, UEBA counts, top risk queue) gathered from the already-cached
 # endpoints — so a page opens with 1 request instead of ~12. Tiny TTL because its
 # inputs are themselves cached; this just avoids re-gathering on every 10s poll.
 _osum_cache: dict = {}
-_OSUM_TTL = 15
+_OSUM_TTL = int(os.getenv("OSUM_TTL", "60"))
 
 # -- Playbook-recommender inputs cache -----------------------------------------
 # The recommender pulls a multi-query pipeline from ClickHouse (feedback, entity
@@ -3370,7 +3374,7 @@ async def detections_catalog(window_hours: int = 24):
             return shared
     res = await _gather_detections(window_hours)
     if cache and res and res.get("use_cases"):
-        cache.set(rkey, res, 180)
+        cache.set(rkey, res, 300)
     return res
 
 

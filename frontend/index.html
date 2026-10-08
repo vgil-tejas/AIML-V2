@@ -8309,6 +8309,13 @@ tr:hover td{background:#161b22}</style></head>
     var done = false;
     function prewarm() {
       if (done) return; done = true;
+      // Only re-warm at most once per 10 min, so repeatedly opening the hub
+      // doesn't keep firing background scans on an already-warm box.
+      try {
+        var last = +localStorage.getItem('cs_prewarm_ts') || 0;
+        if (Date.now() - last < 600000) return;
+        localStorage.setItem('cs_prewarm_ts', String(Date.now()));
+      } catch (e) {}
       // (a) prefetch the split pages' static files into the browser cache
       ['app.css', 'shell.js', 'incidents.html', 'ueba.html', 'logs.html'].forEach(function (h) {
         try { var l = document.createElement('link'); l.rel = 'prefetch'; l.href = h; document.head.appendChild(l); } catch (e) {}
