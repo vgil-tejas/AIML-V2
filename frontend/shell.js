@@ -33,6 +33,7 @@
     ['Operate', [
       ['playbooks', 'Responder', '13', '#5e6ad2', '/#playbooks'],
       ['reports', 'Reports', '14', '#8a8f98', '/#reports'],
+      ['settings', 'Settings', '15', '#8a8f98', '/#settings'],
     ]],
   ];
   var esc = function (s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;'); };
@@ -54,7 +55,6 @@
       '<button class="rail-btn" id="rail-btn" onclick="toggleRail()" title="Collapse rail — Ctrl+B" aria-label="Collapse rail">&#10216;</button>' +
     '</div>' +
     '<nav class="nav spine"><span class="spine-trace" aria-hidden="true"><i class="photon"></i></span>' + navHtml + '</nav>' +
-    '<div class="rail-health" id="rail-health" title="Pipeline health"><span class="rh-dot" id="rh-dot"></span><span class="rh-txt" id="rh-txt">checking&hellip;</span></div>' +
   '</aside>';
 
   var TOPBAR =
