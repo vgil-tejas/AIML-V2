@@ -1818,12 +1818,18 @@ def get_entity_risk_ranking(dimension: str = "ip", half_life_hours: int = 72,
     # Written inline rather than as a SELECT alias: a bare alias over `ts` in a
     # GROUP BY query is not an aggregate and ClickHouse rejects it.
     pts_expr = f"({weight} * {decay})"
+    # Over-fetch: rank the top (limit×3, capped 60) by raw severity points, then
+    # re-rank THOSE by the final blended score and trim to `limit` at the end. A
+    # highly-concentrated entity whose points sit just below the top-N can still
+    # win on score (concentration/recency/spread), so pulling a wider candidate
+    # set before scoring means it isn't dropped prematurely.
+    fetch_n = min(max(int(limit) * 3, int(limit)), 60)
     # Fast path: rank from the daily rollup when enabled (dim=ip only). Any error
     # falls back to the raw scan below, so a rollup problem never breaks the API.
     rollup_rows = None
     if dimension == "ip" and ENTITY_RISK_ROLLUP:
         try:
-            rollup_rows = _erisk_rows_from_rollup(hl, window_days, limit)
+            rollup_rows = _erisk_rows_from_rollup(hl, window_days, fetch_n)
         except Exception as e:
             logger.warning(f"entity-risk rollup path failed, using raw scan: {e}")
             rollup_rows = None
@@ -1851,7 +1857,7 @@ def get_entity_risk_ranking(dimension: str = "ip", half_life_hours: int = 72,
         f"FROM {LOGS_TABLE} "
         f"WHERE ts >= now() - INTERVAL {int(window_days)} DAY {where_ident} "
         f"GROUP BY {col} "
-        f"ORDER BY risk_points DESC LIMIT {int(limit)}"
+        f"ORDER BY risk_points DESC LIMIT {fetch_n}"
     )
     if not rows:
         return []
@@ -1957,7 +1963,7 @@ def get_entity_risk_ranking(dimension: str = "ip", half_life_hours: int = 72,
     # real critical severity, then high, then live (24h) activity.
     out.sort(key=lambda e: (e["score"], e["critical"], e["high"], e["risk_points"], e["events_24h"]),
              reverse=True)
-    return out
+    return out[:int(limit)]   # trim the over-fetched candidate set to the requested size
 
 
 # ── ML feature extraction (identical logic to the OpenSearch client) ───────
