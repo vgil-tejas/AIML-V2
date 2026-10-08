@@ -3354,7 +3354,7 @@
         const cells = row.map((v,i) => {
           const col = cols[i];
           if (col==='severity') return `<td style="color:${sevColor(v)};font-weight:600">${esc(v)}</td>`;
-          if (col==='ts') return `<td style="white-space:nowrap">${esc(String(v).replace('T',' ').substring(0,19))}</td>`;
+          if (col==='ts') return `<td style="white-space:nowrap">${esc(toIST(v))}</td>`;
           if (col==='full_log'||col==='proc_cmdline') return `<td style="max-width:400px;word-break:break-all;font-size:11px">${esc(v)}</td>`;
           return `<td>${esc(v)}</td>`;
         }).join('');
@@ -3910,7 +3910,7 @@ tr:hover td{background:#161b22}</style></head>
         <td>${Number(h.total || 0).toLocaleString()}</td>
         <td>${TT(tt) || '—'}</td>
         <td><span class="badge ${sv || 'low'}">${sv || 'low'}</span></td>
-        <td style="font-size:11px;color:var(--muted);white-space:nowrap">${(h.last_seen || '').substring(0, 19).replace('T', ' ')}</td>
+        <td style="font-size:11px;color:var(--muted);white-space:nowrap">${toIST(h.last_seen)}</td>
         <td style="white-space:nowrap">
           <button class="btn" style="font-size:10px;padding:3px 8px;margin-right:3px" onclick="event.stopPropagation();goTrail('${h.ip}')">Trail</button>
           <button class="btn ai" style="font-size:10px;padding:3px 8px" onclick="event.stopPropagation();quickAI('${h.ip}')">AI</button>
@@ -4517,7 +4517,7 @@ tr:hover td{background:#161b22}</style></head>
       aiLoading(body);
       const r = await get(`${API}/explain/${curIP}`);
       if (!r) { body.innerHTML = '<span style="color:var(--danger)">AI unavailable. Check the AI key in .env and restart backend.</span>'; return; }
-      document.getElementById('ai-trail-model').textContent = aiLabel() + ' · ' + String(r.generated_at || '').substring(0, 19);
+      document.getElementById('ai-trail-model').textContent = aiLabel() + ' · ' + toIST(r.generated_at);
       body.innerHTML = formatAIText(r.explanation);
       toast('AI analysis ready', 'ai');
     }
@@ -4534,7 +4534,7 @@ tr:hover td{background:#161b22}</style></head>
       currentReportTimeframe = timeframe;
       const context = document.getElementById('rep-api-context');
       if (context) {
-        const generated = currentReportPayload?.generated_at ? ` · generated ${String(currentReportPayload.generated_at).substring(0, 19)}` : '';
+        const generated = currentReportPayload?.generated_at ? ` · generated ${toIST(currentReportPayload.generated_at)}` : '';
         context.textContent = `Current report: ${timeframe}${generated}`;
       }
       const formats = ['json', 'md', 'pdf', 'html'];
@@ -4592,7 +4592,7 @@ tr:hover td{background:#161b22}</style></head>
       currentReportTimeframe = r.timeframe || timeframe;
       editor.value = r.report;
       preview.innerHTML = formatReportText(r.report);
-      btnStatus.textContent = `Generated from live security data · ${r.generated_at ? String(r.generated_at).substring(0, 19) : ''}`;
+      btnStatus.textContent = `Generated from live security data · ${r.generated_at ? toIST(r.generated_at) : ''}`;
       toast('Report ready', 'ok');
     }
 
@@ -4808,7 +4808,7 @@ tr:hover td{background:#161b22}</style></head>
       let h = '';
       if (bsl && bsl.found) {
         const b = bsl.baseline;
-        h += `<b>Built:</b> ${(b.built_at || '').substring(0, 19).replace('T', ' ')} &nbsp;|&nbsp; <b>Events:</b> ${b.event_count}<br>`;
+        h += `<b>Built:</b> ${toIST(b.built_at)} &nbsp;|&nbsp; <b>Events:</b> ${b.event_count}<br>`;
         h += `<b>Avg daily:</b> ${b.avg_daily_events}/day &nbsp;|&nbsp; <b>Avg severity:</b> ${b.avg_severity_score} (1=low 4=critical)<br>`;
         h += `<b>Login failures:</b> ${b.total_failures} &nbsp;|&nbsp; <b>Successes:</b> ${b.total_successes}<br>`;
         h += `<b>Usual ports:</b> ${Object.keys(b.usual_ports || {}).slice(0, 8).join(', ') || 'none'}<br>`;
@@ -6109,7 +6109,7 @@ tr:hover td{background:#161b22}</style></head>
         const pts = Object.entries(b.usual_ports || {}).sort((a, c) => c[1] - a[1]).slice(0, 10);
         if (pts.length) bar('ch-ports', pts.map(p => p[0]), pts.map(p => p[1]), '#e3b341', true);
         document.getElementById('bx-profile').innerHTML = `
-      <b>IP:</b> ${ip} &nbsp;|&nbsp; <b>Built:</b> ${(b.built_at || '').substring(0, 19).replace('T', ' ')} &nbsp;|&nbsp; <b>Events:</b> ${b.event_count}<br>
+      <b>IP:</b> ${ip} &nbsp;|&nbsp; <b>Built:</b> ${toIST(b.built_at)} &nbsp;|&nbsp; <b>Events:</b> ${b.event_count}<br>
       <b>Avg daily:</b> ${b.avg_daily_events}/day &nbsp;|&nbsp; <b>Avg severity score:</b> ${b.avg_severity_score} (1=low 4=critical)<br>
       <b>Login failures:</b> ${b.total_failures} &nbsp;|&nbsp; <b>Login successes:</b> ${b.total_successes}<br>
       <b>Countries seen:</b> ${Object.keys(b.usual_countries || {}).join(', ') || 'none'}<br>
@@ -6202,8 +6202,8 @@ tr:hover td{background:#161b22}</style></head>
           <div class="card" style="margin:0;border-left:2px solid var(--ok)"><div class="ch" style="border:none;padding-bottom:5px"><span class="ct" style="color:var(--muted)">Event trail</span></div>
           <div class="cb" style="font-size:12px;line-height:1.8">
             <b>Total Events:</b> ${t.total}<br>
-            <b>First Seen:</b> ${(t.first_seen||'').substring(0,19).replace('T',' ')}<br>
-            <b>Last Seen:</b> ${(t.last_seen||'').substring(0,19).replace('T',' ')}<br>
+            <b>First Seen:</b> ${toIST(t.first_seen)}<br>
+            <b>Last Seen:</b> ${toIST(t.last_seen)}<br>
             <b>Top Threat:</b> ${threatStr}
           </div></div>
 
@@ -6319,7 +6319,7 @@ tr:hover td{background:#161b22}</style></head>
       try { data = JSON.parse(text); } catch (e) { }
       const r = await post(`${API}/explain/pattern`, { data, context: 'Submitted from CyberSentinel AI Investigator' });
       if (!r) { body.innerHTML = '<span style="color:var(--danger)">AI unavailable. Check the AI key in .env and restart backend.</span>'; return; }
-      document.getElementById('ai-inv-model').textContent = aiLabel() + ' · ' + String(r.generated_at || '').substring(0, 19);
+      document.getElementById('ai-inv-model').textContent = aiLabel() + ' · ' + toIST(r.generated_at);
       body.innerHTML = formatAIText(r.explanation);
       toast('Pattern analysis ready', 'ai');
     }
@@ -6673,7 +6673,7 @@ tr:hover td{background:#161b22}</style></head>
             ${c.entity ? `<span class="lg-ip" onclick="goTrail('${escapeHTML(c.entity)}')">${escapeHTML(c.entity)}</span>` : ''}
             <span class="badge ${c.severity || 'medium'}">${escapeHTML(c.severity || 'medium')}</span>
             ${closed ? `<span class="badge low">closed · ${escapeHTML((c.disposition || '').replace('_', ' '))}</span>` : ''}
-            <span style="margin-left:auto;font-size:10px;color:var(--faint);font-family:var(--mono)">${c.created_by ? 'opened by ' + escapeHTML(c.created_by) + ' · ' : ''}${escapeHTML(String(c.updated_at).substring(0, 16))}</span>
+            <span style="margin-left:auto;font-size:10px;color:var(--faint);font-family:var(--mono)">${c.created_by ? 'opened by ' + escapeHTML(c.created_by) + ' · ' : ''}${escapeHTML(toIST(c.updated_at))}</span>
           </div>
           ${closed ? '' : `<div class="case-ctl">
             <div class="seg" role="radiogroup" aria-label="Case status">
@@ -6713,7 +6713,7 @@ tr:hover td{background:#161b22}</style></head>
       if (el.style.display !== 'none') { el.style.display = 'none'; return; }
       const r = await get(`${API}/cases/${id}/audit`);
       el.innerHTML = ((r && r.audit) || []).map(a =>
-        `<div class="ca-line"><span class="ca-ts">${escapeHTML(String(a.ts).substring(0, 19))}</span>
+        `<div class="ca-line"><span class="ca-ts">${escapeHTML(toIST(a.ts))}</span>
          <b>${escapeHTML(a.actor)}</b> ${escapeHTML(a.action)}${a.detail ? ` — ${escapeHTML(a.detail)}` : ''}</div>`).join('')
         || '<div class="ca-line">No audit entries</div>';
       el.style.display = '';
@@ -6770,7 +6770,7 @@ tr:hover td{background:#161b22}</style></head>
           <div class="ai-header">
             <span class="ai-badge">AI</span>
             <span class="ai-title">Incident Narrative</span>
-            <span class="ai-model">${aiLabel()} · ${String(r.generated_at || '').substring(0, 19).replace('T',' ')} IST</span>
+            <span class="ai-model">${aiLabel()} · ${toIST(r.generated_at)}</span>
           </div>
           <div class="ai-body">${formatReportText(r.ai_narrative || r.explanation || '')}</div>
         </div>
@@ -7191,7 +7191,7 @@ tr:hover td{background:#161b22}</style></head>
       const card = document.getElementById('kc-identity-card');
       const r = await get(`${API}/identity/${ip}`);
       if (!r || (!r.agents.length && !r.users.length)) { card.style.display = 'none'; return; }
-      const fmt = row => `<span class="kc-idchip" title="${row.hits} events · first ${String(row.first_ts).substring(0,16)} · last ${String(row.last_ts).substring(0,16)}">
+      const fmt = row => `<span class="kc-idchip" title="${row.hits} events · first ${toIST(row.first_ts)} · last ${toIST(row.last_ts)}">
         ${escapeHTML(row.name)}<i>${row.hits}</i></span>`;
       card.style.display = 'block';
       card.innerHTML = `
@@ -7619,7 +7619,7 @@ tr:hover td{background:#161b22}</style></head>
     }
     function fmtModelTime(value) {
       if (!value) return '—';
-      return String(value).substring(0, 19).replace('T', ' ');
+      return toIST(value);
     }
     function triggerBadge(label, active) {
       return `<span class="mi-trigger ${active ? 'on' : 'off'}">${label}: ${active ? 'ON' : 'off'}</span>`;

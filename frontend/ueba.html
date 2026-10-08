@@ -68,7 +68,14 @@ const num = v => Number(v || 0).toLocaleString();
 async function get(u) { try { const r = await fetch(API + u, { credentials: 'same-origin' }); return r.ok ? await r.json() : null; } catch (_) { return null; } }
 function goTrail(v) { location.href = '/#trail=' + encodeURIComponent(v); }
 function goTrailEntity(field, v) { location.href = '/#trail=' + encodeURIComponent(v); }
-function toIST(ts) { try { return new Date(ts).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', hour12: false }); } catch (_) { return String(ts || ''); } }
+function toIST(ts) {
+  if (ts == null || ts === '' || ts === '—') return '—';
+  var s = String(ts).trim().replace(' ', 'T');
+  if (!/(Z|[+\-]\d{2}:?\d{2})$/.test(s)) s += 'Z';   // store is UTC; no zone => UTC
+  var d = new Date(s);
+  if (isNaN(d)) return String(ts).slice(0, 19).replace('T', ' ');
+  return d.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }).replace(/\//g, '-') + ' IST';
+}
 const RISK_COLORS = { critical: '#eb5757', high: '#f2994a', medium: '#f2c94c', low: '#4cb782' };
 function setNum(id, v) { const e = document.getElementById(id); if (e) e.textContent = num(v); }
 function sparkSVG(data, col) {
@@ -83,7 +90,7 @@ async function showRawLogs(field, value) {
   document.getElementById('raw-b').textContent = 'Loading…'; m.style.display = 'block';
   const r = await get(`/raw-logs?field=${field}&value=${encodeURIComponent(value)}&limit=25`);
   const evs = (r && r.events) || [];
-  document.getElementById('raw-b').innerHTML = evs.length ? evs.map(e => `<div style="border-bottom:1px solid var(--border);padding:7px 0"><span style="color:var(--accent)">${esc(String(e.ts).substring(0, 19))}</span> · ${esc(e.severity || '')} · ${esc(e.rule || '')}<div style="color:var(--text);margin-top:3px">${esc(e.full_log || e.raw || '(no raw line stored)')}</div></div>`).join('') : '<span style="color:var(--muted)">No raw logs found.</span>';
+  document.getElementById('raw-b').innerHTML = evs.length ? evs.map(e => `<div style="border-bottom:1px solid var(--border);padding:7px 0"><span style="color:var(--accent)">${esc(toIST(e.ts))}</span> · ${esc(e.severity || '')} · ${esc(e.rule || '')}<div style="color:var(--text);margin-top:3px">${esc(e.full_log || e.raw || '(no raw line stored)')}</div></div>`).join('') : '<span style="color:var(--muted)">No raw logs found.</span>';
 }
 
 function renderUEBARisk(d) {

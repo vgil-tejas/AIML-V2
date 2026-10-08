@@ -69,6 +69,16 @@ let OPERATOR = 'analyst';
 const esc = v => String(v == null ? '' : v).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const num = v => Number(v || 0).toLocaleString();
 const TT = v => { const s = String(v == null ? '' : v).replace(/_/g, ' ').trim(); return (!s || s.toLowerCase() === 'unknown') ? '' : s; };
+// Every timestamp is shown in IST (Asia/Kolkata). The store is UTC; if a value
+// has no zone marker we treat it as UTC (else the browser would read it as local).
+function toIST(ts) {
+  if (ts == null || ts === '' || ts === '—') return '—';
+  var s = String(ts).trim().replace(' ', 'T');
+  if (!/(Z|[+\-]\d{2}:?\d{2})$/.test(s)) s += 'Z';
+  var d = new Date(s);
+  if (isNaN(d)) return String(ts).slice(0, 19).replace('T', ' ');
+  return d.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }).replace(/\//g, '-') + ' IST';
+}
 async function get(u) { try { const r = await fetch(API + u, { credentials: 'same-origin' }); return r.ok ? await r.json() : null; } catch (_) { return null; } }
 async function post(u, body) { try { const r = await fetch(API + u, { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin', body: JSON.stringify(body) }); return r.ok ? await r.json() : null; } catch (_) { return null; } }
 function toast(msg, type) { const w = document.getElementById('toast-wrap'); const el = document.createElement('div'); el.textContent = msg; el.style.cssText = 'background:var(--bg2);border:1px solid var(--border);border-left:3px solid ' + (type === 'warn' ? 'var(--warn)' : 'var(--accent)') + ';padding:10px 14px;border-radius:8px;font-size:13px;max-width:360px'; w.appendChild(el); setTimeout(() => el.remove(), 4200); }
@@ -82,7 +92,7 @@ async function showRawLogs(field, value) {
   const r = await get(`/raw-logs?field=${field}&value=${encodeURIComponent(value)}&limit=25`);
   const evs = (r && r.events) || [];
   document.getElementById('raw-b').innerHTML = evs.length
-    ? evs.map(e => `<div style="border-bottom:1px solid var(--border);padding:7px 0"><span style="color:var(--accent)">${esc(String(e.ts).substring(0, 19))}</span> · ${esc(e.severity || '')} · ${esc(e.rule || '')}<div style="color:var(--text);margin-top:3px">${esc(e.full_log || e.raw || '(no raw line stored)')}</div></div>`).join('')
+    ? evs.map(e => `<div style="border-bottom:1px solid var(--border);padding:7px 0"><span style="color:var(--accent)">${esc(toIST(e.ts))}</span> · ${esc(e.severity || '')} · ${esc(e.rule || '')}<div style="color:var(--text);margin-top:3px">${esc(e.full_log || e.raw || '(no raw line stored)')}</div></div>`).join('')
     : '<span style="color:var(--muted)">No raw logs found for this entity.</span>';
 }
 
@@ -216,7 +226,7 @@ async function loadCases() {
         ${c.entity ? `<span style="font-family:var(--mono);font-size:12px;color:var(--accent);cursor:pointer" onclick="goTrail('${esc(c.entity)}')">${esc(c.entity)}</span>` : ''}
         <span class="badge ${esc(c.severity || 'medium')}">${esc(c.severity || 'medium')}</span>
         ${closed ? `<span class="badge low">closed · ${esc((c.disposition || '').replace('_', ' '))}</span>` : ''}
-        <span style="margin-left:auto;font-size:10px;color:var(--muted);font-family:var(--mono)">${c.created_by ? 'opened by ' + esc(c.created_by) + ' · ' : ''}${esc(String(c.updated_at).substring(0, 16))}</span>
+        <span style="margin-left:auto;font-size:10px;color:var(--muted);font-family:var(--mono)">${c.created_by ? 'opened by ' + esc(c.created_by) + ' · ' : ''}${esc(toIST(c.updated_at))}</span>
       </div>
       ${closed ? '' : `<div style="display:flex;gap:8px;margin-top:9px;flex-wrap:wrap;align-items:center">
         <div class="seg seg-sm">${CASE_FLOW.map(s => `<button type="button" class="seg-btn${c.status === s ? ' active' : ''}" onclick="caseSet('${esc(c.case_id)}','status','${s}')">${s}</button>`).join('')}</div>
@@ -244,7 +254,7 @@ async function caseAudit(id, btn) {
   const el = document.getElementById('ca-' + id);
   if (el.style.display !== 'none') { el.style.display = 'none'; return; }
   const r = await get(`/cases/${encodeURIComponent(id)}/audit`);
-  el.innerHTML = ((r && r.audit) || []).map(a => `<div style="padding:2px 0"><span style="color:var(--accent)">${esc(String(a.ts).substring(0, 19))}</span> <b>${esc(a.actor)}</b> ${esc(a.action)}${a.detail ? ' — ' + esc(a.detail) : ''}</div>`).join('') || '<div>No audit entries</div>';
+  el.innerHTML = ((r && r.audit) || []).map(a => `<div style="padding:2px 0"><span style="color:var(--accent)">${esc(toIST(a.ts))}</span> <b>${esc(a.actor)}</b> ${esc(a.action)}${a.detail ? ' — ' + esc(a.detail) : ''}</div>`).join('') || '<div>No audit entries</div>';
   el.style.display = '';
 }
 document.getElementById('dim-seg').addEventListener('click', e => {
