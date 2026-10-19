@@ -5144,6 +5144,95 @@ async def _nl_risk_answer(question: str) -> dict:
             "elapsed_ms": elapsed, "ai_generated": False}
 
 
+_DOSSIER_INTENT = __import__("re").compile(
+    r"\b(everything|all activity|profile|dossier|overview|summary|full (?:picture|trail|history|report)|"
+    r"tell me about|what (?:did|is|has)|give me (?:everything|all)|breakdown of)\b", __import__("re").I)
+_DOSSIER_STOP = {"do", "did", "the", "this", "that", "last", "week", "today", "is", "doing",
+                 "a", "an", "any", "my", "our", "it", "been", "up", "to", "happening"}
+
+
+def _looks_entity_dossier(q: str):
+    """If the question is a broad 'tell me everything about <entity>' (an IP, user
+    or host) it returns (field, value); else None. Such questions ask for several
+    different breakdowns at once — impossible in one SELECT — so we answer them
+    deterministically from the entity summary instead of letting the model guess."""
+    import re
+    if not q or not _DOSSIER_INTENT.search(q):
+        return None
+    m = re.search(r"\b(\d{1,3}\.){3}\d{1,3}\b", q)           # IPv4 anywhere
+    if m:
+        ip = m.group(0)
+        if all(0 <= int(p) <= 255 for p in ip.split(".")):
+            return ("ip", ip)
+    m = re.search(r"\b(?:user|username|account|login)\s+[\"']?([A-Za-z0-9._\\\-]{2,64})", q, re.I)
+    if m and m.group(1).lower() not in _DOSSIER_STOP:
+        return ("username", m.group(1))
+    m = re.search(r"\b(?:host|agent|server|machine|endpoint|workstation)\s+[\"']?([A-Za-z0-9._\\\-]{2,64})", q, re.I)
+    if m and m.group(1).lower() not in _DOSSIER_STOP:
+        return ("host", m.group(1))
+    return None
+
+
+async def _nl_entity_dossier(field: str, value: str, question: str) -> dict:
+    """Deterministic, ON-PREMISE 'everything about <entity>' answer — counts, time
+    span, severity mix, the hosts/accounts/source-IPs involved, top activity and
+    the busiest day — all from real aggregates. No AI, so it can't 503 or return an
+    'unexpected response', and nothing leaves the box."""
+    if not osc:
+        raise HTTPException(503, "ClickHouse not available")
+    import time as _t
+    col = {"ip": "src_ip", "username": "username", "host": "agent"}.get(field, "src_ip")
+    flabel = {"ip": "source IP", "username": "user", "host": "host"}.get(field, "entity")
+    t0 = _t.time()
+    summary = await _to_thread(osc.get_entity_summary, field, value)
+    if not summary or not summary.get("found"):
+        return {"answer": f"No records in the logs for {value} ({flabel}). It may never have "
+                          "triggered a rule, or the name/IP isn't captured on these logs.",
+                "sql": f"entity summary · {col} = '{value}'", "columns": [], "rows": [],
+                "row_count": 0, "elapsed_ms": round((_t.time() - t0) * 1000), "ai_generated": False}
+    try:
+        busiest = await _to_thread(lambda: osc._q(
+            f"SELECT toDate(ts) AS d, count() AS c FROM {osc.LOGS_TABLE} "
+            f"WHERE {col} = {{v:String}} GROUP BY d ORDER BY c DESC LIMIT 1", {"v": value}))
+    except Exception:
+        busiest = []
+    elapsed = round((_t.time() - t0) * 1000)
+
+    sev = summary.get("severities", {}) or {}
+    sev_txt = ", ".join(f"{k} {v}" for k, v in
+                        sorted(sev.items(), key=lambda x: -x[1]) if k) or "none tagged"
+    def _top(items, key, n=4):
+        return ", ".join(f"{i[key]} ({i['events']})" for i in (items or [])[:n]) or "none"
+    agents, users, srcips = (summary.get("agents"), summary.get("users"), summary.get("src_ips"))
+    evts = summary.get("event_types") or []
+    threats = [k for k in (summary.get("threat_types") or {}) if k and k.lower() != "unknown"]
+
+    parts = [f"{value} ({flabel}) — {summary.get('total', 0):,} events from "
+             f"{summary.get('first_seen')} to {summary.get('last_seen')} (UTC)."]
+    parts.append(f"Severity: {sev_txt}.")
+    if evts:
+        parts.append(f"Top activity: {_top(evts, 'rule', 3)}.")
+    if field == "ip":
+        parts.append(f"Seen on {len(agents or [])} host(s) [{_top(agents, 'agent', 3)}] "
+                     f"and {len(users or [])} account(s) [{_top(users, 'name', 3)}].")
+    elif field == "username":
+        parts.append(f"From {len(srcips or [])} source IP(s) [{_top(srcips, 'ip', 3)}] "
+                     f"on {len(agents or [])} host(s) [{_top(agents, 'agent', 3)}].")
+    else:
+        parts.append(f"Accounts [{_top(users, 'name', 3)}] from {len(srcips or [])} source IP(s) "
+                     f"[{_top(srcips, 'ip', 3)}].")
+    if threats:
+        parts.append("Threat types: " + ", ".join(threats[:4]) + ".")
+    if busiest and busiest[0].get("d") is not None:
+        parts.append(f"Most active on {busiest[0]['d']} ({busiest[0]['c']:,} events).")
+
+    rows = [[e.get("rule", ""), e.get("events", 0)] for e in evts[:20]]
+    return {"answer": " ".join(parts),
+            "sql": f"entity summary · {col} = '{value}' · full history",
+            "columns": ["activity (rule)", "events"], "rows": rows, "row_count": len(rows),
+            "elapsed_ms": elapsed, "ai_generated": False}
+
+
 @app.post("/api/nl/query")
 async def nl_query(payload: dict):
     question = payload.get("question", "").strip()
@@ -5159,6 +5248,14 @@ async def nl_query(payload: dict):
     # ranking (deterministic, grounded, no AI call — so it can't 503 or invent a name).
     if _looks_risk_question(question):
         return await _nl_risk_answer(question)
+
+    # Broad "everything about <IP/user/host>" dossiers ask for several breakdowns at
+    # once (activity + hosts + accounts + severity + timing) — impossible in one
+    # SELECT, so the model used to return prose. Answer them deterministically from
+    # the entity summary instead (on-premise, can't fail).
+    _ent = _looks_entity_dossier(question)
+    if _ent:
+        return await _nl_entity_dossier(_ent[0], _ent[1], question)
 
     # Preset demo questions run instantly from hardcoded SQL; anything else -> AI.
     sql = _NL_PRESETS.get(_normalize_q(question))
