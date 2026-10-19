@@ -4973,6 +4973,17 @@ Rules:
 - Readable timestamps: formatDateTime(ts, '%Y-%m-%d %H:%i:%S') AS time
 - Tables needing FINAL (no time filter on these): ml_scores, baselines, deviations, blocklist
 
+The analyst's English is often imperfect — typos, broken grammar, Hinglish, or
+indirect phrasing. INFER INTENT GENEROUSLY and still return ONE valid SELECT:
+- fix obvious typos ("faild logins", "attakers", "cirtical", "evnts") silently;
+- map synonyms to fields: "who hit us / attacked us / is attacking" -> top src_ip
+  by count; "break-in / cracking / password guessing" -> brute force
+  (threat_type ILIKE '%brute%'); "foreign / outside / abroad" -> external filter;
+  "machines / boxes / endpoints" -> agent; "people / staff / accounts" -> username;
+  "when / timeline / activity over time" -> group by hour/day.
+- If the question is vague, answer the most useful reasonable interpretation with
+  a bounded query rather than refusing. ALWAYS output a SELECT, never prose.
+
 More worked examples (copy the shape, adapt columns/filters to the question):
 - "top ips" / "tell me top ips" (NO time word -> NO time filter at all, use ALL data): SELECT src_ip, count() AS events FROM logs WHERE src_ip != '' GROUP BY src_ip ORDER BY events DESC LIMIT 20
 - "events per country today": SELECT country, count() AS events FROM logs WHERE ts >= today() AND country != '' GROUP BY country ORDER BY events DESC LIMIT 20
@@ -5233,6 +5244,62 @@ async def _nl_entity_dossier(field: str, value: str, question: str) -> dict:
             "elapsed_ms": elapsed, "ai_generated": False}
 
 
+def _extract_any_entity(q: str):
+    """Pull any IP / named user / named host from a question — no intent words
+    required (used by the best-effort fallback, where we just want SOMETHING to
+    retrieve). Returns (field, value) or None."""
+    import re
+    m = re.search(r"\b(\d{1,3}\.){3}\d{1,3}\b", q or "")
+    if m and all(0 <= int(p) <= 255 for p in m.group(0).split(".")):
+        return ("ip", m.group(0))
+    m = re.search(r"\b(?:user|username|account|login)\s+[\"']?([A-Za-z0-9._\\\-]{2,64})", q or "", re.I)
+    if m and m.group(1).lower() not in _DOSSIER_STOP:
+        return ("username", m.group(1))
+    m = re.search(r"\b(?:host|agent|server|machine|endpoint|workstation)\s+[\"']?([A-Za-z0-9._\\\-]{2,64})", q or "", re.I)
+    if m and m.group(1).lower() not in _DOSSIER_STOP:
+        return ("host", m.group(1))
+    return None
+
+
+async def _nl_best_effort(question: str, reason: str = "") -> dict:
+    """The agent's 'always land on a grounded answer' node. When NL->SQL can't
+    produce a valid query (typos, vague/indirect phrasing, provider hiccup), we do
+    NOT dead-end: (1) if the question names an entity, return its deterministic
+    dossier; else (2) return the most recent high-severity activity as a safe
+    bounded default, with an honest note. Always real retrieved data — never a
+    fabricated finding, never a bare error."""
+    ent = _extract_any_entity(question)
+    if ent:
+        try:
+            return await _nl_entity_dossier(ent[0], ent[1], question)
+        except Exception:
+            pass
+    if osc:
+        try:
+            anchor = await _nl_latest_ts()
+            floor = (f"ts >= toDateTime('{anchor}') - INTERVAL 24 HOUR"
+                     if anchor else "ts >= now() - INTERVAL 24 HOUR")
+            q = (f"SELECT formatDateTime(ts,'%Y-%m-%d %H:%i:%S') AS time, src_ip, dst_ip, "
+                 f"threat_type, severity, rule FROM {osc.LOGS_TABLE} "
+                 f"WHERE {floor} AND severity IN ('critical','high') ORDER BY ts DESC LIMIT 50")
+            data = await _to_thread(lambda: osc._q(q))
+            if data:
+                cols = list(data[0].keys())
+                rows = [[r.get(c) for c in cols] for r in data]
+                return {"answer": ("I couldn't turn that into a precise query, so here's the most "
+                                   "recent high-severity activity instead — try naming an IP, user, "
+                                   "host, threat type or time window for a sharper answer."),
+                        "sql": q, "columns": cols, "rows": rows, "row_count": len(rows),
+                        "elapsed_ms": 0, "ai_generated": False, "best_effort": True}
+        except Exception:
+            pass
+    return {"answer": ("I couldn't turn that into a query from the logs. Try naming a specific IP, "
+                       "user, host, threat type, or time window — e.g. 'failed logins today', "
+                       "'everything about 10.0.0.5', or 'top source IPs this week'."),
+            "sql": "", "columns": [], "rows": [], "row_count": 0,
+            "elapsed_ms": 0, "ai_generated": False, "best_effort": True}
+
+
 @app.post("/api/nl/query")
 async def nl_query(payload: dict):
     question = payload.get("question", "").strip()
@@ -5273,7 +5340,9 @@ async def nl_query(payload: dict):
                 gen_err = ge
                 sql = None
         if not sql:
-            raise gen_err or HTTPException(400, "Could not turn that into a query. Try rephrasing.")
+            # SQL generation failed (bad phrasing / provider busy) — never dead-end;
+            # fall back to a grounded best-effort answer.
+            return await _nl_best_effort(question, str(getattr(gen_err, "detail", gen_err or "")))
 
     if not osc:
         raise HTTPException(503, "ClickHouse not available")
@@ -5341,12 +5410,12 @@ async def nl_query(payload: dict):
         result["ai_generated"] = ai_generated
         return result
 
+    # Every SQL attempt (incl. self-repairs) failed to execute. Don't dead-end —
+    # return a grounded best-effort answer so the analyst always gets something.
     detail = str(last_err)
-    # Surface the DB reason compactly; keep it analyst-friendly, no engine name.
     if "DB::Exception:" in detail:
         detail = detail.split("DB::Exception:", 1)[1].split("(version")[0].strip()
-    raise HTTPException(400, f"Couldn't answer that from the logs — try rephrasing "
-                             f"(e.g. name a time window or an IP/user). Detail: {detail[:280]}")
+    return await _nl_best_effort(question, detail)
 
 
 _resilience_cache: dict = {}
