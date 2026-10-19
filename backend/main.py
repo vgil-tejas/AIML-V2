@@ -4765,15 +4765,51 @@ def _bound_rowlevel_scan(sql: str, anchor: Optional[str]) -> str:
     return f"{head.rstrip()} {joiner} {floor} {tail}"
 
 
-def _nl_local_sentence(columns: list, rows: list, n: int, limited: bool, ci: dict) -> str:
-    """Deterministic grounded answer written on-premise from the returned rows —
-    an honest count plus the top values of the useful columns. No LLM, so it can
-    never 503 or invent a finding, and no data leaves the box."""
-    from collections import Counter
-    n_txt = "At least 200" if limited else str(n)
-    bits = [f"{n_txt} matching record(s)."]
+_MEASURE_COLS = ("events", "count", "cnt", "c", "total", "hits", "sessions",
+                 "attempts", "sources", "source_ips", "uniq", "n")
 
-    def _top(col: str, label: str, k: int = 3):
+
+def _num(x):
+    try:
+        return f"{int(x):,}"
+    except Exception:
+        try:
+            return f"{float(x):,.0f}"
+        except Exception:
+            return str(x)
+
+
+def _nl_local_sentence(columns: list, rows: list, n: int, limited: bool, ci: dict) -> str:
+    """Deterministic grounded answer written on-premise from the returned rows.
+    Two shapes:
+      * RANKED/AGGREGATE (has a measure column like `events`/`count`): read the
+        real number from that column and name the leaders with it — "the top X is
+        A with 37,102, then B (13,660)…". (The old code counted row frequency,
+        which is always 1 per group — that produced the confusing "(1)".)
+      * ROW-LEVEL (individual events): summarise by distinct categories + how many
+        entities/accounts are involved + the latest time.
+    No LLM, so it can't 503 or invent a finding; real values are shown locally."""
+    from collections import Counter
+    n_txt = "at least 200" if limited else str(n)
+
+    # --- aggregate / ranked result (the query already ordered it) --------------
+    measure = next((c for c in columns if c.lower() in _MEASURE_COLS), None)
+    if measure and len(columns) >= 2:
+        mi = ci[measure]
+        dim = next((c for c in columns if c != measure), columns[0])
+        di = ci[dim]
+        top = [(str(r[di]), r[mi]) for r in rows[:5] if r[di] not in (None, "", "—")]
+        if top:
+            lead = f"{top[0][0]} with {_num(top[0][1])} {measure}"
+            rest = ", ".join(f"{v} ({_num(m)})" for v, m in top[1:4])
+            tail = f", then {rest}" if rest else ""
+            return (f"Ranked by {measure}, the top {dim} is {lead}{tail}. "
+                    f"{n_txt} {dim}(s) returned — full ranking in the table below.")
+
+    # --- row-level result ------------------------------------------------------
+    bits = [f"{n_txt} matching event(s)."]
+
+    def _freq(col: str, label: str, k: int = 3):
         if col not in ci:
             return None
         c = Counter()
@@ -4784,18 +4820,28 @@ def _nl_local_sentence(columns: list, rows: list, n: int, limited: bool, ci: dic
             c[str(v)] += 1
         if not c:
             return None
-        return f"{label}: " + ", ".join(f"{val} ({cnt})" for val, cnt in c.most_common(k))
+        uniq = len(c)
+        shown = ", ".join(f"{val} ({cnt})" for val, cnt in c.most_common(k))
+        more = f" of {uniq}" if uniq > k else ""
+        return f"{label}{more}: {shown}"
 
     for col, label in (("severity", "severity"), ("threat_type", "threat"),
-                       ("src_ip", "top sources"), ("agent", "agents"),
+                       ("src_ip", "source IPs"), ("agent", "hosts"),
                        ("username", "accounts"), ("country", "countries"),
                        ("dst_port", "ports")):
-        s = _top(col, label)
+        s = _freq(col, label)
         if s:
             bits.append(s)
         if len(bits) >= 5:
             break
-    return " ".join(bits) + " See the evidence table below for the full rows."
+    # latest time if a time column is present
+    for tcol in ("time", "ts", "@timestamp", "last_seen"):
+        if tcol in ci:
+            times = [str(r[ci[tcol]]) for r in rows if r[ci[tcol]] not in (None, "", "—")]
+            if times:
+                bits.append(f"most recent {max(times)}")
+            break
+    return " ".join(bits) + " Full rows in the evidence table below."
 
 
 async def _nl_answer(question: str, columns: list, rows: list, row_count: int, sql: str = "") -> str:
@@ -4909,17 +4955,21 @@ ANSWER:"""
     return ans
 
 
-async def _nl_sql_from_ai(question: str, prior_sql: str = "", error: str = "") -> str:
+async def _nl_sql_from_ai(question: str, prior_sql: str = "", error: str = "",
+                          context_note: str = "") -> str:
     """Fallback for free-form (non-preset) questions: ask Groq to write the SQL.
     Pass prior_sql+error to request a corrected query after a failed execution.
+    `context_note` carries the prior turn (question + result entities) so follow-up
+    references like "these IPs", "them", "that user" resolve to the last answer.
 
-    PRIVACY: the question / prior SQL / DB error can carry real IPs, usernames and
-    emails. We redact those to decoys before the call and restore them in the SQL
-    the model returns, so the provider only ever sees placeholders while the query
-    still filters on the true value."""
+    PRIVACY: the question / prior SQL / DB error / context can carry real IPs,
+    usernames and emails. We redact those to decoys before the call and restore
+    them in the SQL the model returns, so the provider only ever sees placeholders
+    while the query still filters on the true value."""
     _pmap: dict = {}
     if ai_safety:
-        (question, prior_sql, error), _pmap = ai_safety.sanitize_many([question, prior_sql, error])
+        (question, prior_sql, error, context_note), _pmap = ai_safety.sanitize_many(
+            [question, prior_sql, error, context_note])
     fix_note = ""
     if prior_sql and error:
         fix_note = f"""
@@ -4998,6 +5048,11 @@ More worked examples (copy the shape, adapt columns/filters to the question):
 - "everything about 198.51.100.66" (full trail for an entity): SELECT formatDateTime(ts,'%Y-%m-%d %H:%i:%S') AS time, agent, username, dst_ip, dst_port, threat_type, severity, mitre_tactic, rule FROM logs WHERE src_ip = '198.51.100.66' ORDER BY ts DESC LIMIT 200
 - "what did user jsmith do this week": SELECT formatDateTime(ts,'%Y-%m-%d %H:%i:%S') AS time, src_ip, agent, threat_type, severity, rule FROM logs WHERE username = 'jsmith' AND ts >= now() - INTERVAL 7 DAY ORDER BY ts DESC LIMIT 200
 {fix_note}
+{("CONVERSATION CONTEXT — the analyst is following up on the previous turn. Use it "
+  "to resolve references like 'these IPs', 'them', 'those', 'that user', 'the same':"
+  + chr(10) + context_note + chr(10) +
+  "When the new question refers back, filter on those entities (e.g. src_ip IN (...))."
+  ) if context_note else ""}
 Analyst question: {question}
 
 SQL:"""
@@ -5306,6 +5361,20 @@ async def nl_query(payload: dict):
     if not question:
         raise HTTPException(400, "Question required")
 
+    # Conversation memory: the UI sends the previous question + the entities from
+    # the last answer so follow-ups ("did THESE IPs…", "the same user yesterday")
+    # resolve. Kept small and sanitised before it ever reaches the model.
+    context = payload.get("context") or {}
+    context_note = ""
+    try:
+        pq = str(context.get("prev_question") or "").strip()[:200]
+        ents = [str(e).strip() for e in (context.get("entities") or []) if str(e).strip()][:25]
+        _lines = ([f"Previous question: {pq}"] if pq else []) + \
+                 (["Entities from the previous answer: " + ", ".join(ents)] if ents else [])
+        context_note = "\n".join(_lines)
+    except Exception:
+        context_note = ""
+
     # General security-knowledge questions (CVE / MITRE / "what is X") are answered
     # from reference knowledge, clearly labelled — never turned into an empty log query.
     if _looks_definitional(question):
@@ -5334,7 +5403,7 @@ async def nl_query(payload: dict):
         gen_err = None
         for _ in range(2):
             try:
-                sql = await _nl_sql_from_ai(question)
+                sql = await _nl_sql_from_ai(question, context_note=context_note)
                 break
             except HTTPException as ge:
                 gen_err = ge
@@ -5393,7 +5462,8 @@ async def nl_query(payload: dict):
             if not ai_generated or i == max_attempts - 1:
                 break
             try:
-                nxt = await _nl_sql_from_ai(question, prior_sql=cur_sql, error=str(e))
+                nxt = await _nl_sql_from_ai(question, prior_sql=cur_sql, error=str(e),
+                                            context_note=context_note)
                 nxt = _validate_nl_sql(nxt)          # re-gate the corrected query too
             except Exception as ge:
                 last_err = ge

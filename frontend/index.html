@@ -6325,6 +6325,25 @@ tr:hover td{background:#161b22}</style></head>
     }
     // ── Natural Language SOC Query ────────────────────────────────────────────
     let _nlLastRows = [], _nlLastCols = [];
+    // Follow-up memory: remember entities from the last answered query so a
+    // follow-up ("did these IPs do anything yesterday, with usernames") resolves.
+    let _nlCtx = null;   // {prev_question, entities[]}
+    const _NL_ENT_COLS = ['src_ip', 'dst_ip', 'username', 'agent', 'entity', 'account', 'user'];
+    function _nlCaptureCtx(q, cols, rows) {
+      try {
+        const idx = (cols || []).map((c, i) => [String(c).toLowerCase(), i]).filter(([c]) => _NL_ENT_COLS.includes(c));
+        const ents = [];
+        for (const [, i] of idx) {
+          for (const row of (rows || [])) {
+            const v = row[i];
+            if (v != null && v !== '' && !ents.includes(String(v))) ents.push(String(v));
+            if (ents.length >= 25) break;
+          }
+          if (ents.length >= 25) break;
+        }
+        _nlCtx = { prev_question: q, entities: ents };
+      } catch (e) { /* context is best-effort */ }
+    }
     function nlSetQ(q) {
       document.getElementById('nl-input').value = q;
       runNLQuery();
@@ -6347,7 +6366,7 @@ tr:hover td{background:#161b22}</style></head>
         const resp = await fetch(`${API}/nl/query`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ question: q })
+          body: JSON.stringify({ question: q, context: _nlCtx })
         });
         const data = await resp.json();
         btn.disabled = false; btn.textContent = 'Run Query';
@@ -6373,6 +6392,7 @@ tr:hover td{background:#161b22}</style></head>
         document.getElementById('nl-sql-text').textContent = data.sql;
         document.getElementById('nl-timing').textContent = `· ${data.elapsed_ms}ms · ${data.row_count} row${data.row_count !== 1 ? 's' : ''}`;
         _nlLastCols = data.columns; _nlLastRows = data.rows;
+        _nlCaptureCtx(q, data.columns, data.rows);   // remember entities for follow-ups
         document.getElementById('nl-result-title').textContent = `Results — ${data.row_count} row${data.row_count !== 1 ? 's' : ''}`;
         // Grounded answer banner — plain-English, written strictly from the rows
         // below (the evidence table + generated SQL let the analyst verify it).

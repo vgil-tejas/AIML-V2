@@ -2250,6 +2250,14 @@ addEventListener('resize', () => { initMesh(); if (REDUCED) drawMesh(); });
   const cin = document.getElementById('console-input');
   const runBtn = document.getElementById('console-run');
   const box = document.getElementById('console');
+  let _socCtx = null;   // {prev_question, entities[]} — carries follow-up memory
+  const _ENT_COLS = ['src_ip', 'dst_ip', 'username', 'agent', 'entity', 'account', 'user'];
+  function _captureCtx(q, cols, rows) {
+    const idx = (cols || []).map((c, i) => [String(c).toLowerCase(), i]).filter(([c]) => _ENT_COLS.includes(c));
+    const ents = [];
+    for (const rw of (rows || [])) { for (const [, i] of idx) { const v = rw[i]; if (v && !ents.includes(String(v))) ents.push(String(v)); } if (ents.length >= 25) break; }
+    _socCtx = { prev_question: q, entities: ents };
+  }
 
   if (!stats.ai_configured) {
     box.innerHTML = `<div class="a">The AI analyst is <b style="color:var(--warn)">not configured</b> —
@@ -2273,7 +2281,7 @@ addEventListener('resize', () => { initMesh(); if (REDUCED) drawMesh(); });
     try {
       const res = await fetch(`${API}/nl/query`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ question: q }),
+        body: JSON.stringify({ question: q, context: _socCtx }),
       });
       r = await res.json();
       if (!res.ok) err = r.detail || `request failed (${res.status})`;
@@ -2299,6 +2307,7 @@ addEventListener('resize', () => { initMesh(); if (REDUCED) drawMesh(); });
     }
 
     const cols = r.columns || [], rows = r.rows || [];
+    _captureCtx(q, cols, rows);   // remember entities for the next follow-up
     let html = '';
     // The grounded answer, written STRICTLY from the rows below — headline first.
     if (r.answer)
