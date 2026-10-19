@@ -409,6 +409,63 @@ async def ask_groq(prompt: str, max_tokens: int = 700, model: str | None = None)
                 break  # non-retryable for this model -> try next
     return f"AI provider unavailable: {last}"
 
+
+async def ask_ai_private(prompt: str, max_tokens: int = 700, model: str | None = None) -> str:
+    """ask_groq with automatic PII sanitisation: redact real IPs/users/emails to
+    decoys before the call and restore them in the reply, so the provider never
+    sees bank identifiers while the analyst still reads real values. Use this for
+    any narrative/explanation prompt built from log data. (The SOC-Query path does
+    its own redaction because it must restore inside generated SQL, so it keeps
+    calling ask_groq directly.)"""
+    if not ai_safety:
+        return await ask_groq(prompt, max_tokens=max_tokens, model=model)
+    safe, mp = ai_safety.sanitize_for_ai(prompt)
+    out = await ask_groq(safe, max_tokens=max_tokens, model=model)
+    if out and not out.startswith("AI provider") and mp:
+        out = ai_safety.restore_from_ai(out, mp)
+    return out
+
+
+@app.get("/api/ai/health")
+async def ai_health():
+    """AI provider status + which configured models the provider currently serves.
+    Only the model catalogue is queried (no bank data), and the key is never
+    returned — this is the 'verify availability' check for choosing AI_MODEL."""
+    info = {
+        "key_configured": bool(AI_API_KEY),
+        "base_url": AI_BASE_URL,
+        "models": {"primary": AI_MODEL, "fast": AI_FAST_MODEL,
+                   "fallback": AI_FALLBACK_MODEL or None},
+        "narration_enabled": SOC_AI_NARRATION,
+        "sanitizer_loaded": bool(ai_safety),
+        "max_retries": AI_MAX_RETRIES,
+        "timeout_s": AI_TIMEOUT,
+    }
+    if not AI_API_KEY:
+        info["available"] = None
+        info["note"] = ("No API key — the platform runs local-only; grounded SOC-Query "
+                        "answers still work, only LLM phrasing is off.")
+        return info
+    models_url = AI_BASE_URL.replace("/chat/completions", "/models")
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(10, connect=5)) as c:
+            r = await c.get(models_url, headers={"Authorization": f"Bearer {AI_API_KEY}"})
+        if r.status_code == 200:
+            served = sorted(m.get("id") for m in (r.json().get("data") or []) if m.get("id"))
+            info["available"] = served
+            served_set = set(served)
+            info["served"] = {"primary": AI_MODEL in served_set, "fast": AI_FAST_MODEL in served_set}
+            if AI_FALLBACK_MODEL:
+                info["served"]["fallback"] = AI_FALLBACK_MODEL in served_set
+            info["ok"] = any(info["served"].values())
+        else:
+            info["available"] = None
+            info["note"] = f"Provider returned HTTP {r.status_code} listing models."
+    except Exception as e:
+        info["available"] = None
+        info["note"] = f"Could not reach the AI provider ({type(e).__name__})."
+    return info
+
 # -- constants -----------------------------------------------------------------
 
 KNOWN_BAD_SUBNETS = [
@@ -1256,7 +1313,7 @@ Be specific to this IP and these values. Do not give generic textbook text."""
         "ip": ip,
         "alert_type": alert_type,
         "alert": alert,
-        "explanation": await ask_groq(prompt, max_tokens=500, model=AI_FAST_MODEL),
+        "explanation": await ask_ai_private(prompt, max_tokens=500, model=AI_FAST_MODEL),
         "model": AI_FAST_MODEL,
         "generated_at": datetime.now(timezone.utc).isoformat(),
     }
@@ -1306,7 +1363,7 @@ Do not say the model knows the IP is bad. Explain that Isolation Forest finds ou
     return {
         "ip": ip,
         "ml": ml,
-        "explanation": await ask_groq(prompt, max_tokens=500, model=AI_FAST_MODEL),
+        "explanation": await ask_ai_private(prompt, max_tokens=500, model=AI_FAST_MODEL),
         "model": AI_FAST_MODEL,
         "generated_at": datetime.now(timezone.utc).isoformat(),
     }
@@ -1333,7 +1390,7 @@ ACTION:
 
 Be specific to the actual values. Do not be generic."""
     return {
-        "explanation": await ask_groq(prompt, max_tokens=500, model=AI_FAST_MODEL),
+        "explanation": await ask_ai_private(prompt, max_tokens=500, model=AI_FAST_MODEL),
         "model": AI_FAST_MODEL,
         "generated_at": datetime.now(timezone.utc).isoformat(),
     }
@@ -1379,7 +1436,7 @@ Reference the actual data. If evidence is missing, say what is missing instead o
 
     return {
         "ip": ip,
-        "explanation": await ask_groq(prompt, max_tokens=600, model=AI_FAST_MODEL),
+        "explanation": await ask_ai_private(prompt, max_tokens=600, model=AI_FAST_MODEL),
         "risk_score": ml.get("risk_score"),
         "model": AI_FAST_MODEL,
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -3145,7 +3202,7 @@ RECOMMENDED ACTIONS (with mitigation IDs):"""
 
     return {
         **brief,
-        "explanation": await ask_groq(prompt, max_tokens=500, model=AI_FAST_MODEL),
+        "explanation": await ask_ai_private(prompt, max_tokens=500, model=AI_FAST_MODEL),
         "model": AI_FAST_MODEL,
         "generated_at": datetime.now(timezone.utc).isoformat(),
     }
@@ -3616,7 +3673,7 @@ PRIORITY JUSTIFICATION:"""
 
     return {
         **base,
-        "ai_narrative": await ask_groq(prompt, max_tokens=600, model=AI_FAST_MODEL),
+        "ai_narrative": await ask_ai_private(prompt, max_tokens=600, model=AI_FAST_MODEL),
         "model": AI_FAST_MODEL,
         "generated_at": datetime.now(timezone.utc).isoformat(),
     }
@@ -3792,7 +3849,7 @@ async def suggest_playbooks(incident_id: str, ai: bool = False):
                       f"Incident {incident.get('id')}, severity {incident.get('severity')}. "
                       f"Recommended playbook: {top['name']} because {', '.join(top['reasons'])}. "
                       f"Blast radius: {json.dumps(blast)}. Do not invent facts.")
-            result["ai_summary"] = await ask_groq(prompt, max_tokens=180, model=AI_FAST_MODEL)
+            result["ai_summary"] = await ask_ai_private(prompt, max_tokens=180, model=AI_FAST_MODEL)
     else:
         result["summary"] = "No predefined playbook matched this incident. Investigate manually."
     return result
@@ -5021,7 +5078,7 @@ RULES:
 QUESTION: {question}
 
 ANSWER:"""
-    ans = (await ask_groq(prompt, max_tokens=260, model=AI_MODEL) or "").strip()
+    ans = (await ask_ai_private(prompt, max_tokens=260, model=AI_MODEL) or "").strip()
     low = ans.lower()
     if (not ans or ans.startswith("AI provider") or "ai api key is not configured" in low
             or "simulated ai analysis" in low):
