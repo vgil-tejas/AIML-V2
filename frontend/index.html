@@ -3136,32 +3136,18 @@
               <span class="badge critical" style="cursor:pointer;font-size:11px" onclick="nlSetQ('Show all events in the last hour with severity critical or high')">Critical last hour</span>
             </div>
             <div style="display:flex;gap:10px">
-              <input id="nl-input" placeholder="e.g. Show me all SSH brute force from Russia in the last 12 hours…"
+              <input id="nl-input" placeholder="Ask anything, then ask a follow-up — e.g. 'which IP has the most events?' then 'did those IPs do anything critical yesterday?'"
                 style="flex:1;background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:10px 14px;color:var(--text);font-size:13px;outline:none"
                 onkeydown="if(event.key==='Enter')runNLQuery()" />
-              <button class="btn ai" onclick="runNLQuery()" id="nl-run-btn">Run Query</button>
+              <button class="btn ai" onclick="runNLQuery()" id="nl-run-btn">Ask</button>
+              <button class="btn" id="nl-new-btn" onclick="nlNewThread()" title="Clear the conversation and start fresh" style="display:none">New</button>
             </div>
+            <div id="nl-ctx-hint" style="display:none;margin-top:8px;font-size:11px;color:var(--muted)"></div>
           </div>
         </div>
-        <div id="nl-sql-block" style="display:none;margin-bottom:12px">
-          <div style="background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:12px 16px">
-            <div style="font-size:10px;color:var(--muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:1px">Generated SQL <span id="nl-timing" style="color:var(--ok);text-transform:none;letter-spacing:0"></span></div>
-            <pre id="nl-sql-text" style="margin:0;font-size:12px;color:var(--accent);font-family:var(--mono);white-space:pre-wrap;word-break:break-all"></pre>
-          </div>
-        </div>
-        <div id="nl-results" style="display:none" class="card">
-          <div class="ch">
-            <span class="ct" id="nl-result-title">Results</span>
-            <button class="btn" style="font-size:11px;padding:3px 10px" onclick="nlExportCSV()">Export CSV</button>
-          </div>
-          <!-- overflow-x on outer, overflow-y on inner — keeps th position:sticky working in Chrome -->
-          <div class="cb" style="overflow-x:auto;padding:0">
-            <div style="max-height:460px;overflow-y:auto">
-              <div id="nl-table-wrap"></div>
-            </div>
-          </div>
-        </div>
-        <div id="nl-error" style="display:none;padding:12px 16px;background:rgba(255,59,48,.08);border:1px solid var(--danger);border-radius:6px;color:var(--danger);font-size:13px;margin-top:8px"></div>
+        <!-- Conversation thread — every question and its grounded verdict stack here,
+             so follow-ups ("did THOSE IPs…") read naturally like a RAG chat. -->
+        <div id="nl-thread" style="margin-top:14px"></div>
       </div>
 
       <div id="page-ml" class="page">
@@ -6342,26 +6328,88 @@ tr:hover td{background:#161b22}</style></head>
           if (ents.length >= 25) break;
         }
         _nlCtx = { prev_question: q, entities: ents };
+        const h = document.getElementById('nl-ctx-hint');
+        if (h) {
+          if (ents.length) { h.style.display = 'block'; h.textContent = '↪ Follow-up mode: I\'ll remember ' + ents.length + ' entit' + (ents.length === 1 ? 'y' : 'ies') + ' from this answer — ask "did those IPs…", "the same user yesterday", etc.'; }
+          else { h.style.display = 'none'; h.textContent = ''; }
+        }
       } catch (e) { /* context is best-effort */ }
     }
     function nlSetQ(q) {
       document.getElementById('nl-input').value = q;
       runNLQuery();
     }
+    // ── Conversational RAG console ───────────────────────────────────────────
+    // Each question + its grounded verdict is appended as a turn; follow-ups read
+    // the remembered entities so "did THOSE IPs…" resolves to the last answer.
+    const _nlEsc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    function _nlThread() { return document.getElementById('nl-thread'); }
+    function nlNewThread() {
+      _nlThread().innerHTML = ''; _nlCtx = null; _nlLastRows = []; _nlLastCols = [];
+      document.getElementById('nl-new-btn').style.display = 'none';
+      const h = document.getElementById('nl-ctx-hint'); h.style.display = 'none'; h.textContent = '';
+      document.getElementById('nl-input').focus();
+    }
+    function _nlAppendTurn(q) {
+      document.getElementById('nl-new-btn').style.display = '';
+      const t = document.createElement('div');
+      t.className = 'nl-turn'; t.style.marginBottom = '18px';
+      t.innerHTML =
+        '<div style="display:flex;gap:8px;align-items:flex-start;margin-bottom:8px">'
+        + '<span style="flex:none;font-size:10px;font-weight:700;letter-spacing:.5px;color:#a78bfa;background:rgba(167,139,250,.12);border:1px solid rgba(167,139,250,.35);border-radius:5px;padding:3px 7px">YOU</span>'
+        + '<span style="color:var(--text);font-size:13px;line-height:1.5;padding-top:1px">' + _nlEsc(q) + '</span></div>'
+        + '<div class="nl-a card" style="padding:0"><div class="cb" style="padding:14px 16px"><div style="color:var(--muted);font-size:12px">Analysing the question and querying the logs…</div></div></div>';
+      _nlThread().appendChild(t);
+      const ans = t.querySelector('.nl-a');
+      t.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      return ans;
+    }
+    function _nlVerdictHTML(data) {
+      const v = data.verdict || null;
+      const headline = (v && v.headline) || data.answer || '';
+      const hasFind = v && (v.findings || []).length;
+      let h = '';
+      if (headline) h += '<div style="font-size:14px;line-height:1.55;color:var(--text);font-weight:600;margin-bottom:' + (hasFind || (v && v.interpretation) ? '10px' : '0') + '">' + _nlEsc(headline) + '</div>';
+      if (v) {
+        if (hasFind) h += '<ul style="margin:0 0 10px;padding-left:18px;color:var(--text);font-size:13px;line-height:1.6">' + v.findings.map(f => '<li>' + _nlEsc(f) + '</li>').join('') + '</ul>';
+        if (v.interpretation) h += '<div style="margin:0;padding:9px 12px;border-left:3px solid #f0a202;background:rgba(240,162,2,.07);border-radius:6px;font-size:12.5px;line-height:1.55;color:var(--muted)"><b style="color:var(--text)">What this means — </b>' + _nlEsc(v.interpretation) + '</div>';
+      }
+      return '<div style="border-left:3px solid var(--accent);background:rgba(88,166,255,.06);border:1px solid var(--border);border-radius:8px;padding:12px 14px;margin-bottom:12px">' + h + '</div>';
+    }
+    function _nlTableHTML(data) {
+      if (!data.rows || !data.rows.length) return '<div class="empty" style="padding:12px 2px;color:var(--muted);font-size:12px">No matching rows in the logs for this.</div>';
+      let html = '<div style="overflow-x:auto"><div style="max-height:380px;overflow-y:auto"><table class="tbl" style="width:100%;border-collapse:collapse">'
+        + '<thead><tr>' + data.columns.map(c => `<th style="position:sticky;top:0;background:#161b22;z-index:3;white-space:nowrap;padding:8px 12px;color:var(--accent);text-align:left;border-bottom:2px solid var(--border)">${_nlEsc(c)}</th>`).join('') + '</tr></thead><tbody>';
+      for (const row of data.rows) html += '<tr>' + row.map(v => `<td style="white-space:nowrap;max-width:280px;overflow:hidden;text-overflow:ellipsis;padding:6px 12px;border-bottom:1px solid var(--border)" title="${_nlEsc(v)}">${_nlEsc(v) || '—'}</td>`).join('') + '</tr>';
+      return html + '</tbody></table></div></div>';
+    }
+    function _nlSqlHTML(data) {
+      if (!data.sql) return '';
+      const meta = (data.elapsed_ms != null ? ' · ' + data.elapsed_ms + 'ms' : '') + (data.row_count != null ? ' · ' + data.row_count + ' row' + (data.row_count !== 1 ? 's' : '') : '');
+      return '<details style="margin-top:10px"><summary style="cursor:pointer;font-size:11px;color:var(--muted);user-select:none">Show the query that produced this' + meta + '</summary>'
+        + '<pre style="margin:8px 0 0;font-size:11.5px;color:var(--accent);font-family:var(--mono);white-space:pre-wrap;word-break:break-word;background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:10px 12px">' + _nlEsc(data.sql) + '</pre></details>';
+    }
+    function _nlFollowHTML(data) {
+      const f = (data.verdict && data.verdict.follow_ups) || [];
+      if (!f.length) return '';
+      return '<div style="margin-top:12px"><div style="font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--muted);margin-bottom:7px">Ask a follow-up (keeps this investigation\'s context)</div>'
+        + '<div style="display:flex;gap:8px;flex-wrap:wrap">'
+        + f.map(q => '<button class="nl-chip" data-q="' + _nlEsc(q) + '" style="cursor:pointer;font-size:12px;background:var(--bg3);border:1px solid var(--border);border-radius:16px;padding:6px 12px;color:var(--accent);text-align:left">' + _nlEsc(q) + ' →</button>').join('')
+        + '</div></div>';
+    }
+    function _nlWire(ans) {
+      ans.querySelectorAll('.nl-chip').forEach(b => b.addEventListener('click', () => nlSetQ(b.getAttribute('data-q'))));
+      ans.querySelectorAll('[data-retry]').forEach(b => b.addEventListener('click', () => nlSetQ(b.getAttribute('data-retry'))));
+      const csv = ans.querySelector('[data-csv]'); if (csv) csv.addEventListener('click', nlExportCSV);
+    }
     async function runNLQuery() {
       const q = document.getElementById('nl-input').value.trim();
       if (!q) return;
-      const sqlBlock = document.getElementById('nl-sql-block');
-      const resultsEl = document.getElementById('nl-results');
-      const errorEl = document.getElementById('nl-error');
-      const tableWrap = document.getElementById('nl-table-wrap');
+      document.getElementById('nl-input').value = '';
       const btn = document.getElementById('nl-run-btn');
-      sqlBlock.style.display = 'none';
-      errorEl.style.display = 'none';
-      resultsEl.style.display = 'block';
-      tableWrap.innerHTML = '<div style="padding:24px;text-align:center;color:var(--muted)">Generating SQL and running query…</div>';
-      document.getElementById('nl-result-title').textContent = 'Running…';
       btn.disabled = true; btn.textContent = '…';
+      const ans = _nlAppendTurn(q);
+      const body = ans.querySelector('.cb');
       try {
         const resp = await fetch(`${API}/nl/query`, {
           method: 'POST',
@@ -6369,65 +6417,39 @@ tr:hover td{background:#161b22}</style></head>
           body: JSON.stringify({ question: q, context: _nlCtx })
         });
         const data = await resp.json();
-        btn.disabled = false; btn.textContent = 'Run Query';
+        btn.disabled = false; btn.textContent = 'Ask';
         if (!resp.ok) {
-          resultsEl.style.display = 'none';
-          errorEl.style.display = 'block';
-          const _m = String(data.detail || 'Query failed').replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+          const _m = _nlEsc(data.detail || 'Query failed');
           const _hint = resp.status === 503 ? ' The query assistant is busy — wait a moment and retry.' : '';
-          errorEl.innerHTML = _m + _hint + ' <button class="btn" style="font-size:11px;margin-left:8px" onclick="document.getElementById(\'nl-run-btn\').click()">Retry</button>';
-          return;
+          body.innerHTML = '<div style="padding:12px 14px;background:rgba(255,59,48,.08);border:1px solid var(--danger);border-radius:6px;color:var(--danger);font-size:13px">' + _m + _hint + ' <button class="btn" data-retry="' + _nlEsc(q) + '" style="font-size:11px;margin-left:8px">Retry</button></div>';
+          _nlWire(ans); return;
         }
-        // Reference (general security knowledge) — no log rows; show labelled answer.
+        // Reference (general security knowledge) — no log rows; labelled answer only.
         if (data.reference) {
-          const _re = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-          sqlBlock.style.display = 'none';
-          document.getElementById('nl-result-title').textContent = 'Reference';
-          tableWrap.innerHTML =
-            `<div class="nl-answer" style="margin:0 0 10px;padding:12px 14px;border:1px solid var(--border);border-left:3px solid var(--accent);border-radius:8px;background:rgba(88,166,255,.06);line-height:1.5">ℹ ${_re(data.answer)}</div>`
-            + (data.note ? `<div style="color:var(--muted);font-size:12px;padding:0 2px">${_re(data.note)}</div>` : '');
-          return;
+          body.innerHTML = '<div style="padding:12px 14px;border:1px solid var(--border);border-left:3px solid var(--accent);border-radius:8px;background:rgba(88,166,255,.06);line-height:1.5;font-size:13px">ℹ ' + _nlEsc(data.answer) + '</div>'
+            + (data.note ? '<div style="color:var(--muted);font-size:12px;margin-top:6px">' + _nlEsc(data.note) + '</div>' : '');
+          _nlWire(ans); return;
         }
-        sqlBlock.style.display = 'block';
-        document.getElementById('nl-sql-text').textContent = data.sql;
-        document.getElementById('nl-timing').textContent = `· ${data.elapsed_ms}ms · ${data.row_count} row${data.row_count !== 1 ? 's' : ''}`;
         _nlLastCols = data.columns; _nlLastRows = data.rows;
         _nlCaptureCtx(q, data.columns, data.rows);   // remember entities for follow-ups
-        document.getElementById('nl-result-title').textContent = `Results — ${data.row_count} row${data.row_count !== 1 ? 's' : ''}`;
-        // Grounded answer banner — plain-English, written strictly from the rows
-        // below (the evidence table + generated SQL let the analyst verify it).
-        const _nlEsc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-        const answerBanner = data.answer
-          ? `<div class="nl-answer" style="margin:0 0 12px;padding:12px 14px;border:1px solid var(--border);border-left:3px solid var(--accent);border-radius:8px;background:rgba(88,166,255,.06);line-height:1.5">${_nlEsc(data.answer)}</div>`
-          : '';
-        if (!data.rows.length) {
-          tableWrap.innerHTML = answerBanner + '<div class="empty" style="padding:16px">No results returned</div>';
-          return;
-        }
-        let html = answerBanner + '<table class="tbl" style="width:100%;border-collapse:collapse"><thead><tr>'
-          + data.columns.map(c => `<th style="position:sticky;top:0;background:#161b22;z-index:3;white-space:nowrap;padding:8px 12px;color:var(--accent);text-align:left;border-bottom:2px solid var(--border)">${c}</th>`).join('')
-          + '</tr></thead><tbody>';
-        for (const row of data.rows) {
-          html += '<tr>' + row.map(v => `<td style="white-space:nowrap;max-width:280px;overflow:hidden;text-overflow:ellipsis;padding:6px 12px;border-bottom:1px solid var(--border)" title="${String(v??'').replace(/"/g,'&quot;')}">${v??'—'}</td>`).join('') + '</tr>';
-        }
-        html += '</tbody></table>';
-        tableWrap.innerHTML = html;
-        toast('Query complete — ' + data.row_count + ' rows', 'ok');
+        body.innerHTML = _nlVerdictHTML(data) + _nlTableHTML(data) + _nlSqlHTML(data) + _nlFollowHTML(data)
+          + ((data.rows && data.rows.length) ? '<div style="margin-top:12px"><button class="btn" data-csv="1" style="font-size:11px;padding:3px 10px">Export CSV</button></div>' : '');
+        _nlWire(ans);
+        toast(data.row_count != null ? 'Answer ready — ' + data.row_count + ' row' + (data.row_count !== 1 ? 's' : '') : 'Answer ready', 'ok');
       } catch (e) {
-        btn.disabled = false; btn.textContent = 'Run Query';
-        resultsEl.style.display = 'none';
-        errorEl.style.display = 'block';
-        errorEl.innerHTML = 'Could not reach the query engine (' + String(e.message).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c])) + '). <button class="btn" style="font-size:11px;margin-left:8px" onclick="document.getElementById(\'nl-run-btn\').click()">Retry</button>';
+        btn.disabled = false; btn.textContent = 'Ask';
+        body.innerHTML = '<div style="padding:12px 14px;background:rgba(255,59,48,.08);border:1px solid var(--danger);border-radius:6px;color:var(--danger);font-size:13px">Could not reach the query engine (' + _nlEsc(e.message) + '). <button class="btn" data-retry="' + _nlEsc(q) + '" style="font-size:11px;margin-left:8px">Retry</button></div>';
+        _nlWire(ans);
       }
     }
     function nlExportCSV() {
       if (!_nlLastCols.length) return;
       let csv = _nlLastCols.join(',') + '\n';
       for (const row of _nlLastRows) {
-        csv += row.map(v => `"${String(v??'').replace(/"/g,'""')}"`).join(',') + '\n';
+        csv += row.map(v => `"${String(v ?? '').replace(/"/g, '""')}"`).join(',') + '\n';
       }
       const a = document.createElement('a');
-      a.href = URL.createObjectURL(new Blob([csv], {type:'text/csv'}));
+      a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
       a.download = 'soc_query_' + Date.now() + '.csv';
       a.click();
     }

@@ -2308,10 +2308,17 @@ addEventListener('resize', () => { initMesh(); if (REDUCED) drawMesh(); });
 
     const cols = r.columns || [], rows = r.rows || [];
     _captureCtx(q, cols, rows);   // remember entities for the next follow-up
+    const v = r.verdict || null;
+    const fuId = 'con-fu-' + Date.now();
     let html = '';
-    // The grounded answer, written STRICTLY from the rows below — headline first.
-    if (r.answer)
-      html += `<div class="a nl-answer"><span class="res" style="color:var(--accent)">▸ ${esc(r.answer)}</span></div>`;
+    // The grounded answer, written STRICTLY from the rows below — headline first,
+    // then concrete findings and what it means, so it reads as a verdict not a dump.
+    if (v && v.headline) html += `<div class="a nl-answer"><span class="res" style="color:var(--accent)">▸ ${esc(v.headline)}</span></div>`;
+    else if (r.answer) html += `<div class="a nl-answer"><span class="res" style="color:var(--accent)">▸ ${esc(r.answer)}</span></div>`;
+    if (v && (v.findings || []).length)
+      html += `<ul style="margin:6px 0 2px;padding-left:18px;line-height:1.55;font-size:12.5px">${v.findings.map(f => `<li>${esc(f)}</li>`).join('')}</ul>`;
+    if (v && v.interpretation)
+      html += `<div class="a" style="margin-top:6px;padding:7px 10px;border-left:2px solid var(--warn,#f0a202);background:rgba(240,162,2,.07);border-radius:5px;font-size:12px;opacity:.9"><b>what this means — </b>${esc(v.interpretation)}</div>`;
     if (r.sql) html += `<div class="sql">${esc(r.sql)}</div>`;
     html += `<div class="a"><span class="res">→ ${num(r.row_count || 0)} row${(r.row_count === 1) ? '' : 's'} · ${num(r.elapsed_ms || 0)}ms · evidence below</span></div>`;
     if (rows.length) {
@@ -2325,7 +2332,13 @@ addEventListener('resize', () => { initMesh(); if (REDUCED) drawMesh(); });
     } else {
       html += `<div class="a">No rows matched — nothing in the vault answers that.</div>`;
     }
+    if (v && (v.follow_ups || []).length)
+      html += `<div id="${fuId}" style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">`
+        + v.follow_ups.map(f => `<button class="con-fu" data-q="${esc(f)}" style="cursor:pointer;font-size:11px;background:var(--bg3,#161b22);border:1px solid var(--border,#30363d);border-radius:14px;padding:4px 10px;color:var(--accent)">${esc(f)} →</button>`).join('')
+        + `</div>`;
     box.insertAdjacentHTML('beforeend', html);
+    document.getElementById(fuId)?.querySelectorAll('.con-fu').forEach(b =>
+      b.addEventListener('click', () => { cin.value = b.getAttribute('data-q'); askConsole(); }));
     box.scrollTop = box.scrollHeight;
   }
   runBtn.onclick = askConsole;

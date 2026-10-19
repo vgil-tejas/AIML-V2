@@ -4844,6 +4844,162 @@ def _nl_local_sentence(columns: list, rows: list, n: int, limited: bool, ci: dic
     return " ".join(bits) + " Full rows in the evidence table below."
 
 
+_PRIV_ACCOUNTS = ("administrator", "nt authority\\system", "system", "root", "admin",
+                  "sa", "svc", "svc_admin", "service", "domain admins")
+
+
+def _is_ip_like(v) -> bool:
+    s = str(v or "")
+    parts = s.split(".")
+    if len(parts) != 4:
+        return False
+    try:
+        return all(0 <= int(p) <= 255 for p in parts)
+    except Exception:
+        return False
+
+
+def _is_private_ip(v) -> bool:
+    s = str(v or "")
+    if s.startswith(("10.", "192.168.", "127.", "169.254.")):
+        return True
+    if s.startswith("172."):
+        try:
+            return 16 <= int(s.split(".")[1]) <= 31
+        except Exception:
+            return False
+    return False
+
+
+def _nl_verdict(question: str, columns: list, rows: list, row_count: int,
+                limited: bool, headline_override: str = "") -> dict:
+    """Structured, ON-PREMISE verdict built strictly from the returned rows so the
+    analyst gets understanding, not just a table: a headline, concrete findings,
+    a SOC interpretation (what it means / what it is NOT), and follow-up questions
+    wired to the real leaders. No LLM — it can't 503 and can't invent a finding.
+    Always returns a dict; never raises."""
+    try:
+        ci = {c: i for i, c in enumerate(columns)}
+        n = len(rows)
+        headline = headline_override or _nl_local_sentence(columns, rows, n, limited, ci)
+        if not rows:
+            return {"headline": headline, "findings": [], "interpretation": "", "follow_ups": []}
+        findings: list = []
+        interp = ""
+        follow: list = []
+
+        measure = next((c for c in columns if c.lower() in _MEASURE_COLS), None)
+        dim = None
+        for cand in ("src_ip", "dst_ip", "ip", "entity", "agent", "host", "username",
+                     "account", "user", "country", "dst_port", "rule", "threat_type"):
+            if cand in ci and cand != measure:
+                dim = cand
+                break
+        if dim is None and columns:
+            dim = next((c for c in columns if c != measure), columns[0])
+
+        def _privileged_present():
+            privs = []
+            for ucol in ("username", "account", "user", "target_user"):
+                if ucol in ci:
+                    for r in rows:
+                        u = str(r[ci[ucol]] or "").strip()
+                        if u and u.lower() in _PRIV_ACCOUNTS and u not in privs:
+                            privs.append(u)
+            return privs
+
+        # ───── aggregate / ranked result (has a measure column) ─────
+        if measure and dim and dim in ci and not headline_override:
+            mi, di = ci[measure], ci[dim]
+            pairs = [(str(r[di]), r[mi]) for r in rows if r[di] not in (None, "", "—")]
+            nums = []
+            for _, m in pairs:
+                try:
+                    nums.append(float(m))
+                except Exception:
+                    nums.append(0.0)
+            total = sum(nums) or 0.0
+            if pairs and total > 0:
+                findings.append(f"{pairs[0][0]} leads with {_num(pairs[0][1])} {measure} — "
+                                f"{round(100.0 * nums[0] / total)}% of the {len(pairs)} shown.")
+                if len(nums) >= 3:
+                    findings.append(f"The top 3 carry {round(100.0 * sum(nums[:3]) / total)}% "
+                                    f"of the {measure} in this result.")
+            if dim in ("src_ip", "dst_ip", "ip", "entity"):
+                intn = [v for v, _ in pairs if _is_private_ip(v)]
+                ext = [v for v, _ in pairs if _is_ip_like(v) and not _is_private_ip(v)]
+                if ext:
+                    findings.append(f"{len(intn)} internal host(s), {len(ext)} external — external: "
+                                    + ", ".join(ext[:4]) + ("…" if len(ext) > 4 else "") + ".")
+                elif intn:
+                    findings.append(f"All {len(intn)} are internal (RFC1918) hosts — "
+                                    "no external addresses among the leaders.")
+            privs = _privileged_present()
+            if privs:
+                findings.append("Privileged / service accounts appear here: " + ", ".join(privs[:5]) + ".")
+            ml = measure.lower()
+            if ml in ("events", "count", "cnt", "c", "total", "hits", "n"):
+                interp = ("High event volume on its own is normal activity — a busy server, a scanner, "
+                          "or a log-forwarder — not an attack. Volume is NOT the same as risk. To tell "
+                          "whether any of these is actually a threat, pivot to severity, failed logins, "
+                          "or the entity-risk score below.")
+            elif "fail" in ml or "attempt" in ml:
+                interp = ("These are failed/attempt counts — a high count can mean brute force or a "
+                          "misconfiguration. The key question is whether any attempt then SUCCEEDED.")
+            if pairs:
+                lead = pairs[0][0]
+                follow = [f"What severity levels do {lead}'s events have in the last 24 hours?",
+                          f"Did {lead} have any critical or high severity events yesterday, with which usernames?",
+                          "Show the entity-risk score for the top hosts in this list"]
+
+        # ───── row-level result (individual events) ─────
+        else:
+            from collections import Counter
+            if "severity" in ci:
+                c = Counter(str(r[ci["severity"]]).lower() for r in rows
+                            if r[ci["severity"]] not in (None, "", "—"))
+                if c:
+                    findings.append("Severity mix: " + ", ".join(f"{k} {v}" for k, v in c.most_common(4)) + ".")
+                    hi = c.get("critical", 0) + c.get("high", 0)
+                    interp = (f"{hi} of these are high or critical — triage those first."
+                              if hi else "Nothing in this result is high or critical severity.")
+            for col, lbl in (("src_ip", "source IP"), ("username", "account"), ("agent", "host"),
+                             ("threat_type", "threat type")):
+                if col in ci:
+                    c = Counter(str(r[ci[col]]) for r in rows if r[ci[col]] not in (None, "", "—"))
+                    if c:
+                        findings.append(f"Top {lbl}(s): "
+                                        + ", ".join(f"{k} ({v})" for k, v in c.most_common(3)) + ".")
+                if len(findings) >= 5:
+                    break
+            for tcol in ("time", "ts", "@timestamp", "last_seen"):
+                if tcol in ci:
+                    times = [str(r[ci[tcol]]) for r in rows if r[ci[tcol]] not in (None, "", "—")]
+                    if times:
+                        findings.append(f"Spanning {min(times)} → {max(times)}.")
+                    break
+            ent = None
+            for col in ("src_ip", "username", "agent", "dst_ip", "entity"):
+                if col in ci:
+                    for r in rows:
+                        v = r[ci[col]]
+                        if v not in (None, "", "—"):
+                            ent = str(v)
+                            break
+                if ent:
+                    break
+            if ent:
+                follow = [f"Give me everything about {ent}",
+                          f"Did {ent} do any malicious activity in the last 7 days?",
+                          f"Which accounts and hosts are linked to {ent}?"]
+
+        return {"headline": headline, "findings": findings[:5],
+                "interpretation": interp, "follow_ups": follow[:4]}
+    except Exception:
+        return {"headline": headline_override or "", "findings": [],
+                "interpretation": "", "follow_ups": []}
+
+
 async def _nl_answer(question: str, columns: list, rows: list, row_count: int, sql: str = "") -> str:
     """Write a short, plain-English answer GROUNDED STRICTLY in the rows the store
     returned — the model never answers from memory and never sees data it must
@@ -5204,7 +5360,29 @@ async def _nl_risk_answer(question: str) -> dict:
               f"not a keyword match), the highest-risk {label} are: "
               + "; ".join(_one(r) for r in ranking[:3])
               + f". Full top {len(rows)} below — investigate from the top.")
-    return {"answer": answer,
+    # Tailored verdict so the analyst UNDERSTANDS the ranking (not just a table):
+    # why #1 is #1, how the band is spread, and concrete next questions.
+    from collections import Counter as _Counter
+    top = ranking[0]
+    bands = _Counter((r.get("band") or "—") for r in ranking)
+    v_findings = [
+        f"{top['entity']} is highest at risk {top['score']}/100 ({top['band']}), "
+        f"driven by {top['critical']} critical event(s) out of {_num(top['events'])} total.",
+        "Risk is severity-weighted and time-decayed — a host with fewer but critical, recent "
+        "events outranks a noisy host with only low-severity volume.",
+        "Band spread: " + ", ".join(f"{k} {v}" for k, v in bands.most_common()) + ".",
+    ]
+    lead = top["entity"]
+    v_follow = [
+        f"Give me everything about {lead}",
+        f"Did {lead} do any malicious activity yesterday, and with which usernames?",
+        f"List the last two critical events for {lead}",
+    ]
+    verdict = {"headline": answer, "findings": v_findings,
+               "interpretation": ("Investigate top-down: the score already blends severity, recency and "
+                                  "concentration, so #1 is the best use of the next analyst-hour."),
+               "follow_ups": v_follow}
+    return {"answer": answer, "verdict": verdict,
             "sql": f"entity-risk model · dimension={dim} · 72h half-life, 30d window",
             "columns": cols, "rows": rows, "row_count": len(rows),
             "elapsed_ms": elapsed, "ai_generated": False}
@@ -5477,6 +5655,9 @@ async def nl_query(payload: dict):
         # SQL and the raw rows returned alongside so the analyst can verify it.
         result["answer"] = await _nl_answer(
             question, result["columns"], result["rows"], result["row_count"], result["sql"])
+        result["verdict"] = _nl_verdict(
+            question, result["columns"], result["rows"], result["row_count"],
+            result["row_count"] >= 200)
         result["ai_generated"] = ai_generated
         return result
 
