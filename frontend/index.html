@@ -6354,7 +6354,9 @@ tr:hover td{background:#161b22}</style></head>
         if (!resp.ok) {
           resultsEl.style.display = 'none';
           errorEl.style.display = 'block';
-          errorEl.textContent = data.detail || 'Query failed';
+          const _m = String(data.detail || 'Query failed').replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+          const _hint = resp.status === 503 ? ' The query assistant is busy — wait a moment and retry.' : '';
+          errorEl.innerHTML = _m + _hint + ' <button class="btn" style="font-size:11px;margin-left:8px" onclick="document.getElementById(\'nl-run-btn\').click()">Retry</button>';
           return;
         }
         // Reference (general security knowledge) — no log rows; show labelled answer.
@@ -6395,7 +6397,7 @@ tr:hover td{background:#161b22}</style></head>
         btn.disabled = false; btn.textContent = 'Run Query';
         resultsEl.style.display = 'none';
         errorEl.style.display = 'block';
-        errorEl.textContent = 'Request failed: ' + e.message;
+        errorEl.innerHTML = 'Could not reach the query engine (' + String(e.message).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c])) + '). <button class="btn" style="font-size:11px;margin-left:8px" onclick="document.getElementById(\'nl-run-btn\').click()">Retry</button>';
       }
     }
     function nlExportCSV() {

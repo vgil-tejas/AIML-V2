@@ -110,7 +110,15 @@ services:
       # Every AI feature actually uses the FAST model — forward it so an on-prem /
       # self-hosted LLM install can point it at their own model, not a Groq default.
       - AI_FAST_MODEL=${AI_FAST_MODEL:-openai/gpt-oss-20b}
+      # Last-resort model tried after primary + fast both fail (e.g. both retired).
+      - AI_FALLBACK_MODEL=${AI_FALLBACK_MODEL:-}
       - AI_BASE_URL=${AI_BASE_URL:-https://api.groq.com/openai/v1/chat/completions}
+      # LLM resilience: per-attempt read timeout (s) and transient-error retries.
+      - AI_TIMEOUT=${AI_TIMEOUT:-45}
+      - AI_MAX_RETRIES=${AI_MAX_RETRIES:-2}
+      # SOC Query privacy: OFF = grounded answer written on-premise, no data leaves
+      # the box. Set to 1 to also get LLM phrasing (receives only sanitised facts).
+      - SOC_AI_NARRATION=${SOC_AI_NARRATION:-}
       - LOG_LEVEL=INFO
       - CLICKHOUSE_ENABLED=${CLICKHOUSE_ENABLED:-true}
       - CLICKHOUSE_HOST=clickhouse

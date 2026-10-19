@@ -199,7 +199,20 @@ AI_MODEL      = os.getenv("AI_MODEL", os.getenv("GROQ_MODEL", "openai/gpt-oss-12
 # Fast model for the high-volume path (SQL gen, explanations). Groq retires models
 # periodically — pin to a currently-served id and override via .env if it changes.
 AI_FAST_MODEL = os.getenv("AI_FAST_MODEL", "openai/gpt-oss-20b")
+# Last-resort model tried after the primary + fast model both fail (e.g. both
+# retired). Empty by default; set in .env to a currently-served id.
+AI_FALLBACK_MODEL = os.getenv("AI_FALLBACK_MODEL", "")
 AI_BASE_URL = os.getenv("AI_BASE_URL", os.getenv("GROQ_URL", "https://api.groq.com/openai/v1/chat/completions"))
+AI_TIMEOUT      = float(os.getenv("AI_TIMEOUT", "45"))       # read timeout (s) per attempt
+AI_MAX_RETRIES  = int(os.getenv("AI_MAX_RETRIES", "2"))      # retries per model on transient errors
+# SOC Query narration: OFF by default = the grounded answer is written ON-PREMISE
+# (deterministic, no data leaves the box). Set SOC_AI_NARRATION=1 to also get an
+# LLM-phrased version, which receives only SANITISED facts (IPs/users redacted).
+SOC_AI_NARRATION = os.getenv("SOC_AI_NARRATION", "").lower() in ("1", "true", "yes", "on")
+try:
+    import ai_safety                                          # outbound PII sanitiser
+except Exception:
+    ai_safety = None  # type: ignore
 BASELINE_TTL  = 60 * 60 * 24 * 90
 MIN_EVENTS_FOR_BASELINE = 10
 VOLUME_SPIKE_MULTIPLIER = 3
@@ -318,47 +331,83 @@ def _intel_set(ip: str, data: dict, ttl: int = 900):
     _intel_cache[ip] = (time.time() + ttl, data)
 
 
+_AI_RETRYABLE = {408, 409, 425, 429, 500, 502, 503, 504}
+_AI_SYS_PROMPT = (
+    "You are CyberSentinel AI, the analysis engine of the CyberSentinel security "
+    "platform. Never mention Wazuh, OpenSearch, ClickHouse, Grafana, Groq, Llama "
+    "or any other vendor/tool/model name; say 'CyberSentinel', 'the platform', "
+    "'the sensor' or 'the log store' instead.")
+
+
+def _ai_model_chain(primary: str | None) -> list[str]:
+    """Ordered, de-duped list of models to try: the requested one, then the fast
+    model, then the configured fallback. A retired model (404) advances to the
+    next automatically."""
+    seen, chain = set(), []
+    for m in (primary or AI_MODEL, AI_FAST_MODEL, AI_FALLBACK_MODEL):
+        m = (m or "").strip()
+        if m and m not in seen:
+            seen.add(m)
+            chain.append(m)
+    return chain or [AI_MODEL]
+
+
 async def ask_groq(prompt: str, max_tokens: int = 700, model: str | None = None) -> str:
+    """Call the external LLM with bounded retries, exponential backoff and model
+    fallback. Returns the completion text, or a sentinel string starting with
+    'AI provider' on failure (callers detect that prefix and fall back locally —
+    we NEVER fabricate an answer). The prompt must already be sanitised by the
+    caller; nothing here assumes it can send raw data safely."""
     if not AI_API_KEY:
-        return "AI API key is not configured. Add the AI_API_KEY to .env and restart the backend."
-    use_model = model or AI_MODEL
-    try:
-        async with httpx.AsyncClient(timeout=60) as client:
-            resp = await client.post(
-                AI_BASE_URL,
-                headers={
-                    "Authorization": f"Bearer {AI_API_KEY}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "model": use_model,
-                    "messages": [
-                        # White-label guard: analyst-facing text must never name
-                        # underlying vendors/tools; the product is CyberSentinel.
-                        {"role": "system", "content":
-                         "You are CyberSentinel AI, the analysis engine of the "
-                         "CyberSentinel security platform. Never mention Wazuh, "
-                         "OpenSearch, ClickHouse, Grafana, Groq, Llama or any "
-                         "other vendor/tool/model name; say 'CyberSentinel', "
-                         "'the platform', 'the sensor' or 'the log store' instead."},
-                        {"role": "user", "content": prompt},
-                    ],
-                    "max_tokens": max_tokens,
-                    "temperature": 0.2,
-                },
-            )
-            data = resp.json()
-            if resp.status_code >= 400 or "choices" not in data:
-                msg = data.get("error", {}).get("message", f"HTTP {resp.status_code}")
-                if "restricted" in msg.lower() or "billing" in msg.lower() or "limit" in msg.lower():
-                    if "WHAT THIS ALERT MEANS" in prompt:
-                        return "**Simulated AI Analysis (Account Restricted):**\n\nWHAT THIS ALERT MEANS:\nThis represents a significant behavioral deviation from the IP's established baseline.\n\nWHY IT IS HIGH:\nThis activity matches known adversary tactics such as lateral movement or credential access.\n\nWHAT TO DO:\nInvestigate the IP trail, check for successful logins, and consider immediate blocking if the behavior persists."
-                    else:
-                        return "**Simulated AI Analysis (Account Restricted):**\n\nWHY THIS SCORE:\nThe Isolation Forest model detected this IP as an outlier compared to the normal traffic patterns.\n\nWHAT THE ANOMALY SCORE MEANS:\nA negative score indicates the behavior is highly unusual. The baseline deviations and threat indicators heavily influenced this result.\n\nCONFIDENCE:\nHigh. Multiple corroborating signals confirm this is not normal network activity."
-                return f"AI provider error: {msg}"
-            return data["choices"][0]["message"]["content"]
-    except Exception as e:
-        return f"AI provider unavailable: {e}"
+        return "AI provider unavailable: API key is not configured (set AI_API_KEY)."
+    last = "no attempt made"
+    timeout = httpx.Timeout(AI_TIMEOUT, connect=5.0)
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        for use_model in _ai_model_chain(model):
+            for attempt in range(AI_MAX_RETRIES + 1):
+                try:
+                    resp = await client.post(
+                        AI_BASE_URL,
+                        headers={"Authorization": f"Bearer {AI_API_KEY}",
+                                 "Content-Type": "application/json"},
+                        json={"model": use_model,
+                              "messages": [{"role": "system", "content": _AI_SYS_PROMPT},
+                                           {"role": "user", "content": prompt}],
+                              "max_tokens": max_tokens, "temperature": 0.2},
+                    )
+                except (httpx.TimeoutException, httpx.TransportError) as e:
+                    last = f"{use_model}: network/timeout ({type(e).__name__})"
+                    if attempt < AI_MAX_RETRIES:
+                        await asyncio.sleep(0.5 * (2 ** attempt)); continue
+                    break  # exhausted this model -> try next
+                if resp.status_code == 200:
+                    try:
+                        data = resp.json()
+                    except Exception:
+                        data = {}
+                    if data.get("choices"):
+                        return data["choices"][0]["message"]["content"]
+                    last = f"{use_model}: malformed response"
+                    break
+                try:
+                    emsg = resp.json().get("error", {}).get("message", f"HTTP {resp.status_code}")
+                except Exception:
+                    emsg = f"HTTP {resp.status_code}"
+                last = f"{use_model}: {emsg}"
+                low = emsg.lower()
+                # Model retired / unknown -> jump straight to the next model.
+                if resp.status_code == 404 or ("model" in low and any(
+                        t in low for t in ("decommission", "not found", "does not exist", "deprecat"))):
+                    break
+                # Transient -> back off and retry the SAME model.
+                if resp.status_code in _AI_RETRYABLE and attempt < AI_MAX_RETRIES:
+                    await asyncio.sleep(0.5 * (2 ** attempt)); continue
+                # Hard client errors (bad request / auth) won't improve on retry
+                # or on another model — stop now.
+                if resp.status_code in (400, 401, 403):
+                    return f"AI provider error: {emsg}"
+                break  # non-retryable for this model -> try next
+    return f"AI provider unavailable: {last}"
 
 # -- constants -----------------------------------------------------------------
 
@@ -4659,6 +4708,39 @@ def _bound_rowlevel_scan(sql: str, anchor: Optional[str]) -> str:
     return f"{head.rstrip()} {joiner} {floor} {tail}"
 
 
+def _nl_local_sentence(columns: list, rows: list, n: int, limited: bool, ci: dict) -> str:
+    """Deterministic grounded answer written on-premise from the returned rows —
+    an honest count plus the top values of the useful columns. No LLM, so it can
+    never 503 or invent a finding, and no data leaves the box."""
+    from collections import Counter
+    n_txt = "At least 200" if limited else str(n)
+    bits = [f"{n_txt} matching record(s)."]
+
+    def _top(col: str, label: str, k: int = 3):
+        if col not in ci:
+            return None
+        c = Counter()
+        for r in rows:
+            v = r[ci[col]]
+            if v in (None, "", "—"):
+                continue
+            c[str(v)] += 1
+        if not c:
+            return None
+        return f"{label}: " + ", ".join(f"{val} ({cnt})" for val, cnt in c.most_common(k))
+
+    for col, label in (("severity", "severity"), ("threat_type", "threat"),
+                       ("src_ip", "top sources"), ("agent", "agents"),
+                       ("username", "accounts"), ("country", "countries"),
+                       ("dst_port", "ports")):
+        s = _top(col, label)
+        if s:
+            bits.append(s)
+        if len(bits) >= 5:
+            break
+    return " ".join(bits) + " See the evidence table below for the full rows."
+
+
 async def _nl_answer(question: str, columns: list, rows: list, row_count: int, sql: str = "") -> str:
     """Write a short, plain-English answer GROUNDED STRICTLY in the rows the store
     returned — the model never answers from memory and never sees data it must
@@ -4747,26 +4829,40 @@ QUESTION: {question}
 {data_block}
 
 ANSWER:"""
+    # Deterministic, ON-PREMISE answer built from the rows we just fetched. Real
+    # values appear here because this is shown to the operator locally and never
+    # leaves the box. This is the DEFAULT — the AI is not in the evidence path.
+    local = _nl_local_sentence(columns, rows, n, limited, ci)
+    if not SOC_AI_NARRATION:
+        return local
+    # Opt-in LLM phrasing: send a SANITISED copy of the prompt (IPs/users/emails
+    # swapped for decoys) and restore the real values in the reply. If anything
+    # goes wrong, fall back to the local answer — never block, never fabricate.
+    safe_prompt, pmap = (ai_safety.sanitize_for_ai(prompt) if ai_safety else (prompt, {}))
     try:
-        # Use the STRONGER model for the narration: it is a single call, and
-        # grounding accuracy (right count, never dropping a row) matters far more
-        # here than the speed of the fast model.
-        ans = await ask_groq(prompt, max_tokens=320, model=AI_MODEL)
+        ans = await ask_groq(safe_prompt, max_tokens=320, model=AI_MODEL)
     except Exception:
         ans = ""
     ans = (ans or "").strip()
     low = ans.lower()
-    if (not ans or ans.startswith("AI provider") or "simulated ai analysis" in low
-            or "ai api key is not configured" in low):
-        # Never block on the AI — a truthful count is better than a guess.
-        n_txt = "at least 200" if limited else str(n)
-        return f"{n_txt} matching record(s) found — see the evidence below."
+    if not ans or ans.startswith("AI provider") or "simulated ai analysis" in low:
+        return local
+    if ai_safety and pmap:
+        ans = ai_safety.restore_from_ai(ans, pmap)
     return ans
 
 
 async def _nl_sql_from_ai(question: str, prior_sql: str = "", error: str = "") -> str:
     """Fallback for free-form (non-preset) questions: ask Groq to write the SQL.
-    Pass prior_sql+error to request a corrected query after a failed execution."""
+    Pass prior_sql+error to request a corrected query after a failed execution.
+
+    PRIVACY: the question / prior SQL / DB error can carry real IPs, usernames and
+    emails. We redact those to decoys before the call and restore them in the SQL
+    the model returns, so the provider only ever sees placeholders while the query
+    still filters on the true value."""
+    _pmap: dict = {}
+    if ai_safety:
+        (question, prior_sql, error), _pmap = ai_safety.sanitize_many([question, prior_sql, error])
     fix_note = ""
     if prior_sql and error:
         fix_note = f"""
@@ -4867,6 +4963,10 @@ SQL:"""
     sql = sql.rstrip(";").strip()
     if not sql.upper().startswith("SELECT"):
         raise HTTPException(400, "AI returned an unexpected response. Try rephrasing your question.")
+    # Restore the real IPs/users/emails the model echoed back as decoys, so the
+    # query filters on the true values (the provider never saw them).
+    if ai_safety and _pmap:
+        sql = ai_safety.restore_from_ai(sql, _pmap)
     # Anchor any relative time window to the newest event so historical/lagging
     # data still returns rows (a bare "today" on 3-day-old data would be empty),
     # inlined as a literal so ClickHouse can prune daily partitions on 30M rows,
