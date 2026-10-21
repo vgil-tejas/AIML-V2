@@ -6,7 +6,7 @@
   <title>Logs Explorer · CyberSentinel</title>
   <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,100..900&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="app.css">
-  <link rel="stylesheet" href="theme.css?v=46-godmap">
+  <link rel="stylesheet" href="theme.css?v=47-softnav">
   <style>
     .lbar { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; align-items: center; }
     .lbar input { background: rgba(8,13,23,.8); border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; color: var(--text); font-family: var(--mono); font-size: 12px; outline: none; min-width: 220px; }
@@ -44,7 +44,10 @@
 
 <script>window.PAGE = 'logs'; window.PAGE_TITLE = 'Logs Explorer';</script>
 <script src="shell.js"></script>
-<script>
+<script data-page>
+/* IIFE so this re-runs cleanly on every soft (pjax) navigation without
+   redeclaring globals; handlers used by inline onclick are exported to window. */
+(function () {
 const API = '/api';
 const esc = v => String(v == null ? '' : v).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const num = v => Number(v || 0).toLocaleString();
@@ -113,6 +116,8 @@ async function load() {
   render();
 }
 load();
+Object.assign(window, { goTrail, showRaw });
+})();
 </script>
 </body>
 </html>

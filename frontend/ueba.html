@@ -6,7 +6,7 @@
   <title>UEBA · CyberSentinel</title>
   <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,100..900&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="app.css">
-  <link rel="stylesheet" href="theme.css?v=46-godmap">
+  <link rel="stylesheet" href="theme.css?v=47-softnav">
 </head>
 <body>
 <div class="shell" id="shell">
@@ -60,7 +60,10 @@
 
 <script>window.PAGE = 'ueba'; window.PAGE_TITLE = 'UEBA — Users & Entities';</script>
 <script src="shell.js"></script>
-<script>
+<script data-page>
+/* IIFE so this re-runs cleanly on every soft (pjax) navigation without
+   redeclaring globals; handlers used by inline onclick are exported to window. */
+(function () {
 const API = '/api';
 const escapeHTML = v => String(v == null ? '' : v).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const esc = escapeHTML;
@@ -155,6 +158,8 @@ async function loadUEBA() {
   }
 }
 loadUEBA();
+Object.assign(window, { goTrail, goTrailEntity, showRawLogs, loadUEBA });
+})();
 </script>
 </body>
 </html>

@@ -6,7 +6,7 @@
   <title>Incident Triage · CyberSentinel</title>
   <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,100..900&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="app.css">
-  <link rel="stylesheet" href="theme.css?v=46-godmap">
+  <link rel="stylesheet" href="theme.css?v=47-softnav">
 </head>
 <body>
 <div class="shell" id="shell">
@@ -63,7 +63,10 @@
 
 <script>window.PAGE = 'incidents'; window.PAGE_TITLE = 'Incident Triage';</script>
 <script src="shell.js"></script>
-<script>
+<script data-page>
+/* IIFE so this re-runs cleanly on every soft (pjax) navigation without
+   redeclaring globals; handlers used by inline onclick are exported to window. */
+(function () {
 const API = '/api';
 let OPERATOR = 'analyst';
 const esc = v => String(v == null ? '' : v).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -265,6 +268,8 @@ document.getElementById('dim-seg').addEventListener('click', e => {
 (async () => {
   try { const r = await get('/auth/me'); if (r && r.user) OPERATOR = r.user; } catch (_) {}
   loadEntityRisk(); loadAttackCoverage(); loadIncidents(); loadCases();
+})();
+Object.assign(window, { goTrail, goKillChain, riskAINarrative, showRawLogs, loadEntityRisk, toggleRiskWhy, loadAttackCoverage, loadIncidents, incidentNarrative, intelHub, openCaseFor, loadCases, caseSet, caseAudit });
 })();
 </script>
 </body>

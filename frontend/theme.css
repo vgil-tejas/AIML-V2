@@ -7,6 +7,17 @@
    allowed to compete with the accent — they carry meaning, so they earn it.
    ============================================================================ */
 
+/* ── Cross-document navigation: smooth crossfade instead of a white flash ──
+   Opt into the View Transitions API for same-origin full-page navigations
+   (index <-> split pages). Supported browsers morph old->new; others just
+   navigate as before. Pure CSS, no JS, no behaviour change. */
+@view-transition { navigation: auto; }
+::view-transition-old(root) { animation-duration: .18s; }
+::view-transition-new(root) { animation-duration: .18s; }
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-old(root), ::view-transition-new(root) { animation: none; }
+}
+
 /* ── Design tokens ─────────────────────────────────────────────────────── */
 :root {
   /* Neutral ramp — Linear's near-black canvas. Opaque, not glass. */
