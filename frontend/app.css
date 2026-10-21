@@ -2178,7 +2178,13 @@
 
     /* ── The nav list ──────────────────────────────────────────────────── */
     .rail .nav.spine {
-      position: relative; flex: 1; gap: 0 !important;
+      position: relative; gap: 0 !important;
+      /* flex + min-height:0 both !important: theme.css loads AFTER app.css on the
+         split pages and sets `.sidebar .nav.spine{flex:1 0 auto}` (shrink:0), which
+         stops the list from shrinking so overflow-y:auto never engages and the
+         lower nav items become unreachable. Force shrink + min-height:0 so the
+         list scrolls inside the fixed-height rail. */
+      flex: 1 1 0 !important; min-height: 0 !important;
       padding: 14px 2px 18px !important;
       overflow-y: auto; overflow-x: hidden; scrollbar-width: none;
     }
