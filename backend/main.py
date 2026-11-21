@@ -5009,6 +5009,22 @@ def _known_entity_set(col: str):
     return result
 
 
+def _entity_is_real(field: str, value: str) -> bool:
+    """True if `value` is actually a known account/host, so routing the question to
+    that entity's dossier is warranted. Guards against a mis-parsed question word
+    (atempts, hue, for, ...) being treated as an entity. IPs are always allowed (the
+    dossier reports absence cheaply via the src_ip sort key); a column too
+    high-cardinality to enumerate can't be refuted, so allow it too."""
+    col = {"username": "username", "host": "agent", "ip": "src_ip"}.get(field)
+    if col in (None, "src_ip"):
+        return True
+    known = _known_entity_set(col)
+    if known is None:
+        return True
+    lv = value.lower()
+    return any(lv == k.lower() for k in known)
+
+
 def _extract_filters(sql: str) -> list:
     """Pull (col, op, value) predicates on known low-cardinality columns:
       - `col = 'v'`              -> ('eq', 'v')
@@ -5073,6 +5089,20 @@ def _diagnose_empty(sql: str) -> list:
         problems.append({"col": col, "value": v, "suggestions": sugg,
                          "entity": col in _DIAG_ENTITY_COLS})
     return problems
+
+
+def _result_is_empty(result: dict) -> bool:
+    """Empty for self-correction purposes: no rows, OR a single aggregate row that is
+    all zero/null (a `SELECT count()` with no matches returns [[0]], row_count==1 —
+    NOT 0 — so a dead filter in a count query would otherwise slip past)."""
+    if not result:
+        return True
+    if result.get("row_count", 0) == 0:
+        return True
+    rows = result.get("rows") or []
+    if len(rows) == 1 and rows[0]:
+        return all(v in (0, 0.0, None, "0", "") for v in rows[0])
+    return False
 
 
 def _strip_predicate(sql: str, col: str, value: str) -> str:
@@ -6038,11 +6068,11 @@ def _looks_entity_dossier(q: str):
         ip = m.group(0)
         if all(0 <= int(p) <= 255 for p in ip.split(".")):
             return ("ip", ip)
-    m = re.search(r"\b(?:user|username|account|login)\s+[\"']?([A-Za-z0-9._\\\-]{2,64})", q, re.I)
-    if m and m.group(1).lower() not in _DOSSIER_STOP:
+    m = re.search(r"\b(?:user|username|account|logged in as)\s+[\"']?([A-Za-z0-9._\\\-]{2,64})", q, re.I)
+    if m and m.group(1).lower() not in _DOSSIER_STOP and _entity_is_real("username", m.group(1)):
         return ("username", m.group(1))
     m = re.search(r"\b(?:host|agent|server|machine|endpoint|workstation)\s+[\"']?([A-Za-z0-9._\\\-]{2,64})", q, re.I)
-    if m and m.group(1).lower() not in _DOSSIER_STOP:
+    if m and m.group(1).lower() not in _DOSSIER_STOP and _entity_is_real("host", m.group(1)):
         return ("host", m.group(1))
     return None
 
@@ -6115,11 +6145,11 @@ def _extract_any_entity(q: str):
     m = re.search(r"\b(\d{1,3}\.){3}\d{1,3}\b", q or "")
     if m and all(0 <= int(p) <= 255 for p in m.group(0).split(".")):
         return ("ip", m.group(0))
-    m = re.search(r"\b(?:user|username|account|login)\s+[\"']?([A-Za-z0-9._\\\-]{2,64})", q or "", re.I)
-    if m and m.group(1).lower() not in _DOSSIER_STOP:
+    m = re.search(r"\b(?:user|username|account|logged in as)\s+[\"']?([A-Za-z0-9._\\\-]{2,64})", q or "", re.I)
+    if m and m.group(1).lower() not in _DOSSIER_STOP and _entity_is_real("username", m.group(1)):
         return ("username", m.group(1))
     m = re.search(r"\b(?:host|agent|server|machine|endpoint|workstation)\s+[\"']?([A-Za-z0-9._\\\-]{2,64})", q or "", re.I)
-    if m and m.group(1).lower() not in _DOSSIER_STOP:
+    if m and m.group(1).lower() not in _DOSSIER_STOP and _entity_is_real("host", m.group(1)):
         return ("host", m.group(1))
     return None
 
@@ -7044,7 +7074,7 @@ async def nl_query(payload: dict):
     # wrong answer, not an empty one. Diagnose the dead filter from live data, feed it
     # back once, re-run. If still empty, annotate the answer honestly.
     empty_note = ""
-    if result is not None and result["row_count"] == 0 and ai_generated:
+    if result is not None and ai_generated and _result_is_empty(result):
         problems = await _to_thread(lambda q=result["sql"]: _diagnose_empty(q))
         if problems:
             # 1) Deterministically STRIP dead entity filters (username='for', ...): a
@@ -7063,7 +7093,7 @@ async def nl_query(payload: dict):
                     pass
             # 2) Still empty and still has dead CATEGORICAL values -> ask the model to
             #    pick the right ones (needs judgment a strip can't make).
-            if result["row_count"] == 0:
+            if _result_is_empty(result):
                 still = await _to_thread(lambda q=result["sql"]: _diagnose_empty(q))
                 if any(not p.get("entity") for p in still):
                     try:
@@ -7075,7 +7105,7 @@ async def nl_query(payload: dict):
                             result = await _to_thread(lambda q=nxt: _run_query(q))
                     except Exception:
                         pass
-        if result["row_count"] == 0:     # STILL empty -> explain WHY, don't mislead
+        if _result_is_empty(result):     # STILL empty -> explain WHY, don't mislead
             final = await _to_thread(lambda q=result["sql"]: _diagnose_empty(q))
             if final:
                 empty_note = _empty_human_note(final)
