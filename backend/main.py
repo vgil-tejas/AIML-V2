@@ -5089,16 +5089,37 @@ def _diagnose_empty(sql: str) -> list:
             near = difflib.get_close_matches(v, pool, n=3, cutoff=0.4)
             sugg = list(dict.fromkeys(ci + near)) or pool[:4]
         elif col in _DIAG_ENTITY_COLS and op == "eq":
-            known = _known_entity_set(col)         # None -> too high-card, don't flag
-            if known is None or v in known:
+            known = _known_entity_set(col)
+            if known is not None and v in known:
+                continue                           # real value in this column -> fine
+            # Is the value actually a known value of a SIBLING entity column? (e.g.
+            # username='Crypt0n' but Crypt0n is a HOST/agent.) If so, the column is
+            # wrong, not the value — record the right column so we can rewrite to it.
+            resolved_col = resolved_val = None
+            for other in _DIAG_ENTITY_COLS:
+                if other == col:
+                    continue
+                oset = _known_entity_set(other)
+                if oset:
+                    match = next((k for k in oset if k.lower() == lv), None)
+                    if match:
+                        resolved_col, resolved_val = other, match
+                        break
+            if resolved_col:
+                seen.add((col, v))
+                problems.append({"col": col, "value": v, "entity": True,
+                                 "resolved_col": resolved_col, "resolved_val": resolved_val})
                 continue
-            near = difflib.get_close_matches(v, list(known), n=3, cutoff=0.6)
-            sugg = near                            # for an entity, don't dump the whole roster
+            if known is None:                      # can't enumerate this col AND not a sibling -> can't refute
+                continue
+            seen.add((col, v))
+            problems.append({"col": col, "value": v, "entity": True,
+                             "suggestions": difflib.get_close_matches(v, list(known), n=3, cutoff=0.6)})
+            continue
         else:
             continue
         seen.add((col, v))
-        problems.append({"col": col, "value": v, "suggestions": sugg,
-                         "entity": col in _DIAG_ENTITY_COLS})
+        problems.append({"col": col, "value": v, "suggestions": sugg, "entity": False})
     return problems
 
 
@@ -5131,6 +5152,16 @@ def _strip_predicate(sql: str, col: str, value: str) -> str:
         if new != sql:
             return new
     return sql
+
+
+def _swap_predicate_column(sql: str, old_col: str, new_col: str, value: str,
+                           new_value: str | None = None) -> str:
+    """Rewrite `old_col = 'value'` to `new_col = 'new_value'` — used when a value was
+    filtered on the wrong entity column (username='Crypt0n' where Crypt0n is a host,
+    so it becomes agent='Crypt0n'). Safe: we've confirmed new_col/new_value exist."""
+    import re
+    pat = re.escape(old_col) + r"\s*=\s*'" + re.escape(value) + r"'"
+    return re.sub(pat, f"{new_col} = '{new_value or value}'", sql, count=1, flags=re.I)
 
 
 def _empty_correction_note(problems: list) -> str:
@@ -7128,7 +7159,11 @@ async def nl_query(payload: dict):
             stripped = result["sql"]
             for p in problems:
                 if p.get("entity"):
-                    stripped = _strip_predicate(stripped, p["col"], p["value"])
+                    if p.get("resolved_col"):      # wrong column (user vs host) -> rewrite it
+                        stripped = _swap_predicate_column(
+                            stripped, p["col"], p["resolved_col"], p["value"], p.get("resolved_val"))
+                    else:                          # not a real entity at all -> drop it
+                        stripped = _strip_predicate(stripped, p["col"], p["value"])
             if stripped != result["sql"]:
                 try:
                     result = await _to_thread(
