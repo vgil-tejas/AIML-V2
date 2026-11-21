@@ -47,6 +47,23 @@ def _env_bool(name: str, default: str = "false") -> bool:
     return os.getenv(name, default).strip().lower() in ("1", "true", "yes", "on")
 
 
+def _cookie_secure(request: Request) -> bool:
+    """Decide the session cookie's Secure flag per request.
+
+    Secure is turned on automatically whenever the *external* connection is
+    HTTPS, so the cookie is never silently dropped on a plain-HTTP LAN box yet
+    is always protected once a TLS-terminating gateway sits in front (e.g. the
+    bank proxy for csen-aiml.vgipl.com, which forwards plain HTTP to :19888 but
+    advertises the real scheme in X-Forwarded-Proto). Trust that header first,
+    then the direct scheme. AUTH_COOKIE_SECURE=true forces it on regardless."""
+    if _env_bool("AUTH_COOKIE_SECURE", "false"):
+        return True
+    xfproto = request.headers.get("x-forwarded-proto", "").split(",")[0].strip().lower()
+    if xfproto:
+        return xfproto == "https"
+    return request.url.scheme == "https"
+
+
 def _cfg():
     """Read config fresh each call so a container restart picks up new .env."""
     user = os.getenv("AUTH_USER", "Tejas")
@@ -227,15 +244,18 @@ def install_auth(app) -> None:
             return JSONResponse({"ok": False, "error": "Invalid username or password"}, status_code=401)
         token = _mint(user, secret, ttl_s)
         resp = JSONResponse({"ok": True, "user": user})
-        _set_cookie(resp, token, ttl_s)
+        _set_cookie(resp, token, ttl_s, _cookie_secure(request))
         log.info("login ok user=%r", user)
         return resp
 
     @app.post("/api/auth/logout", tags=["auth"])
-    async def logout():
+    async def logout(request: Request):
         resp = JSONResponse({"ok": True})
-        # expire the cookie immediately
-        resp.set_cookie(COOKIE_NAME, "", max_age=0, httponly=True, samesite="lax", path="/")
+        # expire the cookie immediately — match Secure to the request so the
+        # browser honours the deletion over HTTPS (a Secure cookie is only
+        # cleared by a Secure delete).
+        resp.set_cookie(COOKIE_NAME, "", max_age=0, httponly=True, samesite="lax",
+                        path="/", secure=_cookie_secure(request))
         return resp
 
     @app.get("/api/auth/verify", tags=["auth"])
@@ -282,7 +302,7 @@ def install_auth(app) -> None:
         role = _map_sso_role(claims.get("role", ""), claims.get("access", ""))
         session_token = _mint(username, cookie_secret, ttl_s)
         resp = JSONResponse({"ok": True, "user": username, "role": role, "redirect": "/"})
-        _set_cookie(resp, session_token, ttl_s)
+        _set_cookie(resp, session_token, ttl_s, _cookie_secure(request))
         log.info("SSO validate ok user=%r role=%s sub=%r", username, role, claims.get("sub"))
         return resp
 
@@ -310,7 +330,7 @@ def install_auth(app) -> None:
         role = _map_sso_role(claims.get("role", ""), claims.get("access", ""))
         session_token = _mint(username, cookie_secret, ttl_s)
         resp = RedirectResponse("/", status_code=302)
-        _set_cookie(resp, session_token, ttl_s)
+        _set_cookie(resp, session_token, ttl_s, _cookie_secure(request))
         log.info("SSO login ok user=%r role=%s sub=%r", username, role, claims.get("sub"))
         return resp
 
@@ -318,13 +338,15 @@ def install_auth(app) -> None:
     log.info("auth gate installed (enabled=%s, user=%r, ttl=%ss)", enabled, _u, _ttl)
 
 
-def _set_cookie(resp: Response, token: str, ttl_s: int) -> None:
+def _set_cookie(resp: Response, token: str, ttl_s: int, secure: bool) -> None:
     # HttpOnly so page scripts can't read it; SameSite=Lax to survive top-level
-    # navigation while blocking cross-site sends. `secure` is opt-in via
-    # AUTH_COOKIE_SECURE=true (only set it once the server is behind HTTPS,
-    # otherwise the browser drops the cookie on a plain-HTTP LAN box).
+    # navigation while blocking cross-site sends. `secure` is decided per request
+    # by _cookie_secure(): on automatically once the external connection is HTTPS
+    # (direct, or via a TLS-terminating proxy's X-Forwarded-Proto), forceable with
+    # AUTH_COOKIE_SECURE=true, and off on a plain-HTTP LAN box so the browser
+    # doesn't silently drop the cookie there.
     resp.set_cookie(
         COOKIE_NAME, token,
         max_age=ttl_s, httponly=True, samesite="lax", path="/",
-        secure=_env_bool("AUTH_COOKIE_SECURE", "false"),
+        secure=secure,
     )

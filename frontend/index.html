@@ -2486,6 +2486,12 @@
       .svc-title { font-size: 22px !important; }
     }
     @media (prefers-reduced-motion: reduce) { .svc-fx, .svc-eyebrow i { animation: none !important; } }
+    /* SOC Query: evidence toggle (answer-first, table collapsed by default) */
+    .nl-ev > summary { list-style: none; }
+    .nl-ev > summary::-webkit-details-marker { display: none; }
+    .nl-ev > summary::after { content: '\25B8'; margin-left: 7px; display: inline-block; transition: transform .15s ease; }
+    .nl-ev[open] > summary::after { transform: rotate(90deg); }
+    .nl-ev[open] > summary { border-radius: 16px 16px 6px 6px; }
   </style>
 </head>
 
@@ -6129,16 +6135,15 @@ tr:hover td{background:#161b22}</style></head>
 
       const fetchDirect = async url => { try { const r = await fetch(url); return r.ok ? await r.json() : null; } catch { return null; } };
 
-      const [intel, bslRes, alr, sum, mlRes, aiRes] = await Promise.all([
+      const [intel, bslRes, alr, sum, mlRes] = await Promise.all([
         fetchDirect(`${API}/intel/${ip}`),
         fetchDirect(`${API}/baseline/${ip}`),
         fetchDirect(`${API}/alerts/${ip}`),
         fetchDirect(`${API}/trail/${ip}/summary`),
-        fetchDirect(`${ML}/score/${ip}`),
-        fetchDirect(`${API}/explain/${ip}`)
+        fetchDirect(`${ML}/score/${ip}`)
       ]);
 
-      const ai = aiRes || { explanation: null };
+      // The AI narrative is streamed separately (below) so the dashboard paints now.
       const d = intel || { ip: ip, is_known_bad: false, abuseipdb: null };
       const b = (bslRes && bslRes.found) ? bslRes.baseline : null;
       const t = sum || { total: 0, first_seen: '', last_seen: '', threat_types: {} };
@@ -6207,16 +6212,61 @@ tr:hover td{background:#161b22}</style></head>
         <div style="margin-top:10px">
           <div class="ai-panel">
             <div class="ai-header"><span class="ai-badge">AI</span><span class="ai-title">AI Analysis</span></div>
-            <div class="ai-body">
-              ${ai.explanation ? formatReportText(ai.explanation) : '<span style="color:var(--warn)">AI analysis unavailable — check AI_API_KEY in .env</span>'}
-            </div>
+            <div class="ai-body" id="ai-inv-stream"><span class="ai-stream-wait" style="color:var(--muted)">Analyzing evidence<span class="ai-dots">…</span></span></div>
           </div>
         </div>
       </div>`;
 
       body.innerHTML = html;
-      document.getElementById('ai-inv-model').textContent = ai.model ? `${ai.model} · ${toIST(ai.generated_at)}` : '';
-      toast('Full investigation ready', 'ai');
+      toast('Investigation ready — AI writing…', 'ai');
+      aiStreamExplain(ip);
+    }
+
+    // Stream the AI threat report token-by-token into the investigator panel (SSE).
+    // Falls back to the one-shot /explain endpoint if the stream fails or is empty.
+    async function aiStreamExplain(ip) {
+      const el = document.getElementById('ai-inv-stream');
+      if (!el) return;
+      let acc = '', got = false;
+      try {
+        const resp = await fetch(`${API}/explain/${ip}/stream`, { headers: { 'Accept': 'text/event-stream' } });
+        if (!resp.ok || !resp.body) throw new Error('no stream');
+        const reader = resp.body.getReader();
+        const dec = new TextDecoder();
+        let buf = '';
+        for (;;) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buf += dec.decode(value, { stream: true });
+          let i;
+          while ((i = buf.indexOf('\n\n')) >= 0) {
+            const frame = buf.slice(0, i); buf = buf.slice(i + 2);
+            let ev = null, data = '';
+            for (const ln of frame.split('\n')) {
+              if (ln.startsWith('event:')) ev = ln.slice(6).trim();
+              else if (ln.startsWith('data:')) data += ln.slice(5).trim();
+            }
+            if (ev === 'done') {
+              try { const m = JSON.parse(data); document.getElementById('ai-inv-model').textContent = m.model ? `${m.model} · ${toIST(m.generated_at)}` : ''; } catch (_) {}
+              continue;
+            }
+            if (!data) continue;
+            try { const o = JSON.parse(data); if (o.t) { acc += o.t; got = true; el.innerHTML = formatReportText(acc); } } catch (_) {}
+          }
+        }
+      } catch (_) { /* fall through to one-shot fallback */ }
+      if (!got) {
+        try {
+          const r = await fetch(`${API}/explain/${ip}`);
+          const j = r.ok ? await r.json() : null;
+          if (j && j.explanation) {
+            el.innerHTML = formatReportText(j.explanation);
+            document.getElementById('ai-inv-model').textContent = j.model ? `${j.model} · ${toIST(j.generated_at)}` : '';
+          } else {
+            el.innerHTML = '<span style="color:var(--warn)">AI analysis unavailable — check AI_API_KEY in .env</span>';
+          }
+        } catch (_) { el.innerHTML = '<span style="color:var(--warn)">AI analysis unavailable.</span>'; }
+      }
     }
     async function aiMLExplain() {
       const ip = document.getElementById('ai-ip-input').value.trim(); if (!ip) return;
@@ -6313,10 +6363,11 @@ tr:hover td{background:#161b22}</style></head>
     let _nlLastRows = [], _nlLastCols = [];
     // Follow-up memory: remember entities from the last answered query so a
     // follow-up ("did these IPs do anything yesterday, with usernames") resolves.
-    let _nlCtx = null;   // {prev_question, entities[]}
+    let _nlCtx = null;   // {prev_question, entities[], prev_topic}
     const _NL_ENT_COLS = ['src_ip', 'dst_ip', 'username', 'agent', 'entity', 'account', 'user'];
-    function _nlCaptureCtx(q, cols, rows) {
+    function _nlCaptureCtx(q, data) {
       try {
+        const cols = (data && data.columns) || [], rows = (data && data.rows) || [];
         const idx = (cols || []).map((c, i) => [String(c).toLowerCase(), i]).filter(([c]) => _NL_ENT_COLS.includes(c));
         const ents = [];
         for (const [, i] of idx) {
@@ -6327,7 +6378,12 @@ tr:hover td{background:#161b22}</style></head>
           }
           if (ents.length >= 25) break;
         }
-        _nlCtx = { prev_question: q, entities: ents };
+        // Remember the SUBJECT of this answer ("feature:trail", "ip:1.2.3.4", …) so the
+        // NEXT vague follow-up ("what does it do") resolves to it. Deliberately not
+        // persisted across a topicless data answer: a pronoun question after a table
+        // ("what severity do they have") is about those rows, not the old subject.
+        const topic = (data && data.topic) ? String(data.topic) : '';
+        _nlCtx = { prev_question: q, entities: ents, prev_topic: topic };
         const h = document.getElementById('nl-ctx-hint');
         if (h) {
           if (ents.length) { h.style.display = 'block'; h.textContent = '↪ Follow-up mode: I\'ll remember ' + ents.length + ' entit' + (ents.length === 1 ? 'y' : 'ies') + ' from this answer — ask "did those IPs…", "the same user yesterday", etc.'; }
@@ -6378,10 +6434,19 @@ tr:hover td{background:#161b22}</style></head>
     }
     function _nlTableHTML(data) {
       if (!data.rows || !data.rows.length) return '<div class="empty" style="padding:12px 2px;color:var(--muted);font-size:12px">No matching rows in the logs for this.</div>';
-      let html = '<div style="overflow-x:auto"><div style="max-height:380px;overflow-y:auto"><table class="tbl" style="width:100%;border-collapse:collapse">'
+      // Answer-first: the verdict/answer above is what the analyst reads; the raw
+      // evidence rows are the PROOF behind it, collapsed by default behind a toggle
+      // so a busy SOC analyst isn't forced to scan the whole table. One click opens it.
+      const n = (data.row_count != null ? data.row_count : data.rows.length);
+      const shownNote = (data.row_count != null && data.row_count > data.rows.length) ? ' · showing top ' + data.rows.length : '';
+      let tbl = '<div style="overflow-x:auto"><div style="max-height:380px;overflow-y:auto"><table class="tbl" style="width:100%;border-collapse:collapse">'
         + '<thead><tr>' + data.columns.map(c => `<th style="position:sticky;top:0;background:#161b22;z-index:3;white-space:nowrap;padding:8px 12px;color:var(--accent);text-align:left;border-bottom:2px solid var(--border)">${_nlEsc(c)}</th>`).join('') + '</tr></thead><tbody>';
-      for (const row of data.rows) html += '<tr>' + row.map(v => `<td style="white-space:nowrap;max-width:280px;overflow:hidden;text-overflow:ellipsis;padding:6px 12px;border-bottom:1px solid var(--border)" title="${_nlEsc(v)}">${_nlEsc(v) || '—'}</td>`).join('') + '</tr>';
-      return html + '</tbody></table></div></div>';
+      for (const row of data.rows) tbl += '<tr>' + row.map(v => `<td style="white-space:nowrap;max-width:280px;overflow:hidden;text-overflow:ellipsis;padding:6px 12px;border-bottom:1px solid var(--border)" title="${_nlEsc(v)}">${_nlEsc(v) || '—'}</td>`).join('') + '</tr>';
+      tbl += '</tbody></table></div></div>';
+      return '<details class="nl-ev" style="margin-top:8px">'
+        + '<summary style="cursor:pointer;user-select:none;display:inline-block;font-size:12px;font-weight:600;color:var(--accent);background:var(--bg3);border:1px solid var(--border);border-radius:16px;padding:5px 13px">'
+        + 'Show evidence — ' + n + ' row' + (n !== 1 ? 's' : '') + shownNote + '</summary>'
+        + '<div style="margin-top:10px">' + tbl + '</div></details>';
     }
     function _nlSqlHTML(data) {
       if (!data.sql) return '';
@@ -6401,6 +6466,42 @@ tr:hover td{background:#161b22}</style></head>
       ans.querySelectorAll('.nl-chip').forEach(b => b.addEventListener('click', () => nlSetQ(b.getAttribute('data-q'))));
       ans.querySelectorAll('[data-retry]').forEach(b => b.addEventListener('click', () => nlSetQ(b.getAttribute('data-retry'))));
       const csv = ans.querySelector('[data-csv]'); if (csv) csv.addEventListener('click', nlExportCSV);
+    }
+    // Deep-link + external-source buttons (product-help & intel answers). Internal
+    // nav_links jump straight to the right microservice/page; external_links open
+    // the threat-intel source in a new tab.
+    function _nlActionsHTML(data) {
+      let h = '';
+      const nav = (data && data.nav_links) || [];
+      const ext = (data && data.external_links) || [];
+      if (nav.length) {
+        h += '<div style="display:flex;gap:8px;flex-wrap:wrap;margin:10px 0 2px">'
+          + nav.map(l => '<button class="nl-goto" data-nav-page="' + _nlEsc(l.page) + '" data-nav-entity="' + _nlEsc(l.entity || '')
+            + '" style="cursor:pointer;font-size:12px;font-weight:600;background:var(--accent);color:#fff;border:none;border-radius:7px;padding:7px 13px">'
+            + _nlEsc(l.label) + ' →</button>').join('') + '</div>';
+      }
+      if (ext.length) {
+        h += '<div style="display:flex;gap:8px;flex-wrap:wrap;margin:8px 0 2px">'
+          + ext.map(l => '<a href="' + _nlEsc(l.url) + '" target="_blank" rel="noopener noreferrer" '
+            + 'style="font-size:12px;color:var(--accent);text-decoration:none;border:1px solid var(--border);border-radius:16px;padding:5px 11px">'
+            + _nlEsc(l.label) + ' ↗</a>').join('') + '</div>';
+      }
+      return h;
+    }
+    function _nlWireActions(ans) {
+      ans.querySelectorAll('.nl-goto').forEach(b =>
+        b.addEventListener('click', () => nlGo(b.getAttribute('data-nav-page'), b.getAttribute('data-nav-entity'))));
+    }
+    // Route a deep-link to the real SPA navigation, opening it on the entity when
+    // the target page supports one (IP Trail / Kill Chain / ML score).
+    function nlGo(page, entity) {
+      entity = (entity || '').trim();
+      try {
+        if (page === 'trail') { nav('trail'); if (entity && typeof goTrail === 'function') goTrail(entity); }
+        else if (page === 'killchain') { if (entity && typeof goKillChain === 'function') goKillChain(entity); else nav('killchain'); }
+        else if (page === 'ml') { if (entity && typeof openMLScore === 'function') openMLScore(entity); else nav('ml'); }
+        else { nav(page); }
+      } catch (e) { try { nav(page); } catch (_) {} }
     }
     async function runNLQuery() {
       const q = document.getElementById('nl-input').value.trim();
@@ -6430,11 +6531,14 @@ tr:hover td{background:#161b22}</style></head>
             + (data.note ? '<div style="color:var(--muted);font-size:12px;margin-top:6px">' + _nlEsc(data.note) + '</div>' : '');
           _nlWire(ans); return;
         }
-        _nlLastCols = data.columns; _nlLastRows = data.rows;
-        _nlCaptureCtx(q, data.columns, data.rows);   // remember entities for follow-ups
-        body.innerHTML = _nlVerdictHTML(data) + _nlTableHTML(data) + _nlSqlHTML(data) + _nlFollowHTML(data)
-          + ((data.rows && data.rows.length) ? '<div style="margin-top:12px"><button class="btn" data-csv="1" style="font-size:11px;padding:3px 10px">Export CSV</button></div>' : '');
-        _nlWire(ans);
+        _nlLastCols = data.columns || []; _nlLastRows = data.rows || [];
+        _nlCaptureCtx(q, data);   // remember entities + topic for follow-ups
+        // navonly answers (product-help "where do I see X") carry no log rows — show
+        // the answer + deep-link buttons, skip the empty evidence table.
+        body.innerHTML = _nlVerdictHTML(data) + _nlActionsHTML(data)
+          + (data.navonly ? '' : _nlTableHTML(data)) + _nlSqlHTML(data) + _nlFollowHTML(data)
+          + ((!data.navonly && data.rows && data.rows.length) ? '<div style="margin-top:12px"><button class="btn" data-csv="1" style="font-size:11px;padding:3px 10px">Export CSV</button></div>' : '');
+        _nlWire(ans); _nlWireActions(ans);
         toast(data.row_count != null ? 'Answer ready — ' + data.row_count + ' row' + (data.row_count !== 1 ? 's' : '') : 'Answer ready', 'ok');
       } catch (e) {
         btn.disabled = false; btn.textContent = 'Ask';

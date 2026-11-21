@@ -51,6 +51,22 @@ try:
     import detections as det           # named detection use-cases (tender checklist)
 except Exception:
     det = None  # type: ignore
+try:
+    import kb                          # vectorless (BM25) product-knowledge retriever
+except Exception:
+    kb = None  # type: ignore
+try:
+    import web_search                  # Tavily out-of-scope / mitigation web fallback
+except Exception:
+    web_search = None  # type: ignore
+try:
+    import guardrails                  # SOC Query input guardrails (length / injection)
+except Exception:
+    guardrails = None  # type: ignore
+try:
+    import nl_cache                    # lexical semantic cache for SOC Query answers
+except Exception:
+    nl_cache = None  # type: ignore
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
@@ -58,7 +74,7 @@ import pandas as pd
 import httpx
 from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, PlainTextResponse, Response
+from fastapi.responses import HTMLResponse, PlainTextResponse, Response, StreamingResponse
 
 logger = logging.getLogger("cybersentinel.backend")
 
@@ -183,8 +199,65 @@ async def _start_background_refresh():
                 pass
             await asyncio.sleep(_inc_every)
 
+    async def _refresh_silence():
+        """SR 64: alert when a watch-listed server stops sending logs for N min.
+        Watch-list only — a server that MUST always send — so laptops powering
+        off never raise an alarm. We write on STATE CHANGE only: one 'high'
+        deviation when it goes silent, one 'info' when it resumes, so the SIEM
+        sees a clean new-alert edge instead of a fresh row every tick. The alert
+        then reaches the SIEM through the /api/siem/alerts feed (C2). Inert when
+        SILENCE_WATCHLIST is empty (ships dark)."""
+        watch = [a.strip() for a in os.getenv("SILENCE_WATCHLIST", "").split(",") if a.strip()]
+        if not watch or not (STORE_ENABLED and osc):
+            return
+        threshold = int(os.getenv("SILENCE_THRESHOLD_SECONDS", "300"))
+        every     = int(os.getenv("SILENCE_CHECK_SECONDS", "60"))
+        state: dict[str, bool] = {}   # agent -> currently-silent?
+        logger.info("SR64 silence watchdog: %d server(s), threshold %ds, every %ds",
+                    len(watch), threshold, every)
+        await asyncio.sleep(15)
+        while True:
+            try:
+                seen = await _to_thread(osc.get_agent_last_seen, watch)
+                now = datetime.now(timezone.utc)
+                for agent in watch:
+                    last = seen.get(agent)
+                    gap = None
+                    if last:
+                        try:
+                            gap = (now - datetime.fromisoformat(
+                                last.replace("Z", "+00:00"))).total_seconds()
+                        except Exception:
+                            gap = None
+                    silent = (gap is None) or (gap > threshold)
+                    was = state.get(agent, False)
+                    if silent and not was:
+                        mins = "ever" if gap is None else f"{int(gap // 60)} min"
+                        await _to_thread(osc.save_deviations, agent, [{
+                            "type": "log_silence", "severity": "high",
+                            "message": (f"Server {agent} has not sent logs for {mins} "
+                                        f"(threshold {threshold // 60} min)."),
+                            "details": {"agent": agent, "last_seen": last,
+                                        "gap_seconds": None if gap is None else int(gap),
+                                        "threshold_seconds": threshold, "sr": "SIEM SR 64"},
+                        }])
+                        logger.warning("SR64 silence: %s last_seen=%s", agent, last)
+                    elif was and not silent:
+                        await _to_thread(osc.save_deviations, agent, [{
+                            "type": "log_silence", "severity": "info",
+                            "message": f"Server {agent} resumed sending logs.",
+                            "details": {"agent": agent, "last_seen": last,
+                                        "threshold_seconds": threshold, "sr": "SIEM SR 64"},
+                        }])
+                        logger.info("SR64 silence cleared: %s", agent)
+                    state[agent] = silent
+            except Exception as e:
+                logger.warning("silence watchdog tick failed: %s", e)
+            await asyncio.sleep(every)
+
     asyncio.create_task(_refresh_fast())
     asyncio.create_task(_refresh_incidents())
+    asyncio.create_task(_refresh_silence())
 
 ABUSEIPDB_KEY = os.getenv("ABUSEIPDB_KEY", "demo")
 # Placeholder values that mean "not configured" — avoids firing 401s at AbuseIPDB
@@ -424,6 +497,84 @@ async def ask_ai_private(prompt: str, max_tokens: int = 700, model: str | None =
     if out and not out.startswith("AI provider") and mp:
         out = ai_safety.restore_from_ai(out, mp)
     return out
+
+
+async def ask_groq_stream(prompt: str, max_tokens: int = 600, model: str | None = None):
+    """Async generator yielding text deltas from the LLM as they arrive. The prompt
+    must already be sanitised. Tries the model chain for the connection; once a model
+    starts producing tokens it commits to it. Yields nothing on total failure (the
+    caller detects the empty stream and shows a fallback)."""
+    if not AI_API_KEY:
+        return
+    import json as _json
+    timeout = httpx.Timeout(AI_TIMEOUT, connect=5.0)
+    for use_model in _ai_model_chain(model):
+        try:
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                async with client.stream(
+                    "POST", AI_BASE_URL,
+                    headers={"Authorization": f"Bearer {AI_API_KEY}",
+                             "Content-Type": "application/json"},
+                    json={"model": use_model,
+                          "messages": [{"role": "system", "content": _AI_SYS_PROMPT},
+                                       {"role": "user", "content": prompt}],
+                          "max_tokens": max_tokens, "temperature": 0.2, "stream": True},
+                ) as resp:
+                    if resp.status_code != 200:
+                        await resp.aread()        # drain so the next model can try
+                        continue
+                    got_any = False
+                    async for line in resp.aiter_lines():
+                        if not line or not line.startswith("data:"):
+                            continue
+                        payload = line[5:].strip()
+                        if payload == "[DONE]":
+                            return
+                        try:
+                            delta = _json.loads(payload)["choices"][0]["delta"].get("content") or ""
+                        except Exception:
+                            delta = ""
+                        if delta:
+                            got_any = True
+                            yield delta
+                    if got_any:
+                        return                     # finished cleanly on this model
+        except (httpx.TimeoutException, httpx.TransportError):
+            continue                               # connection hiccup -> next model
+    # all models failed -> generator ends empty
+
+
+async def ask_ai_private_stream(prompt: str, max_tokens: int = 600, model: str | None = None):
+    """Streaming ask_ai_private: sanitises the prompt, streams the reply, and restores
+    decoys INCREMENTALLY — holding back a short tail so a decoy token split across two
+    chunks is never emitted half-restored. The provider never sees real identifiers."""
+    if not ai_safety:
+        async for d in ask_groq_stream(prompt, max_tokens, model):
+            yield d
+        return
+    safe, mp = ai_safety.sanitize_for_ai(prompt)
+    if not mp:
+        async for d in ask_groq_stream(safe, max_tokens, model):
+            yield d
+        return
+    raw, sent, HOLD = "", 0, 24
+    async for delta in ask_groq_stream(safe, max_tokens, model):
+        raw += delta
+        restored = ai_safety.restore_from_ai(raw, mp)
+        emit_to = len(restored) - HOLD            # keep a tail back (partial decoy)
+        if emit_to > sent:
+            yield restored[sent:emit_to]
+            sent = emit_to
+    final = ai_safety.restore_from_ai(raw, mp)     # flush the held-back tail
+    if len(final) > sent:
+        yield final[sent:]
+
+
+def _sse(text: str) -> str:
+    """Encode one streamed text chunk as an SSE data frame (JSON-wrapped so embedded
+    newlines survive)."""
+    import json as _json
+    return "data: " + _json.dumps({"t": text}) + "\n\n"
 
 
 @app.get("/api/ai/health")
@@ -1245,6 +1396,108 @@ async def get_ip_alerts(ip: str):
     return {"ip":ip,"alerts":alerts,"total":len(alerts)}
 
 
+# ── SIEM integration: read-only alert feed ───────────────────────────────────
+# OPTCL SIEM SR 72 / 168.a (our results shown in the SIEM) + SR 64 (silence) +
+# UEBA SR 3 (integration with SIEM/SOAR). The SIEM polls this every few minutes
+# and lists our NEW alerts in its Attention queue. Authenticated with a DEDICATED
+# read-only token — never the operator login cookie — so the SIEM gets exactly
+# this feed and nothing else. Ships dark: no SIEM_FEED_TOKEN in the env -> 503,
+# so the endpoint is inert until we hand the SIEM its token.
+import hmac as _hmac_siem
+import hashlib as _hashlib_siem
+import re as _re_siem
+
+_SIEM_ID_RE = _re_siem.compile(r"^\d{13}-[0-9a-f]{8}$")  # our alert-id shape
+
+SIEM_FEED_TOKEN   = os.getenv("SIEM_FEED_TOKEN", "").strip()
+SIEM_CONSOLE_BASE = os.getenv("SIEM_CONSOLE_BASE", "").strip().rstrip("/")
+
+# Friendly use-case names for our internal deviation `type`s (what the SIEM shows).
+_SIEM_USECASE = {"log_silence": "Log source silence (SR 64)"}
+# Severity -> 0..100 score. The contract lets us send score OR verdict; we send both.
+_SIEM_SEV_SCORE = {"critical": 90, "high": 75, "medium": 50, "low": 25, "info": 10}
+
+
+def _siem_token_ok(request: Request) -> bool:
+    if not SIEM_FEED_TOKEN:
+        return False
+    auth = request.headers.get("authorization", "")
+    tok = auth[7:].strip() if auth[:7].lower() == "bearer " else ""
+    if not tok:
+        tok = (request.query_params.get("token") or "").strip()
+    return bool(tok) and _hmac_siem.compare_digest(tok, SIEM_FEED_TOKEN)
+
+
+def _siem_alert_id(a: dict) -> str:
+    """Sortable, stable id: <epoch_ms>-<8hex of entity:type>. Lets the SIEM ask
+    'only new since <id>' and sort chronologically; re-fired alerts get a newer
+    ts (and thus a newer id), so an escalation re-surfaces as a new alert."""
+    ts = a.get("ts") or ""
+    try:
+        epoch_ms = int(datetime.fromisoformat(ts.replace("Z", "+00:00")).timestamp() * 1000)
+    except Exception:
+        epoch_ms = 0
+    h = _hashlib_siem.sha1(f"{a.get('ip','')}:{a.get('type','')}".encode()).hexdigest()[:8]
+    return f"{epoch_ms:013d}-{h}"
+
+
+def _siem_shape(a: dict) -> dict:
+    sev = str(a.get("severity") or "low").lower()
+    entity = a.get("ip") or ""
+    use_case = _SIEM_USECASE.get(a.get("type"), a.get("type") or "anomaly")
+    link = (f"{SIEM_CONSOLE_BASE}/?entity={entity}#trail"
+            if (SIEM_CONSOLE_BASE and entity) else "")
+    return {
+        "id":       _siem_alert_id(a),
+        "time":     a.get("ts"),
+        "entity":   entity,
+        "score":    _SIEM_SEV_SCORE.get(sev, 25),
+        "severity": sev,
+        "verdict":  str(a.get("message") or "")[:200],
+        "use_case": use_case,
+        "link":     link,
+    }
+
+
+@app.get("/api/siem/alerts")
+async def siem_alerts(request: Request, since: str = "", limit: int = 500,
+                      severity: str = None):
+    """Read-only alert feed for the OPTCL SIEM.
+    Auth: `Authorization: Bearer <SIEM_FEED_TOKEN>` (or ?token=).
+    `since`: an id from a prior pull OR an ISO time -> only strictly newer alerts.
+    Fields per alert: id, time, entity, score, severity, verdict, use_case, link."""
+    if not SIEM_FEED_TOKEN:
+        raise HTTPException(503, "siem feed not configured")
+    if not _siem_token_ok(request):
+        raise HTTPException(401, "invalid feed token")
+    raw = await _to_thread(osc.get_deviations, severity, 5000, None) \
+        if (STORE_ENABLED and osc) else []
+    shaped = [_siem_shape(a) for a in raw]
+    # `since` cursor: our alert id (strict <epoch_ms>-<8hex>), else an ISO
+    # timestamp, else a bare epoch-ms integer. An ISO date contains '-' too, so
+    # the id must be matched by exact shape — never by "has a dash".
+    cutoff_ms = None
+    s = (since or "").strip()
+    if s:
+        if _SIEM_ID_RE.match(s):
+            cutoff_ms = int(s[:13])
+        else:
+            try:
+                cutoff_ms = int(datetime.fromisoformat(
+                    s.replace("Z", "+00:00")).timestamp() * 1000)
+            except Exception:
+                try:
+                    cutoff_ms = int(s)
+                except Exception:
+                    cutoff_ms = None
+    if cutoff_ms is not None:
+        shaped = [x for x in shaped if int(x["id"].split("-", 1)[0]) > cutoff_ms]
+    shaped.sort(key=lambda x: x["id"])
+    lim = int(min(max(limit, 1), 5000))
+    return {"alerts": shaped[-lim:], "count": len(shaped),
+            "server_time": datetime.now(timezone.utc).isoformat()}
+
+
 # -- AI explanations ----------------------------------------------------------
 
 async def collect_ip_context(ip: str) -> dict:
@@ -1396,8 +1649,9 @@ Be specific to the actual values. Do not be generic."""
     }
 
 
-@app.get("/api/explain/{ip}")
-async def explain_ip(ip: str):
+async def _explain_ip_prompt(ip: str):
+    """Build the IP threat-report prompt + return (prompt, ml) so the JSON and the
+    streaming endpoints share one prompt (no drift)."""
     ctx = await collect_ip_context(ip)
     b = ctx["baseline"]
     ml = ctx["ml"]
@@ -1433,7 +1687,12 @@ WHAT CHANGED:
 IMMEDIATE ACTION:
 
 Reference the actual data. If evidence is missing, say what is missing instead of inventing it."""
+    return prompt, ml
 
+
+@app.get("/api/explain/{ip}")
+async def explain_ip(ip: str):
+    prompt, ml = await _explain_ip_prompt(ip)
     return {
         "ip": ip,
         "explanation": await ask_ai_private(prompt, max_tokens=600, model=AI_FAST_MODEL),
@@ -1441,6 +1700,40 @@ Reference the actual data. If evidence is missing, say what is missing instead o
         "model": AI_FAST_MODEL,
         "generated_at": datetime.now(timezone.utc).isoformat(),
     }
+
+
+@app.get("/api/explain/{ip}/stream")
+async def explain_ip_stream(ip: str):
+    """Same IP threat report as /api/explain/{ip}, streamed token-by-token over SSE
+    so the AI Investigator writes it out live. Privacy: the prompt is sanitised and
+    decoys are restored incrementally (ask_ai_private_stream). X-Accel-Buffering:no
+    tells nginx not to buffer, so tokens reach the browser as they are produced."""
+    prompt, ml = await _explain_ip_prompt(ip)
+
+    async def gen():
+        yield _sse("")                       # open the stream immediately
+        produced = False
+        try:
+            # gpt-oss streams its reasoning first and only then the answer, so the
+            # budget must cover BOTH or no content survives — give it ample room.
+            async for chunk in ask_ai_private_stream(prompt, max_tokens=1400, model=AI_FAST_MODEL):
+                if chunk:
+                    produced = True
+                    yield _sse(chunk)
+        except Exception:
+            pass
+        if not produced:
+            yield _sse("AI analysis unavailable — the platform is running local-only "
+                       "or the provider is busy. The evidence above is still complete.")
+        import json as _json
+        yield "event: done\ndata: " + _json.dumps(
+            {"model": AI_FAST_MODEL,
+             "generated_at": datetime.now(timezone.utc).isoformat()}) + "\n\n"
+
+    return StreamingResponse(gen(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache",
+                                      "X-Accel-Buffering": "no",
+                                      "Connection": "keep-alive"})
 
 
 # -- Deterministic Reports -----------------------------------------------------
@@ -5281,10 +5574,64 @@ def _looks_definitional(q: str) -> bool:
     return False
 
 
+def _looks_mitigation(q: str) -> bool:
+    """A GENERAL 'how do I mitigate/prevent/defend against X' question — web-answered
+    with techniques + citations. Excludes anything with an IP (that's a data/action
+    question, and the action path F — 'how do I block 1.2.3.4' — runs earlier)."""
+    import re
+    if not q or _first_ipv4(q):
+        return False
+    ql = " ".join(q.split()).lower()
+    return bool(re.search(
+        r"\b(how (?:do|can|should) (?:i|we|you) (?:mitigate|prevent|stop|block|defend|remediate|"
+        r"respond to|protect against|harden against)|mitigat(?:e|ion|ions)|remediat(?:e|ion)|"
+        r"how to (?:stop|prevent|block|defend|secure|harden|respond to)|best practice|"
+        r"countermeasures?|defend against|defen[cs]e against|protect against|hardening)\b", ql))
+
+
+def _looks_webworthy(q: str) -> bool:
+    """A substantive out-of-scope question worth a web lookup — not a greeting/thanks
+    and not a one-liner. Used to decide whether a 'general' message gets web-grounded."""
+    import re
+    ql = " ".join((q or "").split()).lower()
+    if len(ql.split()) < 3 or _first_ipv4(q):
+        return False
+    if re.match(r"(hi|hey|hello|thanks|thank you|thank|yo|sup|ok|okay|cool|nice|"
+                r"good (?:morning|evening|afternoon)|how are you)\b", ql):
+        return False
+    return True
+
+
 async def _nl_reference_answer(question: str) -> dict:
     """Answer a general security-knowledge question from reference knowledge,
     CLEARLY LABELLED as not-from-your-logs. Kept fully separate from the grounded
-    log path so it can never masquerade as data about the customer's environment."""
+    log path so it can never masquerade as data about the customer's environment.
+
+    If the web connector is live, answer from live web sources with citations
+    (fresher, and no guessing at CVE/mitigation detail); otherwise fall back to the
+    model's own knowledge. The question is sanitised before any egress and the
+    connector refuses anything still carrying an IP."""
+    if web_search is not None and web_search.enabled():
+        safe_q = question
+        if ai_safety:
+            try:
+                safe_q, _wmap = ai_safety.sanitize_for_ai(question)
+            except Exception:
+                safe_q = question
+        try:
+            web = await web_search.search(safe_q)
+        except Exception:
+            web = None
+        if web and (web.get("answer") or web.get("results")):
+            srcs = web.get("results") or []
+            ans = (web.get("answer") or "").strip() or (srcs[0]["content"][:400] if srcs else "")
+            ext = [{"label": s["title"], "url": s["url"]} for s in srcs[:4]]
+            note = ("Reference — general security knowledge from the web, NOT from your logs. "
+                    "To check your own data, ask e.g. \"events mentioning brute force\".")
+            return {"answer": ans, "reference": True, "web": True, "note": note,
+                    "external_links": ext, "sql": None, "columns": [], "rows": [],
+                    "row_count": 0, "elapsed_ms": 0, "ai_generated": True}
+        # Tavily off/empty/failed -> fall through to the model's own knowledge.
     prompt = f"""You are CyberSentinel's security reference assistant. The analyst asked a
 GENERAL security-knowledge question (a definition or concept) — NOT a question about their
 own log data. Answer it factually and concisely.
@@ -5533,11 +5880,681 @@ async def _nl_best_effort(question: str, reason: str = "") -> dict:
             "elapsed_ms": 0, "ai_generated": False, "best_effort": True}
 
 
+_re_h = __import__("re")
+
+# ── CyberSentinel product map — for "where do I see X?" navigation answers ──
+# Hand-authored from the REAL SPA nav routes (index.html nav('<page>')) so the
+# assistant can never invent a page name. Each entry: the nav route, a label, a
+# one-line "what you see" blurb, the entity kind its deep-link accepts ('ip' or
+# None), and the match keywords.
+_CS_FEATURES = [
+    {"page": "trail", "label": "IP Trail", "entity": "ip",
+     "blurb": "the full event trail for a single IP — every event for that address on one timeline, the real evidence behind a verdict",
+     "kw": ["ip trail", "ip evidence", "full ip", "trail for", "trace", "ip history", "ip timeline",
+            "all events for", "full evidence", "evidence for ip", "evidence for an ip", "evidence trail"]},
+    {"page": "logs", "label": "Logs Explorer", "entity": None,
+     "blurb": "raw, searchable log events — the ground-truth records, on-prem",
+     "kw": ["raw logs", "log explorer", "search logs", "logs page", "see logs", "browse logs", "raw events"]},
+    {"page": "ml", "label": "Anomalies · ML", "entity": "ip",
+     "blurb": "the ML risk/anomaly score for an IP and the ranked anomaly list from the Risk Engine",
+     "kw": ["anomaly", "anomalies", "ml score", "risk score", "isolation forest", "anomaly score",
+            "score an ip", "score this ip", "model score", "ml page"]},
+    {"page": "deviations", "label": "Deviations", "entity": None,
+     "blurb": "entities that broke their own baseline and were escalated for a human",
+     "kw": ["deviation", "baseline deviation", "escalated", "attention queue", "what escalated"]},
+    {"page": "bslexplorer", "label": "Baseline Explorer", "entity": None,
+     "blurb": "the learned 'normal' baseline per entity",
+     "kw": ["baseline", "normal behaviour", "normal behavior", "baseline explorer", "what is normal"]},
+    {"page": "ueba", "label": "UEBA · Identity", "entity": None,
+     "blurb": "user & identity behaviour — account takeover, impossible travel, peer-group outliers",
+     "kw": ["ueba", "user behaviour", "user behavior", "identity", "account takeover", "impossible travel",
+            "peer group", "peer-group", "insider"]},
+    {"page": "incidents", "label": "Incidents", "entity": None,
+     "blurb": "correlated incidents — scattered alerts stitched into one attack story",
+     "kw": ["incident", "correlation", "campaign", "attack story", "related alerts", "incidents page"]},
+    {"page": "killchain", "label": "Kill Chain", "entity": "ip",
+     "blurb": "the MITRE ATT&CK kill-chain view for an attack",
+     "kw": ["kill chain", "killchain", "kill-chain", "mitre", "att&ck", "attack chain", "tactic", "technique"]},
+    {"page": "intelligence", "label": "Telemetry Intelligence", "entity": None,
+     "blurb": "the telemetry intelligence / novelty view",
+     "kw": ["telemetry", "novelty", "intelligence page", "telemetry intelligence"]},
+    {"page": "nlquery", "label": "SOC Query", "entity": None,
+     "blurb": "this natural-language query console",
+     "kw": ["soc query", "ask in english", "natural language", "nl query", "query console"]},
+    {"page": "aiinvestigate", "label": "AI Investigator", "entity": None,
+     "blurb": "the AI investigator that writes up an entity for you",
+     "kw": ["ai investigator", "ai analyst", "investigate with ai", "auto investigate"]},
+    {"page": "playbooks", "label": "Responder · Playbooks", "entity": None,
+     "blurb": "response playbooks and recommended remediation actions",
+     "kw": ["playbook", "responder", "remediation", "recommended action", "how to respond", "how do i block"]},
+    {"page": "reports", "label": "Reports", "entity": None,
+     "blurb": "exportable reports for management / handover",
+     "kw": ["report", "export report", "pdf", "management summary", "handover", "reports page"]},
+    {"page": "overview", "label": "Overview", "entity": None,
+     "blurb": "the single-verdict command overview and attention list",
+     "kw": ["overview", "dashboard", "home page", "command", "verdict", "start page", "main screen"]},
+]
+
+_HOWTO_RE = _re_h.compile(
+    r"\b(where (?:can|do|should|would) i|where is|where's|which (?:page|screen|tab|section|view)|"
+    r"how (?:do|can) i (?:see|find|view|get to|open|navigate|reach)|take me to|navigate to|"
+    r"go to the|open the|show me where (?:to|i)|where to (?:see|find)|"
+    r"(?:give me|get me|send me|share|show me|what'?s|where'?s|need|want)(?: the)? (?:link|url|page|screen)|"
+    r"link (?:to|for|of)|url (?:to|for|of)|deep[\s\-]?link|take me|jump to|bring me to)\b", _re_h.I)
+_PRODUCT_WORDS = ("page", "screen", "tab", "section", "view", "dashboard", "console", "panel", "menu")
+
+
+def _first_ipv4(q: str):
+    m = _re_h.search(r"\b(\d{1,3}\.){3}\d{1,3}\b", q or "")
+    if m and all(0 <= int(p) <= 255 for p in m.group(0).split(".")):
+        return m.group(0)
+    return None
+
+
+def _looks_howto(q: str) -> bool:
+    """A navigation question about the product itself ('where do I see X?').
+    Requires the navigation phrasing AND a product word or a known feature keyword,
+    so it never steals a data question like 'where did user X log in from'."""
+    if not q or not _HOWTO_RE.search(q):
+        return False
+    ql = " ".join(q.split()).lower()
+    if any(w in ql for w in _PRODUCT_WORDS):
+        return True
+    return any(kw in ql for f in _CS_FEATURES for kw in f["kw"])
+
+
+def _nl_howto_answer(question: str) -> dict:
+    """Answer 'where do I see / how do I get to X' from the hand-authored product
+    map — deterministic, no AI (can't 503, can't invent a page). Returns a short
+    answer plus nav_links the UI renders as one-click deep links."""
+    ql = " ".join((question or "").split()).lower()
+    ip = _first_ipv4(question)
+    scored = []
+    for f in _CS_FEATURES:
+        s = sum(2 + (1 if len(kw) >= 10 else 0) for kw in f["kw"] if kw in ql)
+        if s:
+            scored.append((s, f))
+    scored.sort(key=lambda x: -x[0])
+
+    def _link(f):
+        if ip and f.get("entity") == "ip":
+            return {"label": f"{f['label']} for {ip}", "page": f["page"], "entity": ip}
+        return {"label": "Open " + f["label"], "page": f["page"]}
+
+    if scored:
+        best = scored[0][1]
+        extra = [s[1] for s in scored[1:3] if s[0] >= 2]
+        ans = (f"To see {best['blurb']}, open the {best['label']} "
+               + ("console" if best["page"] == "nlquery" else "page") + ".")
+        if ip and best.get("entity") == "ip":
+            ans += f" The button below opens it straight on {ip}."
+        if extra:
+            ans += " Related: " + ", ".join(f["label"] for f in extra) + "."
+        return {"answer": ans, "nav_links": [_link(best)] + [_link(f) for f in extra],
+                "navonly": True, "product_help": True, "reference": False, "sql": None,
+                "topic": "feature:" + best["page"],
+                "columns": [], "rows": [], "row_count": 0, "elapsed_ms": 0, "ai_generated": False}
+    menu = [f for f in _CS_FEATURES if f["page"] in
+            ("overview", "trail", "ueba", "incidents", "intelligence", "logs")]
+    return {"answer": ("CyberSentinel's main places: Overview (single verdict + attention list), "
+                       "IP Trail (full evidence for an IP), UEBA (identity behaviour), Incidents "
+                       "(correlated attack stories), Logs Explorer (raw events) and Telemetry "
+                       "Intelligence. Tell me what you want to see and I'll take you there."),
+            "nav_links": [{"label": "Open " + f["label"], "page": f["page"]} for f in menu],
+            "navonly": True, "product_help": True, "reference": False, "sql": None,
+            "columns": [], "rows": [], "row_count": 0, "elapsed_ms": 0, "ai_generated": False}
+
+
+_REP_RE = _re_h.compile(
+    r"\b(malicious|known[\s\-]?bad|reputation|blacklist(?:ed)?|black[\s\-]?list|abuseipdb|"
+    r"virustotal|virus total|greynoise|shodan|threat intel|threat-intel|dangerous|"
+    r"is (?:it|this|that) (?:ip )?(?:bad|safe|clean)|flagged|on any (?:block|deny) ?list)\b", _re_h.I)
+
+
+def _looks_reputation(q: str) -> bool:
+    return bool(q) and bool(_REP_RE.search(q))
+
+
+async def _nl_intel_answer(question: str, ip: str) -> dict:
+    """Answer 'is <IP> malicious / known bad' from the external threat-intel hub
+    (AbuseIPDB, VirusTotal, GreyNoise, OTX, Shodan) via intel_hub — cache-first,
+    on-prem-orchestrated, fail-soft. Returns a fused verdict + per-source evidence
+    and clickable source links; an intel outage never blocks triage."""
+    if not intel_hub:
+        raise HTTPException(503, "Threat-intel hub is not available.")
+    data = await intel_hub.lookup_all(
+        ip, osc=osc if (osc and STORE_ENABLED) else None, to_thread=_to_thread)
+    sources = data.get("sources", {}) or {}
+    fused = data.get("fused_score")
+    if data.get("benign_scanner"):
+        verdict_txt, band = "a known benign internet scanner (noise, not a threat)", "benign"
+    elif fused is None:
+        verdict_txt, band = ("no external intel available — no provider keys are armed, or every "
+                             "provider was unreachable"), "unknown"
+    elif fused >= 80:
+        verdict_txt, band = "flagged as malicious / high-risk by external intel", "malicious"
+    elif fused >= 40:
+        verdict_txt, band = "suspicious — some external sources report abuse", "suspicious"
+    else:
+        verdict_txt, band = "largely clean in external intel", "clean"
+    hits = [f"{s.get('label', n)}: {s.get('verdict', '—')}"
+            + (f" ({s['score']}/100)" if s.get("score") is not None else "")
+            for n, s in sources.items()
+            if s.get("verdict") not in (None, "no-key", "unreachable", "rate-limited")]
+    ans = (f"External threat intel on {ip}: "
+           + (f"fused reputation {fused}/100 — " if fused is not None else "")
+           + verdict_txt + "."
+           + ((" " + "; ".join(hits) + ".") if hits else "")
+           + ((" " + data["note"] + ".") if data.get("note") else ""))
+    cols = ["source", "verdict", "score", "evidence"]
+    rows = [[s.get("label", n), s.get("verdict", "—"),
+             (s.get("score") if s.get("score") is not None else "—"), s.get("evidence", "")]
+            for n, s in sources.items()]
+    ext = [{"label": s.get("label", n), "url": s["link"]}
+           for n, s in sources.items() if s.get("link")]
+    nav_links = [{"label": f"IP Trail for {ip}", "page": "trail", "entity": ip},
+                 {"label": "Open Intelligence", "page": "intelligence"}]
+    return {"answer": ans, "intel": True, "intel_band": band,
+            "sql": f"threat-intel hub · {ip} · AbuseIPDB/VirusTotal/GreyNoise/OTX/Shodan (cache-first)",
+            "columns": cols, "rows": rows, "row_count": len(rows),
+            "external_links": ext, "nav_links": nav_links, "topic": "ip:" + ip,
+            "elapsed_ms": 0, "ai_generated": False}
+
+
+# ── Slice D: "how does X work" — grounded product-concept answers ────────────
+# Hand-authored from the REAL implementation so the assistant explains OUR system
+# accurately instead of giving a generic textbook definition. page = where to see
+# it live (deep-link). Deterministic, no AI.
+_CS_CONCEPTS = [
+    {"kw": ["risk score", "entity risk", "risk calculated", "risk computed", "how is risk", "risk band", "scoring work"],
+     "page": "ml",
+     "text": "CyberSentinel's entity-risk is an absolute 0–100 score (roughly 60×points/(points+140)). "
+             "It is severity-weighted and time-decayed (72h half-life), plus concentration, recency and spread, "
+             "with a bump when external intel flags the entity. So a host with a few recent critical events "
+             "outranks a noisy host with only low-severity volume."},
+    {"kw": ["anomaly engine", "isolation forest", "ml model", "anomaly detection", "how does the ml",
+            "anomaly score", "zero-day", "unknown attack", "machine learning work", "ml engine", "ml engines",
+            "risk engine", "how does ml", "how do ml", "how do the ml", "scoring engine", "ai engine", "ai model",
+            "ml anomalies", "ml anomaly", "ml anamlies", "ml anamolies", "anomalies work", "anomaly work",
+            "machine learning algo", "machine learning algorithm", "which algo", "which algorithm", "what algorithm",
+            "which model", "what model", "algo running", "algorithm running", "ml algo", "dl model", "deep learning"],
+     "page": "ml",
+     "text": "The Risk Engine is an unsupervised Isolation Forest (150 trees) over a 19-feature behavioural vector. "
+             "It fuses an anomaly score with baseline-deviation and threat-intel into the 0–100 risk, flags "
+             "behaviour that has no written rule, and auto-retrains on a rolling window — that's how it catches "
+             "novel attacks."},
+    {"kw": ["ueba", "user behaviour", "user behavior", "account takeover", "impossible travel", "peer group", "identity analytics", "insider work"],
+     "page": "ueba",
+     "text": "UEBA learns each identity's normal and flags account-takeover (repeated failures then a success, or a "
+             "login from a new country), impossible travel (two logins too far apart to be real), and peer-group "
+             "outliers (a user behaving far from its peers, z-score based)."},
+    {"kw": ["correlation", "incident", "how are incidents", "attack story", "campaign", "kill chain", "att&ck", "mitre"],
+     "page": "incidents",
+     "text": "Correlation is non-rule and statistical: related events are clustered into one incident (including by "
+             "network /24), mapped onto the MITRE ATT&CK kill chain and ranked by a priority score — so 40 "
+             "scattered alerts become one attack story."},
+    {"kw": ["baseline", "deviation", "normal behaviour", "normal behavior", "how is normal", "baseline work"],
+     "page": "bslexplorer",
+     "text": "A baseline is the learned 'normal' for an entity (event rates, ports, protocols, timing). A deviation is "
+             "when an entity breaks its own baseline; those get escalated for a human on the Deviations view."},
+    {"kw": ["threat intel", "enrichment", "reputation work", "abuseipdb", "virustotal", "intel hub", "how does intel"],
+     "page": "intelligence",
+     "text": "Enrichment checks an IP against external sources (AbuseIPDB, VirusTotal, GreyNoise, OTX, Shodan) for "
+             "reputation — cache-first, on-prem-orchestrated, fail-soft, and only on an explicit lookup. It enriches "
+             "the picture; it does not itself block anything."},
+    {"kw": ["detection use case", "use-case", "threat forecast", "detections work", "out of the box detection"],
+     "page": "overview",
+     "text": "17+ named detection use-cases run continuously as a 'threat forecast' on the Overview — out of the "
+             "box, with no rule authoring required."},
+    {"kw": ["privacy", "sanitis", "sanitiz", "data to ai", "data leave", "send to groq", "sensitive data", "how is data protected", "pseudonym"],
+     "page": "nlquery",
+     "text": "Before anything is sent to the external LLM, real IPs, emails, usernames (and now hosts and ID numbers) "
+             "are swapped for harmless decoys locally and restored on return — and by default log rows are not sent "
+             "at all; the answer is written on-premise. Queries, scoring and evidence stay on the box."},
+    {"kw": ["soc query", "how do you answer", "how does this answer", "how does the chatbot", "nl to sql", "how do you query"],
+     "page": "nlquery",
+     "text": "This console turns plain English into a validated, read-only SQL query, runs it on-premise, and writes "
+             "the answer strictly from the returned rows (it won't invent facts), with the evidence one click away."},
+    {"kw": ["pipeline", "collector", "normaliser", "normalizer", "how do logs", "data flow", "architecture work", "ingestion work"],
+     "page": "overview",
+     "text": "Logs flow Collector → Normaliser → ClickHouse → Risk Engine + Backend → dashboard. The AI/ML "
+             "layer reads that store and adds analytics; it never changes how the SIEM collects events."},
+]
+_HOWIT_RE = _re_h.compile(
+    r"\b(how (?:does|do|is|are|can)|how.{0,20}work|explain|what does .* do|what is the|"
+    r"tell me how|how are .* (?:calculated|computed|scored|detected)|"
+    r"which (?:algo|algorithm|model|engine|ml|technique|method)|"
+    r"what (?:algo|algorithm|model|technique|method)|what(?:'s| is) (?:the )?(?:tech|approach)|"
+    r"is running|are you using|do you use|does it use)\b", _re_h.I)
+
+
+def _looks_howit(q: str):
+    """'How does X work / explain X' about a CyberSentinel concept -> (concept) or None.
+    Requires explanatory phrasing AND a known concept keyword, so it never grabs a
+    generic security question ('how does TLS work') — those go to the reference path."""
+    if not q or not _HOWIT_RE.search(q):
+        return None
+    ql = " ".join(q.split()).lower()
+    best, bs = None, 0
+    for c in _CS_CONCEPTS:
+        s = sum(1 for kw in c["kw"] if kw in ql)
+        if s > bs:
+            best, bs = c, s
+    return best
+
+
+def _nl_howit_answer(concept: dict) -> dict:
+    """Explain one product concept from the curated knowledge base (deterministic)."""
+    f = next((x for x in _CS_FEATURES if x["page"] == concept["page"]), None)
+    links = [{"label": "Open " + f["label"], "page": f["page"]}] if f else []
+    try:
+        _ci = _CS_CONCEPTS.index(concept)
+    except ValueError:
+        _ci = -1
+    return {"answer": concept["text"], "nav_links": links, "navonly": True,
+            "product_help": True, "reference": False, "sql": None, "columns": [],
+            "topic": ("concept:" + str(_ci)) if _ci >= 0 else None,
+            "rows": [], "row_count": 0, "elapsed_ms": 0, "ai_generated": False}
+
+
+# ── Slice E: system / operational status ("is the system healthy?") ─────────
+_STATUS_RE = _re_h.compile(
+    r"\b(system (?:health|status|ok|up)|is the system|is everything (?:ok|working|running)|"
+    r"are (?:things|we) ok|overall status|health check|is the (?:model|engine) (?:trained|ready|running)|"
+    r"model (?:trained|ready|status)|how fresh|data (?:fresh|up to date|current)|last event|"
+    r"are we (?:collecting|ingesting|receiving)|is (?:data|ingestion) (?:coming|working|flowing)|"
+    r"how much data|how many events (?:do we|are there|total)|status of (?:the )?(?:system|platform))\b",
+    _re_h.I)
+
+
+def _looks_status(q: str) -> bool:
+    return bool(q) and bool(_STATUS_RE.search(q))
+
+
+async def _nl_status_answer(question: str) -> dict:
+    """Live operational status from the platform's own internals — store health,
+    data volume, freshness, escalations and resilience grade. Fail-soft: any part
+    that can't be read is simply omitted. No external calls."""
+    parts = []
+    store_ok = True
+    try:
+        h = await health()
+        parts.append(f"store {h.get('store', '?')}, AI {h.get('ai', '?')}")
+        store_ok = h.get("store") == "connected"
+    except Exception:
+        pass
+    try:
+        st = await get_stats()
+        parts.append(f"{int(st.get('total_logs', 0)):,} events across "
+                     f"{int(st.get('unique_ips', 0)):,} unique IPs")
+        na = int(st.get("total_alerts", 0) or 0)
+        nc = len(st.get("critical_ips", []) or [])
+        if na or nc:
+            parts.append(f"{na:,} escalations ({nc} critical IP{'s' if nc != 1 else ''})")
+    except Exception:
+        pass
+    try:
+        latest = await _nl_latest_ts()
+        if latest:
+            parts.append(f"most recent event {latest} (UTC)")
+    except Exception:
+        pass
+    grade = None
+    try:
+        res = await get_resilience()
+        grade = res.get("grade")
+        if grade:
+            parts.append(f"resilience grade {grade} ({res.get('score', '?')}/100)")
+    except Exception:
+        pass
+    lead = "The system looks healthy" if store_ok else "The system has a degraded component"
+    ans = lead + " — " + "; ".join(parts) + "." if parts else \
+        (lead + ".")
+    return {"answer": ans, "nav_links": [{"label": "Open Overview", "page": "overview"}],
+            "navonly": True, "product_help": True, "reference": False, "sql": None,
+            "columns": [], "rows": [], "row_count": 0, "elapsed_ms": 0, "ai_generated": False}
+
+
+# ── Slice F: next-step / response guidance ("what should I do about X?") ─────
+_ACTION_RE = _re_h.compile(
+    r"\b(what should i do|what do i do|how (?:do|should) i (?:respond|handle|remediate|contain|mitigate|deal)|"
+    r"how to (?:respond|handle|remediate|contain|mitigate)|recommended (?:action|response|next step|remediation|playbook)|"
+    r"next step|what action|what'?s the response|response plan|how to stop|should i block)\b", _re_h.I)
+_THREAT_KW = [
+    ("brute", "brute_force"), ("password spray", "password_spraying"), ("port scan", "port_scan"),
+    ("scan", "reconnaissance"), ("malware", "malware"), ("ransom", "ransomware"), ("phish", "phishing"),
+    ("sql inj", "sql_injection"), ("exfil", "data_exfiltration"), ("ddos", "ddos"),
+    ("denial of service", "ddos"), ("lateral", "lateral_movement"), ("privilege", "privilege_escalation"),
+    ("takeover", "account_takeover"), ("c2", "command_and_control"), ("beacon", "command_and_control"),
+]
+
+
+def _looks_action(q: str) -> bool:
+    return bool(q) and bool(_ACTION_RE.search(q))
+
+
+async def _nl_action_answer(question: str) -> dict:
+    """Recommend an ordered response from the playbook catalogue (pbr.draft_response)
+    for the threat in the question — or, if only an IP is named, its dominant threat
+    type from the logs. Grounded in the real action catalogue + ATT&CK mitigations;
+    mutating steps are flagged for approval, never auto-run."""
+    if not pbr:
+        raise HTTPException(503, "The response recommender is not available.")
+    ql = " ".join((question or "").split()).lower()
+    ip = _first_ipv4(question)
+    threat = next((t for kw, t in _THREAT_KW if kw in ql), None)
+    if not threat and ip and osc and STORE_ENABLED:
+        try:
+            r = await _to_thread(lambda: osc._q(
+                f"SELECT threat_type, count() AS c FROM {osc.LOGS_TABLE} "
+                f"WHERE src_ip = {{v:String}} AND threat_type != '' "
+                f"GROUP BY threat_type ORDER BY c DESC LIMIT 1", {"v": ip}))
+            if r and r[0].get("threat_type"):
+                threat = r[0]["threat_type"]
+        except Exception:
+            pass
+    threat = threat or "suspicious_activity"
+    d = await _to_thread(lambda: pbr.draft_response(threat))
+    steps = d.get("steps", []) or []
+    findings = []
+    for i, s in enumerate(steps, 1):
+        tag = " (needs approval — changes something)" if s.get("requires_approval") else \
+              (" (read-only)" if not s.get("mutates") else "")
+        findings.append(f"{i}. {s.get('label', s.get('action', 'step'))}{tag}")
+    tlabel = threat.replace("_", " ")
+    head = (f"Recommended response for {tlabel}"
+            + (f" from {ip}" if ip else "")
+            + " — an ordered playbook; the enrichment steps are safe to run now, the blocking/disable "
+              "steps need your approval before anything changes.")
+    def _mit_name(m):
+        # Mitigations from the intel KB are {id,name,detail} dicts; tolerate plain strings too.
+        return (m.get("name") or m.get("id") or "").strip() if isinstance(m, dict) else str(m).strip()
+    _mits = [x for x in (_mit_name(m) for m in (d.get("mitigations") or [])) if x][:3]
+    interp = ("ATT&CK: " + " / ".join(x for x in [d.get("tactic"), d.get("technique")] if x)
+              + (". Mitigations: " + "; ".join(_mits) if _mits else "")) \
+        if (d.get("technique") or _mits) else \
+        "Enrich first to confirm, then contain; open a case and notify the SOC so the action is tracked."
+    nav_links = [{"label": "Open Responder · Playbooks", "page": "playbooks"}]
+    follow = ["Show the most recent critical activity"]
+    if ip:
+        nav_links.insert(0, {"label": f"IP Trail for {ip}", "page": "trail", "entity": ip})
+        follow = [f"Give me everything about {ip}", f"Is {ip} malicious?"]
+    verdict = {"headline": head, "findings": findings, "interpretation": interp,
+               "follow_ups": follow}
+    return {"answer": head, "verdict": verdict, "nav_links": nav_links, "navonly": True,
+            "product_help": True, "reference": False,
+            "sql": f"response recommender · threat={threat}", "columns": [], "rows": [],
+            "topic": ("ip:" + ip) if ip else ("threat:" + threat),
+            "row_count": 0, "elapsed_ms": 0, "ai_generated": False}
+
+
+# ── Conversational memory: resolve a vague follow-up against the last topic ──
+# Product answers (B/C/D/F) tag themselves with a `topic` (feature:/concept:/ip:/
+# threat:). The UI echoes the previous topic back as context.prev_topic, so a short
+# pronoun follow-up ("what does it do", "how does it work", "tell me more") can be
+# answered about the SAME subject instead of falling through to a blind SQL guess.
+_VAGUE_PRONOUNS = {"it", "this", "that", "they", "them", "its", "one"}
+_VAGUE_PHRASES = (
+    "what does it do", "what does that do", "what does this do", "what it does",
+    "what do they do", "how does it work", "how does that work", "how does this work",
+    "how does it", "how do they work", "what is it", "what's it", "whats it",
+    "what is this", "what is that", "tell me more", "more about", "what about",
+    "explain", "elaborate", "go on", "and that", "and this", "why", "what for",
+    "what's it for", "whats it for", "so what", "meaning", "what do you mean")
+
+
+def _looks_vague_followup(q: str) -> bool:
+    """A short, subject-less question that leans on the previous turn ('what does it
+    do?', 'how does it work?', 'tell me more'). Deliberately strict: >6 words, or a
+    named IP, means the question stands on its own and this does NOT fire."""
+    ql = " ".join((q or "").split()).lower().strip(" ?.!")
+    if not ql or _first_ipv4(q):
+        return False
+    words = ql.split()
+    if len(words) > 6:
+        return False
+    if any(ql == p or ql.startswith(p + " ") for p in _VAGUE_PHRASES):
+        return True
+    # a very short question whose only subject is a pronoun
+    return len(words) <= 5 and any(w in _VAGUE_PRONOUNS for w in words)
+
+
+def _describe_feature(page: str, ip: str = None) -> dict:
+    """Short 'what does <feature> do' answer from the product map + a deep link."""
+    f = next((x for x in _CS_FEATURES if x["page"] == page), None)
+    if not f:
+        return None
+    link = {"label": "Open " + f["label"], "page": page}
+    if ip and f.get("entity") == "ip":
+        link = {"label": f"{f['label']} for {ip}", "page": page, "entity": ip}
+    return {"answer": f"{f['label']} is {f['blurb']}.", "nav_links": [link],
+            "navonly": True, "product_help": True, "reference": False, "sql": None,
+            "topic": "feature:" + page,
+            "columns": [], "rows": [], "row_count": 0, "elapsed_ms": 0, "ai_generated": False}
+
+
+def _ip_quick_menu(ip: str) -> dict:
+    """A vague follow-up while an IP is the running subject -> offer the pivots."""
+    return {"answer": f"We were looking at {ip}. You can open its full evidence trail, "
+                      f"its ML risk score, or its ATT&CK kill chain — or ask whether it's malicious.",
+            "nav_links": [{"label": f"IP Trail for {ip}", "page": "trail", "entity": ip},
+                          {"label": f"Risk score for {ip}", "page": "ml", "entity": ip},
+                          {"label": f"Kill Chain for {ip}", "page": "killchain", "entity": ip}],
+            "navonly": True, "product_help": True, "reference": False, "sql": None,
+            "topic": "ip:" + ip,
+            "verdict": {"headline": f"More on {ip}", "findings": [],
+                        "follow_ups": [f"Is {ip} malicious?", f"What should I do about {ip}?"]},
+            "columns": [], "rows": [], "row_count": 0, "elapsed_ms": 0, "ai_generated": False}
+
+
+async def _resolve_followup_topic(prev_topic: str, question: str):
+    """Map a remembered topic + a vague follow-up onto the right grounded answer."""
+    kind, _, val = (prev_topic or "").partition(":")
+    val = val.strip()
+    if kind == "feature" and val:
+        return _describe_feature(val, _first_ipv4(question))
+    if kind == "concept" and val:
+        try:
+            i = int(val)
+        except ValueError:
+            return None
+        return _nl_howit_answer(_CS_CONCEPTS[i]) if 0 <= i < len(_CS_CONCEPTS) else None
+    if kind == "ip" and val:
+        return _ip_quick_menu(val)
+    if kind == "threat" and val:
+        return await _nl_action_answer(f"what should I do about {val.replace('_', ' ')}")
+    return None
+
+
+# ── LLM front-brain: understand ANY phrasing, answer conversationally, or hand
+# a true data question to the grounded SQL engine ────────────────────────────
+# It makes the console feel like a chatbot instead of a keyword matcher. Privacy:
+# the model sees ONLY the sanitised question + our own product knowledge (feature
+# map + concept notes) — never bank logs, IPs, users or query results. It may NOT
+# answer data questions itself (those stay grounded in real SQL), and it is fully
+# fail-soft: any provider hiccup falls through to the existing SQL path.
+SOC_AI_BRAIN = os.getenv("SOC_AI_BRAIN", "1").strip().lower() not in ("0", "false", "no", "off", "")
+
+# Strong, unambiguous data signals. When present we skip the brain and go straight
+# to SQL (saves a round-trip); conversational questions never contain these.
+_DATA_SIGNALS = _re_h.compile(
+    r"\b(how many|how much|count|number of|list |show (?:all|me all|the |me the )|"
+    r"top (?:\d+ )?(?:ip|src|source|dst|dest|user|host|account|talker|attacker|threat|port|rule|agent)s?|"
+    r"top \d+|top \d|(?:show|list|give me|display|fetch|find|pull up|get me) (?:me )?(?:the )?"
+    r"(?:top|all|every|recent|last|latest|high|critical)|"
+    r"ranked|rank(?:ing)? |most (?:active|events|common|targeted|risky|dangerous)|between .+ and |"
+    r"last \d+ (?:hour|day|minute|week|month)|yesterday|today|this (?:week|month|hour)|"
+    r"failed login|logged in|events? (?:from|for|on|with|in)|which (?:ip|user|host|account)|"
+    r"group by|per (?:ip|user|host|day)|how often|total |any (?:events|alerts|attacks|logins))\b", _re_h.I)
+
+
+def _obviously_data(q: str) -> bool:
+    return bool(_DATA_SIGNALS.search(q or "")) or bool(_first_ipv4(q))
+
+
+def _soc_knowledge_blob(question: str = "") -> str:
+    """Product knowledge for the LLM front-brain. The page list (deep-link targets)
+    is always included; the explanatory knowledge is RETRIEVED from system.md by the
+    vectorless BM25 index for THIS question — so the prompt stays small, stays
+    grounded, and grows just by editing the knowledge file. Falls back to the
+    curated in-code concepts if the KB isn't available."""
+    feats = "\n".join(f"- {f['label']} (page_id={f['page']}): {f['blurb']}" for f in _CS_FEATURES)
+    concepts = ""
+    if kb is not None and question:
+        try:
+            hits = kb.search(question, k=5)
+            # Guarantee the product-identity chunk is present even when a common
+            # domain word (e.g. "SIEM") pulls integration chunks to the top, so the
+            # model never loses the big picture on a "how are you different" question.
+            if hits and not any("what cybersentinel" in h["title"].lower() for h in hits):
+                hits = kb.search("what is cybersentinel ai ml intelligence layer", k=1) + hits
+            if hits:
+                concepts = "\n\n".join(f"### {h['title']}\n{h['text']}" for h in hits)
+        except Exception:
+            concepts = ""
+    if not concepts:  # KB missing/empty or no question -> curated fallback
+        concepts = "\n".join(f"- {c['text']}" for c in _CS_CONCEPTS)
+    return ("AVAILABLE PAGES (deep-link targets):\n" + feats
+            + "\n\nRELEVANT PRODUCT KNOWLEDGE:\n" + concepts)
+
+
+@app.get("/api/kb/search")
+async def kb_search(q: str, k: int = 4):
+    """Vectorless (BM25) retrieval over the product knowledge base (system.md).
+    On-prem, synchronous, word-by-word — nothing leaves the box."""
+    if kb is None:
+        raise HTTPException(503, "knowledge base module not loaded")
+    return {"query": q, "results": kb.search(q, k=max(1, min(int(k), 10))),
+            "stats": kb.stats()}
+
+
+@app.get("/api/kb/stats")
+async def kb_stats():
+    if kb is None:
+        return {"ready": False, "reason": "module not loaded"}
+    return kb.stats()
+
+
+@app.get("/api/nl/cache/stats")
+async def nl_cache_stats():
+    if nl_cache is None:
+        return {"enabled": False, "reason": "module not loaded"}
+    return nl_cache.stats()
+
+
+def _extract_json(s: str):
+    import json as _json
+    if not s:
+        return None
+    m = _re_h.search(r"\{.*\}", s, _re_h.S)
+    if not m:
+        return None
+    try:
+        return _json.loads(m.group(0))
+    except Exception:
+        return None
+
+
+async def _nl_llm_brain(question: str, context_note: str = ""):
+    """Return a conversational answer dict for a product/general/clarify message, or
+    None to defer to the grounded SQL engine (data intent, or any failure)."""
+    safe_q, mp = question, None
+    if ai_safety:
+        try:
+            safe_q, mp = ai_safety.sanitize_for_ai(question)
+        except Exception:
+            safe_q, mp = question, None
+    prompt = (
+        "You are the conversational assistant inside the CyberSentinel SOC platform. "
+        "An analyst typed a message. Decide what they want and reply with STRICT JSON only "
+        "(no prose, no markdown, no code fence).\n\n"
+        'Schema: {"intent":"data|product|general|clarify","page":<page_id or null>,"answer":<string or null>}\n\n'
+        "intent meanings:\n"
+        "- data: they want facts or numbers from the live event store (counts, rankings, a specific "
+        "IP/user/host's activity, time-window queries, failed logins, severities). You must NOT answer "
+        "these; set answer=null and page=null so the platform runs a real query.\n"
+        "- product: how CyberSentinel works, where to find a feature, what a feature/page does, what "
+        "model or algorithm runs, how scoring/detection/correlation/privacy works. Answer in 1-3 "
+        "friendly sentences using ONLY the knowledge below, and set page to the most relevant page_id.\n"
+        "- general: a greeting, thanks, or a general cybersecurity concept not specific to our stored "
+        "data. Answer briefly and helpfully; page may be null.\n"
+        "- clarify: too vague to act on. Put ONE short clarifying question in answer.\n\n"
+        "Hard rules: never invent event data, IP addresses, counts, names or verdicts. Never mention "
+        "vendor or tool names. Keep answers concise and plain.\n\n"
+        f"{_soc_knowledge_blob(safe_q)}\n\n"
+        + (f"CONVERSATION CONTEXT:\n{context_note}\n\n" if context_note else "")
+        + f"ANALYST MESSAGE: {safe_q}\n\nJSON:"
+    )
+    # gpt-oss-20b is a reasoning model: with a rich (retrieved) knowledge prompt a
+    # tight budget gets spent on reasoning and the final content comes back empty.
+    # 700 leaves room for both the reasoning and the short JSON answer.
+    raw = await ask_groq(prompt, max_tokens=700, model=AI_FAST_MODEL)
+    if not raw or raw.startswith("AI provider"):
+        return None
+    obj = _extract_json(raw)
+    if not obj:
+        return None
+    intent = str(obj.get("intent", "")).strip().lower()
+    if intent == "data":
+        return None   # hand off to the grounded SQL engine
+    answer = str(obj.get("answer") or "").strip()
+    if not answer:
+        return None
+    # Out-of-scope general security questions: ground them in live web sources with
+    # citations instead of the model's unsourced memory (fresher, no CVE guessing).
+    # Reuses the reference path, which falls back to this answer if the web is off.
+    if intent == "general" and _looks_webworthy(safe_q) \
+            and web_search is not None and web_search.enabled():
+        try:
+            _ref = await _nl_reference_answer(question)
+            if _ref is not None and _ref.get("web"):
+                return _ref
+        except HTTPException:
+            pass   # reference AI busy -> use the brain's own answer below
+        except Exception:
+            pass
+    if mp:   # put any real identifiers back into the displayed answer
+        try:
+            answer = ai_safety.restore_from_ai(answer, mp)
+        except Exception:
+            pass
+    page = obj.get("page")
+    nav_links, topic = [], None
+    feat = next((f for f in _CS_FEATURES if f["page"] == page), None) if page else None
+    if feat:
+        nav_links = [{"label": "Open " + feat["label"], "page": feat["page"]}]
+        topic = "feature:" + feat["page"]
+    return {"answer": answer, "nav_links": nav_links, "navonly": True,
+            "product_help": intent != "general", "reference": intent == "general",
+            "sql": None, "topic": topic, "columns": [], "rows": [],
+            "row_count": 0, "elapsed_ms": 0, "ai_generated": True}
+
+
 @app.post("/api/nl/query")
 async def nl_query(payload: dict):
     question = payload.get("question", "").strip()
     if not question:
         raise HTTPException(400, "Question required")
+
+    # Input guardrails: reject oversized input and prompt-injection / prompt-leak
+    # attempts BEFORE anything reaches the LLM, the web connector or the SQL
+    # generator. `question` becomes the cleaned (control-char-stripped) text.
+    if guardrails is not None:
+        _ok, _why, question = guardrails.check(question)
+        if not _ok:
+            if _why == "empty":
+                raise HTTPException(400, "Question required")
+            _gmsg = {
+                "too_long": (f"That message is too long — please shorten it to under "
+                             f"{guardrails.max_chars()} characters and ask again."),
+                "injection": ("I can only help with security analysis of your environment and "
+                              "general security questions — I can't follow instructions that try to "
+                              "change how I work. Try asking about an IP, a user, a detection, or a "
+                              "security concept."),
+            }.get(_why, "I can't process that input.")
+            return {"answer": _gmsg, "reference": True, "blocked": True, "guardrail": _why,
+                    "sql": None, "columns": [], "rows": [], "row_count": 0,
+                    "elapsed_ms": 0, "ai_generated": False}
 
     # Conversation memory: the UI sends the previous question + the entities from
     # the last answer so follow-ups ("did THESE IPs…", "the same user yesterday")
@@ -5553,10 +6570,81 @@ async def nl_query(payload: dict):
     except Exception:
         context_note = ""
 
+    # Conversational follow-up: a short, subject-less question ("what does it do?",
+    # "how does it work?", "tell me more") answered about the SAME topic as the last
+    # turn, using the topic tag the UI echoed back. Runs first so it isn't misread
+    # as a blind data query. Only fires when there IS a remembered topic.
+    _prev_topic = str(context.get("prev_topic") or "").strip()
+
+    # Lexical semantic cache: for a standalone (no conversation context) non-data
+    # question, return a near-duplicate's cached answer with zero Groq/Tavily call.
+    # Follow-ups and obvious data questions skip the cache (they're context- or
+    # live-data-dependent). Entity (IP) questions are excluded inside the cache.
+    _no_ctx = not _prev_topic and not str(context.get("prev_question") or "").strip()
+    if nl_cache is not None and _no_ctx and not _obviously_data(question):
+        _c = nl_cache.get(question)
+        if _c is not None:
+            return _c
+
+    if _prev_topic and _looks_vague_followup(question):
+        try:
+            _r = await _resolve_followup_topic(_prev_topic, question)
+            if _r is not None:
+                return _r
+        except HTTPException:
+            raise
+        except Exception:
+            pass   # fall through to normal handling
+
+    # Reputation of a SPECIFIC IP ("is 1.2.3.4 malicious / known bad?") -> the
+    # external threat-intel hub (reuses intel_hub: cache-first, on-prem-orchestrated,
+    # fail-soft). Needs an IP; without one, a reputation word falls through to the
+    # definitional path ("what is a blacklist").
+    _intel_ip = _first_ipv4(question)
+    if _looks_reputation(question) and _intel_ip:
+        try:
+            return await _nl_intel_answer(question, _intel_ip)
+        except HTTPException:
+            raise
+        except Exception:
+            pass   # intel hiccup — fall through to normal grounded handling
+
+    # Next-step / response guidance ("what should I do about X / how do I respond")
+    # -> an ordered playbook from the real action catalogue + ATT&CK mitigations.
+    if _looks_action(question):
+        try:
+            return await _nl_action_answer(question)
+        except HTTPException:
+            raise
+        except Exception:
+            pass
+
+    # Product navigation ("where do I see X / which page shows Y") -> a deep-link
+    # answer from the hand-authored product map (deterministic, no AI).
+    if _looks_howto(question):
+        return _nl_howto_answer(question)
+
+    # "How does X work / explain X" about a CyberSentinel concept -> grounded
+    # product-concept answer (deterministic KB), with a deep-link to see it live.
+    _concept = _looks_howit(question)
+    if _concept:
+        return _nl_howit_answer(_concept)
+
+    # Live operational status ("is the system healthy / how fresh is the data")
+    # -> read the platform's own internals (store, volume, freshness, resilience).
+    if _looks_status(question):
+        try:
+            return await _nl_status_answer(question)
+        except Exception:
+            pass
+
     # General security-knowledge questions (CVE / MITRE / "what is X") are answered
     # from reference knowledge, clearly labelled — never turned into an empty log query.
-    if _looks_definitional(question):
-        return await _nl_reference_answer(question)
+    if _looks_definitional(question) or _looks_mitigation(question):
+        _ref = await _nl_reference_answer(question)
+        if nl_cache is not None and _no_ctx:
+            nl_cache.put(question, _ref)
+        return _ref
 
     # Vague "who is the insider threat / most risky" questions -> the entity-risk
     # ranking (deterministic, grounded, no AI call — so it can't 503 or invent a name).
@@ -5570,6 +6658,23 @@ async def nl_query(payload: dict):
     _ent = _looks_entity_dossier(question)
     if _ent:
         return await _nl_entity_dossier(_ent[0], _ent[1], question)
+
+    # LLM front-brain: the fast matchers above handle the common product questions
+    # instantly and offline. Anything they missed that is NOT an obvious data query
+    # goes to the model, which either answers conversationally (product/general/
+    # clarify) or returns None to defer to the grounded SQL engine below. It only
+    # ever sees the sanitised question + our product knowledge. Fail-soft.
+    if SOC_AI_BRAIN and not _obviously_data(question):
+        try:
+            _brain = await _nl_llm_brain(question, context_note)
+            if _brain is not None:
+                if nl_cache is not None and _no_ctx:
+                    nl_cache.put(question, _brain)
+                return _brain
+        except HTTPException:
+            raise
+        except Exception:
+            pass   # provider hiccup — fall through to SQL
 
     # Preset demo questions run instantly from hardcoded SQL; anything else -> AI.
     sql = _NL_PRESETS.get(_normalize_q(question))

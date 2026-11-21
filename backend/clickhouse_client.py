@@ -1189,6 +1189,21 @@ def save_deviations(ip: str, alerts: list[dict]) -> bool:
         return False
 
 
+def get_agent_last_seen(agents: list[str]) -> dict[str, Optional[str]]:
+    """Most-recent event ts per agent (the log-sending server), for the SR-64
+    silence watchdog. Returns {agent: iso_ts}; an agent that has NEVER sent a
+    log is simply absent from the result (caller treats that as silent)."""
+    agents = [a for a in (agents or []) if a]
+    if not agents:
+        return {}
+    rows = _q(
+        f"SELECT agent, max(ts) AS last FROM {LOGS_TABLE} "
+        f"WHERE agent IN {{agents:Array(String)}} GROUP BY agent",
+        {"agents": agents},
+    )
+    return {r["agent"]: _iso(r.get("last")) for r in rows}
+
+
 def _deviations_base_sql() -> str:
     """argMax deduplication — avoids FINAL table scan on ReplacingMergeTree."""
     return (f"SELECT ip, type, "

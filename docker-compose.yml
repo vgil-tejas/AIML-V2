@@ -82,7 +82,14 @@ services:
     ports:
       - "127.0.0.1:${BACKEND_HOST_PORT:-18110}:8000"
     environment:
+      # ── Threat-intel provider keys (read by backend/intel_hub.py) ──
+      # Values come from .env (gitignored); only the NAMES live here, so no secret is
+      # committed. Empty default => that provider stays disabled and fails soft.
       - ABUSEIPDB_KEY=${ABUSEIPDB_KEY:-demo}
+      - VT_KEY=${VT_KEY:-}
+      - GREYNOISE_KEY=${GREYNOISE_KEY:-}
+      - OTX_KEY=${OTX_KEY:-}
+      - SHODAN_KEY=${SHODAN_KEY:-}
       # ── Login gate (single operator) — see backend/auth.py ──
       - AUTH_ENABLED=${AUTH_ENABLED:-true}
       - AUTH_USER=${AUTH_USER:-Tejas}
@@ -119,6 +126,33 @@ services:
       # SOC Query privacy: OFF = grounded answer written on-premise, no data leaves
       # the box. Set to 1 to also get LLM phrasing (receives only sanitised facts).
       - SOC_AI_NARRATION=${SOC_AI_NARRATION:-}
+      # SOC Query conversational front-brain: the model understands any phrasing and
+      # answers product/general questions from our knowledge (never bank data), and
+      # defers real data questions to on-prem SQL. Set 0 for strict keyword+SQL only.
+      - SOC_AI_BRAIN=${SOC_AI_BRAIN:-1}
+      # ── OPTCL SIEM integration ───────────────────────────────────────────
+      # C2 read-only alert feed (/api/siem/alerts). Inert (503) until the SIEM's
+      # own token is set; NEVER the operator login cookie. Keep the real token in
+      # server .env, never committed.
+      - SIEM_FEED_TOKEN=${SIEM_FEED_TOKEN:-}
+      - SIEM_CONSOLE_BASE=${SIEM_CONSOLE_BASE:-}
+      # SR 64 silence watchdog: comma-separated watch-list of servers that MUST
+      # always send. Empty = disabled (laptops never alarm). 300s = 5 min.
+      - SILENCE_WATCHLIST=${SILENCE_WATCHLIST:-}
+      - SILENCE_THRESHOLD_SECONDS=${SILENCE_THRESHOLD_SECONDS:-300}
+      - SILENCE_CHECK_SECONDS=${SILENCE_CHECK_SECONDS:-60}
+      # Tavily web-search fallback for out-of-scope / mitigation questions. Inert
+      # until the key is set; the question is sanitised before egress and a query
+      # carrying an IP is refused. Keep the real key in server .env, never commit.
+      - TAVILY_API_KEY=${TAVILY_API_KEY:-}
+      - TAVILY_TIMEOUT=${TAVILY_TIMEOUT:-8}
+      - TAVILY_MAX_RESULTS=${TAVILY_MAX_RESULTS:-5}
+      # SOC Query input guardrails + lexical answer cache (cuts repeat Groq calls)
+      - SOC_INPUT_MAX_CHARS=${SOC_INPUT_MAX_CHARS:-1500}
+      - NL_CACHE=${NL_CACHE:-1}
+      - NL_CACHE_TTL=${NL_CACHE_TTL:-3600}
+      - NL_CACHE_MAX=${NL_CACHE_MAX:-500}
+      - NL_CACHE_SIM=${NL_CACHE_SIM:-0.8}
       - LOG_LEVEL=INFO
       - CLICKHOUSE_ENABLED=${CLICKHOUSE_ENABLED:-true}
       - CLICKHOUSE_HOST=clickhouse
@@ -147,6 +181,9 @@ services:
       - backend_data:/app/data
       # customer-editable response playbooks — edit YAML, restart backend, done
       - ./backend/playbooks.d:/app/playbooks.d:ro
+      # product knowledge base for SOC Query — edit system.md, NO restart needed
+      # (the vectorless BM25 index auto-reloads on the file's next mtime change)
+      - ./backend/knowledge:/app/knowledge:ro
     depends_on:
       clickhouse:
         condition: service_healthy
