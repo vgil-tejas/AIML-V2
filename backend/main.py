@@ -4886,6 +4886,36 @@ _CAT_FAIL = {"deny", "denied", "drop", "dropped", "block", "blocked", "reject",
 _CAT_HINT_CACHE = {"text": "", "ts": 0.0}
 _CAT_HINT_TTL = 1800          # 30 min — vocabulary changes slowly
 _CAT_HINT_WINDOW_DAYS = 30    # recent window keeps the GROUP BY cheap at scale
+_DISTINCT_CACHE: dict = {}    # col -> (ts, [values by frequency]) — shared, per-column
+
+
+def _distinct_values(col: str, limit: int = 40) -> list:
+    """The real vocabulary of a LOW-CARDINALITY column, most-frequent first.
+    Cached per-column (TTL) and fail-soft. Single source of 'what values really
+    exist' for both the prompt grounding and the empty-result diagnosis — nothing
+    about the data vocabulary is ever hardcoded.
+
+    NO time filter on purpose: (1) correctness — the data can lag wall-clock badly
+    (the whole NL path anchors windows to max(ts), not now()), so a now()-based
+    window would miss real values and we'd falsely call them 'not in your data';
+    (2) cost — these are low-cardinality columns (dictionary-encoded), so a bare
+    GROUP BY is cheap, and the result is cached, so it runs rarely."""
+    now = time.time()
+    hit = _DISTINCT_CACHE.get(col)
+    if hit and (now - hit[0]) < _CAT_HINT_TTL:
+        return hit[1]
+    if not (osc and STORE_ENABLED):
+        return hit[1] if hit else []
+    try:
+        rows = osc._q(
+            f"SELECT {col} AS v, count() AS c FROM {osc.LOGS_TABLE} "
+            f"WHERE {col} != '' GROUP BY {col} ORDER BY c DESC LIMIT {int(limit)}")
+        vals = [str(r["v"]).strip() for r in rows if str(r.get("v", "")).strip()]
+    except Exception as e:
+        logger.warning(f"distinct values for {col} failed: {e}")
+        return hit[1] if hit else []
+    _DISTINCT_CACHE[col] = (now, vals)
+    return vals
 
 
 def _categorical_values_hint() -> str:
@@ -4900,26 +4930,18 @@ def _categorical_values_hint() -> str:
     if not (osc and STORE_ENABLED):
         return cached
     lines, success_present, fail_present = [], [], []
-    try:
-        for col in _CAT_COLS:
-            rows = osc._q(
-                f"SELECT {col} AS v, count() AS c FROM {osc.LOGS_TABLE} "
-                f"WHERE {col} != '' AND ts >= now() - INTERVAL {_CAT_HINT_WINDOW_DAYS} DAY "
-                f"GROUP BY {col} ORDER BY c DESC LIMIT 40")
-            vals = [str(r["v"]).strip() for r in rows if str(r.get("v", "")).strip()]
-            if not vals:
-                continue
-            lines.append(f"- {col}: {', '.join(vals)}")
-            if col == "action":
-                for v in vals:
-                    lv = v.lower()
-                    if lv in _CAT_SUCCESS:
-                        success_present.append(v)
-                    elif lv in _CAT_FAIL:
-                        fail_present.append(v)
-    except Exception as e:                       # never break the query path on this
-        logger.warning(f"categorical grounding hint failed: {e}")
-        return cached
+    for col in _CAT_COLS:
+        vals = _distinct_values(col, 40)
+        if not vals:
+            continue
+        lines.append(f"- {col}: {', '.join(vals)}")
+        if col == "action":
+            for v in vals:
+                lv = v.lower()
+                if lv in _CAT_SUCCESS:
+                    success_present.append(v)
+                elif lv in _CAT_FAIL:
+                    fail_present.append(v)
     if not lines:
         return cached
     blob = ("Known values present in the data (match these EXACTLY as written — "
@@ -4938,6 +4960,117 @@ def _categorical_values_hint() -> str:
                  + "; ".join(outcome) + ".")
     _CAT_HINT_CACHE.update(text=blob, ts=now)
     return blob
+
+
+# --- Empty-result self-correction ----------------------------------------
+# A query that EXECUTES but returns 0 rows is the silent-wrong-answer trap: valid
+# SQL, no exception, so the self-repair loop never fires — the analyst just sees
+# "nothing happened". Usually the cause is an exact-match filter on a value that
+# doesn't exist (action='allow' vs 'allowed', severity='Critical' vs 'critical',
+# or username='attempts' where a word was mistaken for an entity). We find the dead
+# filter by PROBING the live data (never a hardcoded value list), feed it back to
+# the model to retry, and — if still empty — tell the analyst exactly what didn't
+# resolve instead of implying the event never happened.
+# Only LOW-CARDINALITY columns are diagnosed — their full value set is cheaply
+# cached (bounded GROUP BY), so membership is an in-memory check with ZERO extra DB
+# load. High-cardinality columns (src_ip, username, dst_ip, agent) are deliberately
+# excluded: confirming a value's ABSENCE there would full-scan 142M rows on the
+# shared box (the known read-load trap), and a 0 on those is usually a legitimate
+# "that entity had no activity" anyway.
+_DIAG_CAT_COLS = {"action", "severity", "threat_type", "logon_type", "mitre_tactic",
+                  "mitre_technique", "decoder", "country", "dst_port", "rule_id"}
+_DIAG_COLS = _DIAG_CAT_COLS
+
+
+def _extract_filters(sql: str) -> list:
+    """Pull (col, op, value) predicates on known low-cardinality columns:
+      - `col = 'v'`              -> ('eq', 'v')
+      - `col IN ('a','b')`       -> ('eq','a'), ('eq','b')
+      - `col ILIKE '%term%'`     -> ('like', 'term')   (pattern stripped to its core)
+    These are the shapes that can silently zero a result on a value that doesn't
+    exist. >=/<=/!= are ignored (not value-existence filters)."""
+    import re
+    out = []
+    for m in re.finditer(r"(?<![!<>])\b([a-z_]+)\s*=\s*'([^']*)'", sql):
+        col = m.group(1).lower()
+        if col in _DIAG_COLS:
+            out.append((col, "eq", m.group(2)))
+    for m in re.finditer(r"\b([a-z_]+)\s+IN\s*\(([^)]*)\)", sql, re.I):
+        col = m.group(1).lower()
+        if col in _DIAG_COLS:
+            for v in re.findall(r"'([^']*)'", m.group(2)):
+                out.append((col, "eq", v))
+    for m in re.finditer(r"\b([a-z_]+)\s+ILIKE\s+'([^']*)'", sql, re.I):
+        col = m.group(1).lower()
+        if col in _DIAG_COLS:
+            term = m.group(2).strip("%").strip().strip("_")
+            if len(term) >= 3:        # ignore trivially-short patterns
+                out.append((col, "like", term))
+    return out
+
+
+def _diagnose_empty(sql: str) -> list:
+    """For a 0-row query, return the exact-match filters whose value matches NOTHING
+    in the live data: [{col, value, suggestions}]. Checks each value against the
+    cached live vocabulary of its (low-cardinality) column — instant, no extra DB
+    load, no hardcoded values. Conservative: only flags a filter it can CONFIRM is
+    dead (value, exact-case, absent from a non-empty known-value set)."""
+    if not (osc and STORE_ENABLED):
+        return []
+    import difflib
+    problems, seen = [], set()
+    for col, op, v in _extract_filters(sql):
+        if col not in _DIAG_CAT_COLS or (col, v) in seen:
+            continue
+        pool = _distinct_values(col, 200)
+        if not pool:                               # no vocabulary -> can't confirm anything
+            continue
+        lv = v.lower()
+        if op == "eq":
+            if any(v == p for p in pool):          # exact value exists -> fine
+                continue
+        else:                                      # 'like' — fine if ANY value contains the term
+            if any(lv in p.lower() for p in pool):
+                continue
+        seen.add((col, v))
+        ci = [p for p in pool if p.lower() == lv]              # right value, wrong case (eq)
+        near = difflib.get_close_matches(v, pool, n=3, cutoff=0.4)
+        sugg = list(dict.fromkeys(ci + near)) or pool[:4]      # fall back to the real options
+        problems.append({"col": col, "value": v, "suggestions": sugg})
+    return problems
+
+
+def _empty_correction_note(problems: list) -> str:
+    """Model-facing: why the previous query returned nothing, so it can rewrite."""
+    lines = ["Your previous query executed but returned 0 rows because these "
+             "exact-match filters match NOTHING in the data. Return a corrected SELECT:"]
+    for p in problems:
+        s = f"- {p['col']} = '{p['value']}' : no such value in column {p['col']}."
+        if p.get("suggestions"):
+            s += " Real values include: " + ", ".join(p["suggestions"]) + \
+                 " — use the correct one (exact case)."
+        else:
+            s += (f" If '{p['value']}' came from the question's wording (a verb/noun, "
+                  f"not a real {p['col']}), DROP this filter or reinterpret the intent.")
+        lines.append(s)
+    lines.append("Use only values that exist, or match loosely with ILIKE '%term%'. "
+                 "Do NOT reintroduce an impossible filter.")
+    return "\n".join(lines)
+
+
+def _empty_human_note(problems: list) -> str:
+    """Analyst-facing: an honest explanation instead of a bare 'no records'."""
+    bits = []
+    for p in problems:
+        if p.get("suggestions"):
+            bits.append(f"`{p['col']} = '{p['value']}'` isn't a value in your data "
+                        f"(closest: {', '.join(p['suggestions'])})")
+        else:
+            bits.append(f"`{p['col']} = '{p['value']}'` matched nothing — "
+                        f"'{p['value']}' may not be a real {p['col']}")
+    return ("No events matched — but heads-up: " + "; ".join(bits) +
+            ". I may have read the question wrong; try rephrasing, or name a specific "
+            "IP, user, host, port or time range.")
 
 
 def _normalize_q(q: str) -> str:
@@ -5518,6 +5651,12 @@ Rules:
   store a FIXED vocabulary. Use ONLY values from "Known values present in the data"
   above. Never guess a literal (e.g. do NOT write action='allow' — the value is 'allowed').
   If the needed value isn't listed, match loosely with ILIKE '%term%' instead of '='.
+- NEVER turn a generic English word from the question into a username/agent/entity
+  filter. Words like "attempts", "logins", "activity", "events", "connections",
+  "access", "traffic" describe the KIND of event, not an account or host — they map
+  to action/threat_type/rule/dst_port, never to username=... or agent=...
+  ("failed login attempts" = action='failed' (or threat_type ILIKE '%brute%'), with
+  NO username filter at all).
 - Return ONLY the raw SQL query. No markdown, no backticks, no explanation, no comments.
 - Only SELECT statements. Absolutely no INSERT/UPDATE/DELETE/DROP/CREATE/ALTER.
 - DECIDE row-level vs aggregate FIRST, then never mix them:
@@ -6834,11 +6973,38 @@ async def nl_query(payload: dict):
                 break                    # model isn't changing it — stop retrying
             cur_sql = nxt
 
+    # Empty-result self-correction: the SQL was VALID but returned 0 rows. Before we
+    # tell the analyst "nothing happened", prove that's actually true — a 0 caused by
+    # a filter on a non-existent value (action='allow', username='attempts') is a
+    # wrong answer, not an empty one. Diagnose the dead filter from live data, feed it
+    # back once, re-run. If still empty, annotate the answer honestly.
+    empty_note = ""
+    if result is not None and result["row_count"] == 0 and ai_generated:
+        problems = await _to_thread(lambda q=result["sql"]: _diagnose_empty(q))
+        if problems:
+            try:
+                nxt = await _nl_sql_from_ai(
+                    question, prior_sql=result["sql"],
+                    error=_empty_correction_note(problems), context_note=context_note)
+                nxt = _validate_nl_sql(nxt)
+                if nxt and nxt.strip() != result["sql"].strip():
+                    result = await _to_thread(lambda q=nxt: _run_query(q))
+            except Exception:
+                pass                     # keep the original empty result; annotate below
+        if result["row_count"] == 0:     # still empty -> explain WHY, don't mislead
+            still = await _to_thread(lambda q=result["sql"]: _diagnose_empty(q))
+            if still:
+                empty_note = _empty_human_note(still)
+
     if result is not None:
         # Grounded answer: written STRICTLY from the rows we just fetched, with the
         # SQL and the raw rows returned alongside so the analyst can verify it.
-        result["answer"] = await _nl_answer(
-            question, result["columns"], result["rows"], result["row_count"], result["sql"])
+        if empty_note:                   # honest diagnosis beats a generic "no records"
+            result["answer"] = empty_note
+            result["note"] = empty_note
+        else:
+            result["answer"] = await _nl_answer(
+                question, result["columns"], result["rows"], result["row_count"], result["sql"])
         result["verdict"] = _nl_verdict(
             question, result["columns"], result["rows"], result["row_count"],
             result["row_count"] >= 200)
