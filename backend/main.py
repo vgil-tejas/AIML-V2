@@ -4971,15 +4971,42 @@ def _categorical_values_hint() -> str:
 # filter by PROBING the live data (never a hardcoded value list), feed it back to
 # the model to retry, and — if still empty — tell the analyst exactly what didn't
 # resolve instead of implying the event never happened.
-# Only LOW-CARDINALITY columns are diagnosed — their full value set is cheaply
-# cached (bounded GROUP BY), so membership is an in-memory check with ZERO extra DB
-# load. High-cardinality columns (src_ip, username, dst_ip, agent) are deliberately
-# excluded: confirming a value's ABSENCE there would full-scan 142M rows on the
-# shared box (the known read-load trap), and a 0 on those is usually a legitimate
-# "that entity had no activity" anyway.
+# Low-cardinality columns whose full value set is cheaply cached (bounded GROUP BY),
+# so membership is an in-memory check with ZERO extra DB load.
 _DIAG_CAT_COLS = {"action", "severity", "threat_type", "logon_type", "mitre_tactic",
                   "mitre_technique", "decoder", "country", "dst_port", "rule_id"}
-_DIAG_COLS = _DIAG_CAT_COLS
+# Entity columns that are SEMANTICALLY BOUNDED (accounts, hostnames) — enumerable
+# safely, so we can catch a mis-parsed filter like username='for'. Their value set
+# is fetched LAZILY (only when an empty query actually filters one) and SKIPPED if
+# the column turns out high-cardinality. src_ip/dst_ip stay excluded — enumerating
+# or absence-probing those would full-scan 142M rows on the shared box, and a 0 on
+# an IP is usually a legitimate "no activity".
+_DIAG_ENTITY_COLS = {"username", "agent", "target_user"}
+_DIAG_COLS = _DIAG_CAT_COLS | _DIAG_ENTITY_COLS
+_ENTITY_SET_CACHE: dict = {}       # col -> (ts, set|None)  (None = too high-card to use)
+_ENTITY_CARD_CAP = 5000            # above this a column is treated as un-enumerable
+
+
+def _known_entity_set(col: str):
+    """Full value set of a bounded entity column (username/agent/target_user), or
+    None if it's too high-cardinality to enumerate safely (then we don't diagnose
+    it). Lazy + cached, so the single bounded aggregate runs rarely. Fail-soft."""
+    now = time.time()
+    hit = _ENTITY_SET_CACHE.get(col)
+    if hit and (now - hit[0]) < _CAT_HINT_TTL:
+        return hit[1]
+    if not (osc and STORE_ENABLED):
+        return hit[1] if hit else None
+    try:
+        rows = osc._q(f"SELECT {col} AS v FROM {osc.LOGS_TABLE} "
+                      f"WHERE {col} != '' GROUP BY {col} LIMIT {_ENTITY_CARD_CAP + 1}")
+        vals = [str(r["v"]).strip() for r in rows if str(r.get("v", "")).strip()]
+    except Exception as e:
+        logger.warning(f"entity set for {col} failed: {e}")
+        return hit[1] if hit else None
+    result = None if len(vals) > _ENTITY_CARD_CAP else set(vals)
+    _ENTITY_SET_CACHE[col] = (now, result)
+    return result
 
 
 def _extract_filters(sql: str) -> list:
@@ -5020,41 +5047,73 @@ def _diagnose_empty(sql: str) -> list:
     import difflib
     problems, seen = [], set()
     for col, op, v in _extract_filters(sql):
-        if col not in _DIAG_CAT_COLS or (col, v) in seen:
-            continue
-        pool = _distinct_values(col, 200)
-        if not pool:                               # no vocabulary -> can't confirm anything
+        if (col, v) in seen:
             continue
         lv = v.lower()
-        if op == "eq":
-            if any(v == p for p in pool):          # exact value exists -> fine
+        if col in _DIAG_CAT_COLS:
+            pool = _distinct_values(col, 200)
+            if not pool:                           # no vocabulary -> can't confirm anything
                 continue
-        else:                                      # 'like' — fine if ANY value contains the term
-            if any(lv in p.lower() for p in pool):
+            if op == "eq" and any(v == p for p in pool):       # exact value exists -> fine
                 continue
+            if op == "like" and any(lv in p.lower() for p in pool):   # substring exists -> fine
+                continue
+            ci = [p for p in pool if p.lower() == lv]           # right value, wrong case
+            near = difflib.get_close_matches(v, pool, n=3, cutoff=0.4)
+            sugg = list(dict.fromkeys(ci + near)) or pool[:4]
+        elif col in _DIAG_ENTITY_COLS and op == "eq":
+            known = _known_entity_set(col)         # None -> too high-card, don't flag
+            if known is None or v in known:
+                continue
+            near = difflib.get_close_matches(v, list(known), n=3, cutoff=0.6)
+            sugg = near                            # for an entity, don't dump the whole roster
+        else:
+            continue
         seen.add((col, v))
-        ci = [p for p in pool if p.lower() == lv]              # right value, wrong case (eq)
-        near = difflib.get_close_matches(v, pool, n=3, cutoff=0.4)
-        sugg = list(dict.fromkeys(ci + near)) or pool[:4]      # fall back to the real options
-        problems.append({"col": col, "value": v, "suggestions": sugg})
+        problems.append({"col": col, "value": v, "suggestions": sugg,
+                         "entity": col in _DIAG_ENTITY_COLS})
     return problems
+
+
+def _strip_predicate(sql: str, col: str, value: str) -> str:
+    """Remove a single `col = 'value'` conjunct (plus one adjacent AND) from a WHERE
+    clause. Used to delete a filter we've PROVEN matches nothing — removing a
+    zero-matching predicate can only surface legitimate rows, never hide any."""
+    import re
+    pred = re.escape(col) + r"\s*=\s*'" + re.escape(value) + r"'"
+    for pat in (r"\b" + pred + r"\s+AND\s+",            # "<pred> AND "
+                r"\s+AND\s+" + pred + r"\b",            # " AND <pred>"
+                r"\bWHERE\s+" + pred + r"\s+",          # "WHERE <pred> " (only filter)
+                r"\b" + pred + r"\b"):                  # bare
+        new = re.sub(pat, lambda m: ("WHERE " if m.group(0).upper().startswith("WHERE") else " "),
+                     sql, count=1, flags=re.I)
+        if new != sql:
+            return new
+    return sql
 
 
 def _empty_correction_note(problems: list) -> str:
     """Model-facing: why the previous query returned nothing, so it can rewrite."""
     lines = ["Your previous query executed but returned 0 rows because these "
-             "exact-match filters match NOTHING in the data. Return a corrected SELECT:"]
+             "filters match NOTHING in the data. Return a corrected SELECT:"]
     for p in problems:
-        s = f"- {p['col']} = '{p['value']}' : no such value in column {p['col']}."
-        if p.get("suggestions"):
-            s += " Real values include: " + ", ".join(p["suggestions"]) + \
-                 " — use the correct one (exact case)."
+        if p.get("entity"):
+            s = (f"- {p['col']} = '{p['value']}' : there is no such account/host. "
+                 f"'{p['value']}' is almost certainly a word from the question, NOT an "
+                 f"identity — REMOVE this filter entirely (do not filter {p['col']} at all).")
+            if p.get("suggestions"):
+                s += " (If a real account was meant, the closest is: " + \
+                     ", ".join(p["suggestions"]) + ".)"
         else:
-            s += (f" If '{p['value']}' came from the question's wording (a verb/noun, "
-                  f"not a real {p['col']}), DROP this filter or reinterpret the intent.")
+            s = f"- {p['col']} = '{p['value']}' : no such value in column {p['col']}."
+            if p.get("suggestions"):
+                s += " Real values are: " + ", ".join(p["suggestions"]) + \
+                     " — use the correct one (exact case)."
+            else:
+                s += " DROP this filter or reinterpret the intent."
         lines.append(s)
-    lines.append("Use only values that exist, or match loosely with ILIKE '%term%'. "
-                 "Do NOT reintroduce an impossible filter.")
+    lines.append("Use only values/accounts that exist, or match loosely with ILIKE "
+                 "'%term%'. Do NOT reintroduce an impossible filter.")
     return "\n".join(lines)
 
 
@@ -5062,15 +5121,17 @@ def _empty_human_note(problems: list) -> str:
     """Analyst-facing: an honest explanation instead of a bare 'no records'."""
     bits = []
     for p in problems:
-        if p.get("suggestions"):
+        if p.get("entity"):
+            bits.append(f"I filtered on {p['col']} `'{p['value']}'`, but that isn't a "
+                        f"real account/host — I likely mistook a word in your question "
+                        f"for a name")
+        elif p.get("suggestions"):
             bits.append(f"`{p['col']} = '{p['value']}'` isn't a value in your data "
                         f"(closest: {', '.join(p['suggestions'])})")
         else:
-            bits.append(f"`{p['col']} = '{p['value']}'` matched nothing — "
-                        f"'{p['value']}' may not be a real {p['col']}")
+            bits.append(f"`{p['col']} = '{p['value']}'` matched nothing")
     return ("No events matched — but heads-up: " + "; ".join(bits) +
-            ". I may have read the question wrong; try rephrasing, or name a specific "
-            "IP, user, host, port or time range.")
+            ". Try rephrasing, or name a specific IP, user, host, port or time range.")
 
 
 def _normalize_q(q: str) -> str:
@@ -5651,12 +5712,16 @@ Rules:
   store a FIXED vocabulary. Use ONLY values from "Known values present in the data"
   above. Never guess a literal (e.g. do NOT write action='allow' — the value is 'allowed').
   If the needed value isn't listed, match loosely with ILIKE '%term%' instead of '='.
-- NEVER turn a generic English word from the question into a username/agent/entity
-  filter. Words like "attempts", "logins", "activity", "events", "connections",
-  "access", "traffic" describe the KIND of event, not an account or host — they map
-  to action/threat_type/rule/dst_port, never to username=... or agent=...
-  ("failed login attempts" = action='failed' (or threat_type ILIKE '%brute%'), with
-  NO username filter at all).
+- A username/agent/target_user filter value must be a REAL account or host name that
+  the analyst explicitly named. NEVER build one from an ordinary question word — a
+  preposition/article/verb/descriptor (for, and, or, the, a, to, of, successful,
+  failed, login, logon, attempt, show, list, activity, event, connection, access,
+  traffic, rdp, ssh, port) is NEVER an identity. Those describe the KIND of event and
+  map to action/threat_type/rule/dst_port. If the question does NOT name a specific
+  account or host, add NO username/agent filter at all.
+  Examples: "successful login for rdp and ssh" -> dst_port IN ('3389','22') AND
+  action IN (<the real success values from Known values>), with NO username filter.
+  "what did jsmith do" -> username = 'jsmith' (a real named account, keep it).
 - Return ONLY the raw SQL query. No markdown, no backticks, no explanation, no comments.
 - Only SELECT statements. Absolutely no INSERT/UPDATE/DELETE/DROP/CREATE/ALTER.
 - DECIDE row-level vs aggregate FIRST, then never mix them:
@@ -6982,19 +7047,38 @@ async def nl_query(payload: dict):
     if result is not None and result["row_count"] == 0 and ai_generated:
         problems = await _to_thread(lambda q=result["sql"]: _diagnose_empty(q))
         if problems:
-            try:
-                nxt = await _nl_sql_from_ai(
-                    question, prior_sql=result["sql"],
-                    error=_empty_correction_note(problems), context_note=context_note)
-                nxt = _validate_nl_sql(nxt)
-                if nxt and nxt.strip() != result["sql"].strip():
-                    result = await _to_thread(lambda q=nxt: _run_query(q))
-            except Exception:
-                pass                     # keep the original empty result; annotate below
-        if result["row_count"] == 0:     # still empty -> explain WHY, don't mislead
-            still = await _to_thread(lambda q=result["sql"]: _diagnose_empty(q))
-            if still:
-                empty_note = _empty_human_note(still)
+            # 1) Deterministically STRIP dead entity filters (username='for', ...): a
+            #    value proven absent was only zeroing the result, so dropping it is
+            #    safe, needs no model call, and can't hide real rows. Fixes the
+            #    mis-parsed-word-as-account case for certain.
+            stripped = result["sql"]
+            for p in problems:
+                if p.get("entity"):
+                    stripped = _strip_predicate(stripped, p["col"], p["value"])
+            if stripped != result["sql"]:
+                try:
+                    result = await _to_thread(
+                        lambda q=_validate_nl_sql(stripped): _run_query(q))
+                except Exception:
+                    pass
+            # 2) Still empty and still has dead CATEGORICAL values -> ask the model to
+            #    pick the right ones (needs judgment a strip can't make).
+            if result["row_count"] == 0:
+                still = await _to_thread(lambda q=result["sql"]: _diagnose_empty(q))
+                if any(not p.get("entity") for p in still):
+                    try:
+                        nxt = await _nl_sql_from_ai(
+                            question, prior_sql=result["sql"],
+                            error=_empty_correction_note(still), context_note=context_note)
+                        nxt = _validate_nl_sql(nxt)
+                        if nxt and nxt.strip() != result["sql"].strip():
+                            result = await _to_thread(lambda q=nxt: _run_query(q))
+                    except Exception:
+                        pass
+        if result["row_count"] == 0:     # STILL empty -> explain WHY, don't mislead
+            final = await _to_thread(lambda q=result["sql"]: _diagnose_empty(q))
+            if final:
+                empty_note = _empty_human_note(final)
 
     if result is not None:
         # Grounded answer: written STRICTLY from the rows we just fetched, with the
