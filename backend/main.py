@@ -4837,7 +4837,10 @@ Tables in database: cybersentinel
    - severity: String - low | medium | high | critical
    - rule: String - detection rule description
    - rule_level: UInt8 - severity 1-15 (>=12 means critical)
-   - action: String - allow | block | drop
+   - action: String - connection/logon OUTCOME. Stored values are lowercase (e.g.
+     allowed, blocked, denied, dropped, failed, accepted, login) — MATCH the exact
+     values listed under "Known values present in the data" below; do NOT use
+     'allow'/'block'/'drop' (those literals are NOT in the column and match nothing).
    - country: String - country name of src_ip (e.g. 'India', 'China', 'Russia', 'United States')
    - agent: String - internal endpoint hostname that generated the alert
    - mitre_tactic: String - ATT&CK tactic (e.g. 'Initial Access', 'Lateral Movement', 'Exfiltration')
@@ -4866,6 +4869,75 @@ Tables in database: cybersentinel
 6. cybersentinel.blocklist - blocked IPs (use FINAL, active=1 means currently blocked)
    - ip, kind: String (auto|manual), active: UInt8, added_at: DateTime64
 """
+
+
+# --- Categorical grounding ------------------------------------------------
+# The #1 cause of a confident-but-empty NL->SQL answer was the model filtering a
+# categorical column on a value that DOESN'T EXIST in the data (e.g. action='allow'
+# when the column stores 'allowed'). The static schema above can only GUESS these,
+# and the real vocabulary differs per deployment. So we read the ACTUAL distinct
+# values from the live store and hand them to the model. Bounded to a recent window
+# + capped + cached so it never becomes a heavy scan; fully fail-soft.
+_CAT_COLS = ["action", "severity", "threat_type", "logon_type", "mitre_tactic", "decoder"]
+_CAT_SUCCESS = {"allow", "allowed", "accept", "accepted", "permit", "permitted",
+                "pass", "passed", "success", "succeeded", "login", "logon", "logged"}
+_CAT_FAIL = {"deny", "denied", "drop", "dropped", "block", "blocked", "reject",
+             "rejected", "fail", "failed", "failure", "logout", "timeout"}
+_CAT_HINT_CACHE = {"text": "", "ts": 0.0}
+_CAT_HINT_TTL = 1800          # 30 min — vocabulary changes slowly
+_CAT_HINT_WINDOW_DAYS = 30    # recent window keeps the GROUP BY cheap at scale
+
+
+def _categorical_values_hint() -> str:
+    """Return a prompt block listing the categorical values ACTUALLY present in the
+    live logs, so the NL->SQL model matches real literals instead of guessing.
+    Cached (TTL), window-bounded, value-capped, and fail-soft (returns the last good
+    text, or '' if we never got one — the static schema then stands alone)."""
+    now = time.time()
+    cached = _CAT_HINT_CACHE["text"]
+    if cached and (now - _CAT_HINT_CACHE["ts"]) < _CAT_HINT_TTL:
+        return cached
+    if not (osc and STORE_ENABLED):
+        return cached
+    lines, success_present, fail_present = [], [], []
+    try:
+        for col in _CAT_COLS:
+            rows = osc._q(
+                f"SELECT {col} AS v, count() AS c FROM {osc.LOGS_TABLE} "
+                f"WHERE {col} != '' AND ts >= now() - INTERVAL {_CAT_HINT_WINDOW_DAYS} DAY "
+                f"GROUP BY {col} ORDER BY c DESC LIMIT 40")
+            vals = [str(r["v"]).strip() for r in rows if str(r.get("v", "")).strip()]
+            if not vals:
+                continue
+            lines.append(f"- {col}: {', '.join(vals)}")
+            if col == "action":
+                for v in vals:
+                    lv = v.lower()
+                    if lv in _CAT_SUCCESS:
+                        success_present.append(v)
+                    elif lv in _CAT_FAIL:
+                        fail_present.append(v)
+    except Exception as e:                       # never break the query path on this
+        logger.warning(f"categorical grounding hint failed: {e}")
+        return cached
+    if not lines:
+        return cached
+    blob = ("Known values present in the data (match these EXACTLY as written — "
+            "lowercase, as stored; NEVER invent a categorical value that is not in "
+            "this list; when unsure, use ILIKE '%term%' instead of '='):\n"
+            + "\n".join(lines))
+    outcome = []
+    if success_present:
+        outcome.append("a SUCCESSFUL / allowed / accepted connection or logon = action IN ("
+                       + ", ".join(f"'{v}'" for v in dict.fromkeys(success_present)) + ")")
+    if fail_present:
+        outcome.append("a FAILED / blocked / denied attempt = action IN ("
+                       + ", ".join(f"'{v}'" for v in dict.fromkeys(fail_present)) + ")")
+    if outcome:
+        blob += ("\nOutcome mapping for \"successful\"/\"failed\" questions: "
+                 + "; ".join(outcome) + ".")
+    _CAT_HINT_CACHE.update(text=blob, ts=now)
+    return blob
 
 
 def _normalize_q(q: str) -> str:
@@ -5429,6 +5501,7 @@ The most common cause is an aggregate (count(), sum(), max()) used in SELECT or
 ORDER BY without a matching GROUP BY, or selecting a column that is neither
 aggregated nor in GROUP BY. Add the correct GROUP BY, or remove the aggregate.
 """
+    _cat_hint = await _to_thread(_categorical_values_hint)
     prompt = f"""You are the query engine for CyberSentinel, a bank's cybersecurity SIEM.
 Write ClickHouse-dialect SQL, but NEVER mention ClickHouse, Wazuh or any vendor/tool
 name in prose you produce - the product is called CyberSentinel.
@@ -5438,7 +5511,13 @@ Convert the analyst's natural language question into a valid ClickHouse SELECT q
 Schema:
 {_NL_SCHEMA}
 
+{_cat_hint}
+
 Rules:
+- Categorical columns (action, severity, threat_type, logon_type, mitre_tactic, decoder)
+  store a FIXED vocabulary. Use ONLY values from "Known values present in the data"
+  above. Never guess a literal (e.g. do NOT write action='allow' — the value is 'allowed').
+  If the needed value isn't listed, match loosely with ILIKE '%term%' instead of '='.
 - Return ONLY the raw SQL query. No markdown, no backticks, no explanation, no comments.
 - Only SELECT statements. Absolutely no INSERT/UPDATE/DELETE/DROP/CREATE/ALTER.
 - DECIDE row-level vs aggregate FIRST, then never mix them:
