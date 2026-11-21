@@ -417,7 +417,10 @@ def _ai_model_chain(primary: str | None) -> list[str]:
     model, then the configured fallback. A retired model (404) advances to the
     next automatically."""
     seen, chain = set(), []
-    for m in (primary or AI_MODEL, AI_FAST_MODEL, AI_FALLBACK_MODEL):
+    # Always cross-fall between the fast and primary models: if one is rate-limited
+    # (429) the other (a different model = separate capacity) can still answer, so a
+    # busy fast model no longer dead-ends NL->SQL.
+    for m in (primary or AI_MODEL, AI_FAST_MODEL, AI_MODEL, AI_FALLBACK_MODEL):
         m = (m or "").strip()
         if m and m not in seen:
             seen.add(m)
@@ -4835,19 +4838,27 @@ Tables in database: cybersentinel
    - dst_port: String - destination port number (stored as String)
    - threat_type: String - brute_force | port_scan | malware | phishing | lateral_movement | etc
    - severity: String - low | medium | high | critical
-   - rule: String - detection rule description
+   - rule: String - detection rule description (free text)
+   - rule_id: String - the rule's numeric id (e.g. '81633'). "rule.id 81633",
+     "rule id 81633", "rule.id:81633" -> rule_id = '81633'.
    - rule_level: UInt8 - severity 1-15 (>=12 means critical)
    - action: String - connection/logon OUTCOME. Stored values are lowercase (e.g.
      allowed, blocked, denied, dropped, failed, accepted, login) — MATCH the exact
      values listed under "Known values present in the data" below; do NOT use
      'allow'/'block'/'drop' (those literals are NOT in the column and match nothing).
    - country: String - country name of src_ip (e.g. 'India', 'China', 'Russia', 'United States')
-   - agent: String - internal endpoint hostname that generated the alert
+   - agent: String - the device/host that REPORTED the log: an endpoint hostname, or
+     the firewall/sensor name (e.g. a Fortigate). This is "which firewall/host did
+     this log come from". "source firewall", "which device/sensor" -> agent.
    - mitre_tactic: String - ATT&CK tactic (e.g. 'Initial Access', 'Lateral Movement', 'Exfiltration')
    - mitre_technique: String - ATT&CK technique name
    - username: String - user account involved
    - target_user: String - account being targeted/attacked
    - rule_groups: String - detection rule categories
+   - location: String - the log file / channel / device path the event came from
+     (the raw source location). "location field", "where did this log come from"
+     (the log source, not a country) -> location. For a geographic country use
+     country; there is NO dst_country column.
    NOTE: an IP is a LOCATION, not an identity — the same src_ip can map to
    different agent/username values over time. For "which agent/host/user had
    this IP" or "who was on this IP" questions, GROUP BY agent, username and
@@ -5381,8 +5392,13 @@ def _nl_local_sentence(columns: list, rows: list, n: int, limited: bool, ci: dic
     from collections import Counter
     n_txt = "at least 200" if limited else str(n)
 
-    # --- aggregate / ranked result (the query already ordered it) --------------
+    # --- scalar aggregate (SELECT count()/uniq() with no dimension) ------------
     measure = next((c for c in columns if c.lower() in _MEASURE_COLS), None)
+    if measure and rows and not [c for c in columns if c.lower() not in _MEASURE_COLS]:
+        parts = [f"{_num(rows[0][ci[c]])} {c}" for c in columns]
+        return "There are " + ", ".join(parts) + " for this query."
+
+    # --- aggregate / ranked result (the query already ordered it) --------------
     if measure and len(columns) >= 2:
         mi = ci[measure]
         dim = next((c for c in columns if c != measure), columns[0])
@@ -5478,6 +5494,22 @@ def _nl_verdict(question: str, columns: list, rows: list, row_count: int,
         follow: list = []
 
         measure = next((c for c in columns if c.lower() in _MEASURE_COLS), None)
+
+        # Scalar aggregate (SELECT count()/uniq() with NO GROUP BY dimension): there is
+        # nothing to rank. Narrate the number plainly and STOP — never treat the count
+        # VALUE as an entity (that produced "<count> leads with <count> — 100% of the 1
+        # shown" and follow-ups like "what severity does <count> have").
+        non_measure = [c for c in columns if c.lower() not in _MEASURE_COLS]
+        if measure and not non_measure:
+            ml = measure.lower()
+            interp = ""
+            if ml in ("events", "count", "cnt", "c", "total", "hits", "n"):
+                interp = ("That is a raw event volume — a big number is usually just a busy "
+                          "server, scanner or log-forwarder, not an attack. Pivot to severity, "
+                          "failed logins or the entity-risk score to judge real risk.")
+            return {"headline": headline, "findings": [], "interpretation": interp,
+                    "follow_ups": []}
+
         dim = None
         for cand in ("src_ip", "dst_ip", "ip", "entity", "agent", "host", "username",
                      "account", "user", "country", "dst_port", "rule", "threat_type"):
@@ -6161,6 +6193,14 @@ async def _nl_best_effort(question: str, reason: str = "") -> dict:
     dossier; else (2) return the most recent high-severity activity as a safe
     bounded default, with an honest note. Always real retrieved data — never a
     fabricated finding, never a bare error."""
+    # Distinguish a REAL comprehension failure from the AI engine being briefly
+    # rate-limited/unavailable — telling the analyst "I couldn't understand" when the
+    # truth is "the provider is busy" is misleading. Message honestly in that case.
+    _r = (reason or "").lower()
+    busy = any(t in _r for t in ("busy", "rate", "429", "unavailable", "try again",
+                                 "provider", "timeout", "temporarily"))
+    busy_prefix = ("The AI engine is briefly busy (rate-limited) — this is temporary, "
+                   "please run the question again in a moment. ") if busy else ""
     ent = _extract_any_entity(question)
     if ent:
         try:
@@ -6179,17 +6219,21 @@ async def _nl_best_effort(question: str, reason: str = "") -> dict:
             if data:
                 cols = list(data[0].keys())
                 rows = [[r.get(c) for c in cols] for r in data]
-                return {"answer": ("I couldn't turn that into a precise query, so here's the most "
-                                   "recent high-severity activity instead — try naming an IP, user, "
-                                   "host, threat type or time window for a sharper answer."),
+                tail = ("Meanwhile, here's the most recent high-severity activity."
+                        if busy else
+                        "I couldn't turn that into a precise query, so here's the most recent "
+                        "high-severity activity instead — try naming an IP, user, host, threat "
+                        "type or time window for a sharper answer.")
+                return {"answer": busy_prefix + tail,
                         "sql": q, "columns": cols, "rows": rows, "row_count": len(rows),
                         "elapsed_ms": 0, "ai_generated": False, "best_effort": True}
         except Exception:
             pass
-    return {"answer": ("I couldn't turn that into a query from the logs. Try naming a specific IP, "
-                       "user, host, threat type, or time window — e.g. 'failed logins today', "
-                       "'everything about 10.0.0.5', or 'top source IPs this week'."),
-            "sql": "", "columns": [], "rows": [], "row_count": 0,
+    final = (busy_prefix or
+             "I couldn't turn that into a query from the logs. Try naming a specific IP, "
+             "user, host, threat type, or time window — e.g. 'failed logins today', "
+             "'everything about 10.0.0.5', or 'top source IPs this week'.")
+    return {"answer": final, "sql": "", "columns": [], "rows": [], "row_count": 0,
             "elapsed_ms": 0, "ai_generated": False, "best_effort": True}
 
 
