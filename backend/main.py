@@ -275,6 +275,9 @@ AI_FAST_MODEL = os.getenv("AI_FAST_MODEL", "openai/gpt-oss-20b")
 # Last-resort model tried after the primary + fast model both fail (e.g. both
 # retired). Empty by default; set in .env to a currently-served id.
 AI_FALLBACK_MODEL = os.getenv("AI_FALLBACK_MODEL", "")
+# Timezone timestamps are DISPLAYED in (data stays UTC in the store and in every
+# WHERE filter — only rendering shifts, so times match the main SIEM/IST console).
+DISPLAY_TZ = os.getenv("DISPLAY_TZ", "Asia/Kolkata")
 AI_BASE_URL = os.getenv("AI_BASE_URL", os.getenv("GROQ_URL", "https://api.groq.com/openai/v1/chat/completions"))
 AI_TIMEOUT      = float(os.getenv("AI_TIMEOUT", "45"))       # read timeout (s) per attempt
 AI_MAX_RETRIES  = int(os.getenv("AI_MAX_RETRIES", "2"))      # retries per model on transient errors
@@ -5206,6 +5209,51 @@ def _empty_human_note(problems: list) -> str:
             ". Try rephrasing, or name a specific IP, user, host, port or time range.")
 
 
+def _localize_display_tz(sql: str) -> str:
+    """Render DISPLAYED timestamps in DISPLAY_TZ (default IST) so they match the main
+    SIEM. Adds the timezone argument ONLY to display/bucket functions applied to `ts`
+    (formatDateTime, toStartOf*, toDate) — it NEVER touches toDateTime('literal')
+    comparisons or `ts >= …` math, so filtering stays in UTC and windows don't shift.
+    Data in the store is unchanged; only what the analyst sees is localized."""
+    if not DISPLAY_TZ:
+        return sql
+    import re
+    tz = DISPLAY_TZ
+    # formatDateTime(ts, 'fmt')  ->  formatDateTime(ts, 'fmt', 'TZ')   (2-arg form only;
+    # if the model already passed a tz it's the 3-arg form and won't match -> no double)
+    sql = re.sub(r"(formatDateTime\s*\(\s*ts\s*,\s*'[^']*')\s*\)",
+                 lambda m: f"{m.group(1)}, '{tz}')", sql, flags=re.I)
+    # bucket/truncate functions on ts with no tz arg -> add tz (IST hour/day buckets)
+    sql = re.sub(r"\b(toStartOf(?:Hour|Day|Minute|FifteenMinutes|Week|Month|Quarter|Year)|toDate|toYYYYMMDD)\s*\(\s*ts\s*\)",
+                 lambda m: f"{m.group(1)}(ts, '{tz}')", sql, flags=re.I)
+    return sql
+
+
+def _to_display_tz(val) -> str:
+    """Format a UTC timestamp (datetime or ISO/space string) in DISPLAY_TZ for showing
+    to the analyst. Fail-soft: returns the original on any parse/tz error."""
+    if not val or not DISPLAY_TZ:
+        return str(val or "")
+    try:
+        from zoneinfo import ZoneInfo
+        dt = val if isinstance(val, datetime) else datetime.fromisoformat(
+            str(val).strip().replace("Z", "+00:00").replace(" ", "T", 1))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(ZoneInfo(DISPLAY_TZ)).strftime("%Y-%m-%d %H:%M:%S")
+    except Exception:
+        return str(val)
+
+
+def _tz_label() -> str:
+    """Short name of DISPLAY_TZ (e.g. 'IST') for labelling shown times."""
+    try:
+        from zoneinfo import ZoneInfo
+        return datetime.now(ZoneInfo(DISPLAY_TZ)).strftime("%Z") or DISPLAY_TZ
+    except Exception:
+        return DISPLAY_TZ
+
+
 def _normalize_q(q: str) -> str:
     """Lowercase, collapse whitespace, drop trailing punctuation for preset match."""
     return " ".join((q or "").split()).lower().rstrip("?.! ")
@@ -6175,7 +6223,8 @@ async def _nl_entity_dossier(field: str, value: str, question: str) -> dict:
     threats = [k for k in (summary.get("threat_types") or {}) if k and k.lower() != "unknown"]
 
     parts = [f"{value} ({flabel}) — {summary.get('total', 0):,} events from "
-             f"{summary.get('first_seen')} to {summary.get('last_seen')} (UTC)."]
+             f"{_to_display_tz(summary.get('first_seen'))} to "
+             f"{_to_display_tz(summary.get('last_seen'))} ({_tz_label()})."]
     parts.append(f"Severity: {sev_txt}.")
     if evts:
         parts.append(f"Top activity: {_top(evts, 'rule', 3)}.")
@@ -6584,7 +6633,7 @@ async def _nl_status_answer(question: str) -> dict:
     try:
         latest = await _nl_latest_ts()
         if latest:
-            parts.append(f"most recent event {latest} (UTC)")
+            parts.append(f"most recent event {_to_display_tz(latest)} ({_tz_label()})")
     except Exception:
         pass
     grade = None
@@ -7091,6 +7140,7 @@ async def nl_query(payload: dict):
 
     def _run_query(q):
         # Runs in a worker thread - gets its OWN thread-local ClickHouse client
+        q = _localize_display_tz(q)      # render shown timestamps in IST (filters stay UTC)
         c = osc.get_client()
         if not c:
             raise RuntimeError("ClickHouse not available")
