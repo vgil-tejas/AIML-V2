@@ -5866,7 +5866,7 @@ tr:hover td{background:#161b22}</style></head>
       <div class="alert-head-tools">
         <span class="badge ${sc}">${sc}</span>
         <button class="btn ai" style="font-size:10px;padding:2px 8px" onclick="aiExplainAlert('${a.ip}','${a.type}',this)">AI why?</button>
-        <span class="alert-time">${(a.ts || '').substring(11, 19)}</span>
+        <span class="alert-time" title="${a.ts ? toIST(a.ts) : ''}">${a.ts ? (toIST(a.ts).match(/\d{2}:\d{2}:\d{2}/) || [''])[0] : ''}</span>
       </div>
     </div>
     <div class="alert-message"><span class="alert-label">What happened</span><p>${a.message || ''}</p></div>
@@ -7533,7 +7533,7 @@ tr:hover td{background:#161b22}</style></head>
 
         // Attack waves table
         const wavesHtml = cor.attack_waves?.length
-          ? `<table class="tbl" style="font-size:11px"><thead><tr><th>Hour</th><th>Events</th><th>Peak Severity</th><th>Tactics Active</th></tr></thead><tbody>
+          ? `<table class="tbl" style="font-size:11px"><thead><tr><th>Hour (IST)</th><th>Events</th><th>Peak Severity</th><th>Tactics Active</th></tr></thead><tbody>
               ${cor.attack_waves.map(w=>`<tr>
                 <td style="white-space:nowrap">${w.time}</td>
                 <td><b>${w.events}</b></td>

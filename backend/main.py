@@ -3269,9 +3269,17 @@ async def kill_chain(ip: str):
     import math
 
     def _parse_ts(s):
+        # Parse the UTC alert time and render the attack-wave bucket in DISPLAY_TZ
+        # (IST) so the Kill-Chain "Attack waves" hours match every other panel and
+        # the main SIEM. @timestamp strings elsewhere stay UTC (frontend localises).
         try:
-            s = str(s).replace("Z", "+00:00")
-            return datetime.fromisoformat(s)
+            dt = datetime.fromisoformat(str(s).replace("Z", "+00:00"))
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            if DISPLAY_TZ:
+                from zoneinfo import ZoneInfo
+                dt = dt.astimezone(ZoneInfo(DISPLAY_TZ))
+            return dt
         except Exception:
             return None
 
